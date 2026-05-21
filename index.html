@@ -1,0 +1,1328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DCA Cleaning Solutions | Premium Carpet & Air Duct Restoration</title>
+  <meta name="description" content="Expert residential and commercial cleaning solutions. Elevating indoor air quality and restoring carpet fiber purity with state-of-the-art equipment. Professional, reliable, and fully guaranteed.">
+  
+  <!-- Web Fonts: Premium Pair -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Plus+Jakarta+Sans:wght@200..800&display=swap" rel="stylesheet">
+  
+  <style>
+    /* -------------------------------------------------------------
+       1. Core Styling & Design Tokens
+       Theme: Eucalyptus & Stone (Refined Editorial)
+       ------------------------------------------------------------- */
+    :root {
+      --brand-deep: #0b3330;       /* Rich Eucalyptus/Pine */
+      --brand-mid: #14504b;        /* Medium Teal */
+      --brand-accent: #cc5a37;     /* Warm Terracotta/Rust */
+      --brand-accent-hover: #b04627;
+      --bg-stone: #fcfbf8;         /* Limestone Off-White */
+      --bg-cream: #f5f2ea;         /* Creamy Sand */
+      --text-dark: #1b2624;        /* Deep Green-Black */
+      --text-muted: #536461;       /* Soft Sage-Gray */
+      --border-color: #e2ded5;     /* Warm Gray Border */
+      --white: #ffffff;
+      
+      --font-display: 'Playfair Display', serif;
+      --font-body: 'Plus Jakarta Sans', sans-serif;
+      --transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      font-family: var(--font-body);
+      color: var(--text-dark);
+      background-color: var(--bg-stone);
+      line-height: 1.6;
+    }
+
+    /* -------------------------------------------------------------
+       2. Reusable Layout Utilities
+       ------------------------------------------------------------- */
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 40px;
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        padding: 0 24px;
+      }
+    }
+
+    section {
+      padding: 100px 0;
+    }
+
+    @media (max-width: 768px) {
+      section {
+        padding: 60px 0;
+      }
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-family: var(--font-body);
+      font-weight: 600;
+      font-size: 0.95rem;
+      text-decoration: none;
+      padding: 14px 28px;
+      border-radius: 4px;
+      transition: var(--transition);
+      cursor: pointer;
+      border: none;
+    }
+
+    .btn-primary {
+      background-color: var(--brand-accent);
+      color: var(--white);
+    }
+
+    .btn-primary:hover {
+      background-color: var(--brand-accent-hover);
+      transform: translateY(-2px);
+    }
+
+    .btn-outline {
+      background-color: transparent;
+      border: 1px solid var(--brand-mid);
+      color: var(--brand-mid);
+    }
+
+    .btn-outline:hover {
+      background-color: var(--brand-mid);
+      color: var(--bg-stone);
+    }
+
+    /* -------------------------------------------------------------
+       3. Header & Navigation
+       ------------------------------------------------------------- */
+    header {
+      background-color: rgba(252, 251, 248, 0.9);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border-bottom: 1px solid var(--border-color);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      transition: var(--transition);
+    }
+
+    .nav-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      height: 90px;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+
+    .logo-text {
+      font-family: var(--font-display);
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--brand-deep);
+      line-height: 1;
+    }
+
+    .logo-sub {
+      font-family: var(--font-body);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      margin-top: 3px;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 40px;
+      list-style: none;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      color: var(--text-dark);
+      font-weight: 500;
+      font-size: 0.95rem;
+      transition: var(--transition);
+      position: relative;
+    }
+
+    .nav-links a::after {
+      content: '';
+      position: absolute;
+      width: 100%;
+      transform: scaleX(0);
+      height: 1.5px;
+      bottom: -6px;
+      left: 0;
+      background-color: var(--brand-accent);
+      transform-origin: bottom right;
+      transition: transform 0.25s ease-out;
+    }
+
+    .nav-links a:hover {
+      color: var(--brand-accent);
+    }
+
+    .nav-links a:hover::after {
+      transform: scaleX(1);
+      transform-origin: bottom left;
+    }
+
+    @media (max-width: 991px) {
+      .nav-links {
+        display: none; /* Kept simple without heavy JS hamburger for solid layout reliability */
+      }
+    }
+
+    /* -------------------------------------------------------------
+       4. Hero Section (Asymmetric & Bold)
+       ------------------------------------------------------------- */
+    .hero {
+      background: linear-gradient(180deg, var(--bg-cream) 0%, var(--bg-stone) 100%);
+      padding: 120px 0 100px;
+      overflow: hidden;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 60px;
+      align-items: center;
+    }
+
+    .hero-content {
+      max-width: 640px;
+    }
+
+    .hero-tag {
+      font-family: var(--font-body);
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--brand-accent);
+      margin-bottom: 20px;
+      display: inline-block;
+    }
+
+    .hero h1 {
+      font-family: var(--font-display);
+      font-size: 3.8rem;
+      font-weight: 700;
+      line-height: 1.1;
+      color: var(--brand-deep);
+      margin-bottom: 24px;
+    }
+
+    .hero h1 span {
+      font-style: italic;
+      color: var(--brand-accent);
+    }
+
+    .hero p {
+      font-size: 1.15rem;
+      color: var(--text-muted);
+      margin-bottom: 40px;
+      line-height: 1.7;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 20px;
+    }
+
+    .hero-graphic {
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .hero-graphic::before {
+      content: '';
+      position: absolute;
+      width: 110%;
+      height: 110%;
+      background-color: var(--bg-cream);
+      border-radius: 12px;
+      transform: rotate(-3deg);
+      z-index: 1;
+    }
+
+    .hero-graphic svg {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      max-width: 500px;
+      height: auto;
+      border-radius: 8px;
+      box-shadow: 0 20px 40px rgba(11, 51, 48, 0.08);
+      background-color: var(--white);
+    }
+
+    @media (max-width: 991px) {
+      .hero-grid {
+        grid-template-columns: 1fr;
+        gap: 60px;
+        text-align: center;
+      }
+      .hero-content {
+        margin: 0 auto;
+      }
+      .hero h1 {
+        font-size: 2.8rem;
+      }
+      .hero-actions {
+        justify-content: center;
+      }
+      .hero-graphic {
+        max-width: 500px;
+        margin: 0 auto;
+      }
+    }
+
+    /* -------------------------------------------------------------
+       5. Philosophy & Key Stats (An Elegant Breakout)
+       ------------------------------------------------------------- */
+    .philosophy {
+      background-color: var(--brand-deep);
+      color: var(--bg-stone);
+      position: relative;
+    }
+
+    .philosophy-grid {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 80px;
+      align-items: center;
+    }
+
+    .philosophy-title h2 {
+      font-family: var(--font-display);
+      font-size: 2.8rem;
+      font-weight: 600;
+      line-height: 1.2;
+      margin-bottom: 24px;
+    }
+
+    .philosophy-title p {
+      font-size: 1.05rem;
+      color: rgba(252, 251, 248, 0.7);
+    }
+
+    .stats-layout {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 40px;
+    }
+
+    .stat-card {
+      border-left: 2px solid var(--brand-accent);
+      padding-left: 24px;
+    }
+
+    .stat-card .number {
+      font-family: var(--font-display);
+      font-size: 3rem;
+      font-weight: 700;
+      color: var(--white);
+      line-height: 1;
+      margin-bottom: 12px;
+    }
+
+    .stat-card .label {
+      font-size: 1rem;
+      font-weight: 500;
+      color: rgba(252, 251, 248, 0.85);
+      margin-bottom: 6px;
+    }
+
+    .stat-card .desc {
+      font-size: 0.85rem;
+      color: rgba(252, 251, 248, 0.6);
+    }
+
+    @media (max-width: 991px) {
+      .philosophy-grid {
+        grid-template-columns: 1fr;
+        gap: 50px;
+      }
+      .stats-layout {
+        gap: 30px;
+      }
+    }
+
+    @media (max-width: 576px) {
+      .stats-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* -------------------------------------------------------------
+       6. Asymmetric Services Grid
+       ------------------------------------------------------------- */
+    .services-header {
+      text-align: center;
+      max-width: 700px;
+      margin: 0 auto 80px;
+    }
+
+    .services-header h2 {
+      font-family: var(--font-display);
+      font-size: 2.8rem;
+      font-weight: 700;
+      color: var(--brand-deep);
+      margin-bottom: 16px;
+    }
+
+    .services-header p {
+      font-size: 1.1rem;
+      color: var(--text-muted);
+    }
+
+    /* Asymmetric Cards Grid (DESIGN_VARIANCE: 8) */
+    .services-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr;
+      gap: 40px;
+      margin-bottom: 40px;
+    }
+
+    .services-grid-alt {
+      display: grid;
+      grid-template-columns: 0.8fr 1.2fr;
+      gap: 40px;
+    }
+
+    .service-card {
+      background-color: var(--white);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 50px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: var(--transition);
+      box-shadow: 0 4px 12px rgba(11, 51, 48, 0.02);
+    }
+
+    .service-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 20px 40px rgba(11, 51, 48, 0.06);
+      border-color: var(--brand-mid);
+    }
+
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 30px;
+    }
+
+    .card-icon {
+      background-color: var(--bg-cream);
+      padding: 16px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--brand-mid);
+    }
+
+    .card-num {
+      font-family: var(--font-display);
+      font-size: 1.8rem;
+      font-style: italic;
+      color: var(--border-color);
+    }
+
+    .service-card h3 {
+      font-family: var(--font-display);
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: var(--brand-deep);
+      margin-bottom: 16px;
+    }
+
+    .service-card p {
+      color: var(--text-muted);
+      font-size: 1rem;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    .service-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      list-style: none;
+    }
+
+    .service-tags li {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background-color: var(--bg-cream);
+      color: var(--brand-mid);
+      padding: 6px 12px;
+      border-radius: 4px;
+    }
+
+    @media (max-width: 991px) {
+      .services-grid, .services-grid-alt {
+        grid-template-columns: 1fr;
+        gap: 30px;
+      }
+      .service-card {
+        padding: 35px;
+      }
+    }
+
+    /* -------------------------------------------------------------
+       7. Interactive Booking Platform (Netlify Forms & Interactive UX)
+       ------------------------------------------------------------- */
+    .booking-section {
+      background-color: var(--bg-cream);
+      position: relative;
+    }
+
+    .booking-grid {
+      display: grid;
+      grid-template-columns: 0.85fr 1.15fr;
+      gap: 80px;
+      align-items: flex-start;
+    }
+
+    .booking-info {
+      max-width: 480px;
+    }
+
+    .booking-info h2 {
+      font-family: var(--font-display);
+      font-size: 2.8rem;
+      font-weight: 700;
+      color: var(--brand-deep);
+      margin-bottom: 24px;
+      line-height: 1.15;
+    }
+
+    .booking-info p {
+      font-size: 1.05rem;
+      color: var(--text-muted);
+      margin-bottom: 30px;
+    }
+
+    .contact-item {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .contact-icon {
+      color: var(--brand-accent);
+      background-color: var(--white);
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 10px rgba(11, 51, 48, 0.03);
+    }
+
+    .contact-text h4 {
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+    }
+
+    .contact-text p {
+      font-weight: 600;
+      color: var(--brand-deep);
+      margin-bottom: 0;
+    }
+
+    /* The Booking Form */
+    .booking-card {
+      background-color: var(--white);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 50px;
+      box-shadow: 0 12px 30px rgba(11, 51, 48, 0.04);
+    }
+
+    .booking-form {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 24px;
+    }
+
+    .form-group-full {
+      grid-column: span 2;
+    }
+
+    .booking-form label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--brand-deep);
+      margin-bottom: 8px;
+    }
+
+    .booking-form input,
+    .booking-form select,
+    .booking-form textarea {
+      width: 100%;
+      padding: 14px 16px;
+      font-family: var(--font-body);
+      font-size: 0.95rem;
+      color: var(--text-dark);
+      background-color: var(--bg-stone);
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      transition: var(--transition);
+    }
+
+    .booking-form input:focus,
+    .booking-form select:focus,
+    .booking-form textarea:focus {
+      outline: none;
+      border-color: var(--brand-mid);
+      background-color: var(--white);
+      box-shadow: 0 0 0 3px rgba(20, 80, 75, 0.08);
+    }
+
+    /* Custom Honeypot style (Spam protection) */
+    .hidden-field {
+      display: none;
+    }
+
+    @media (max-width: 991px) {
+      .booking-grid {
+        grid-template-columns: 1fr;
+        gap: 50px;
+      }
+      .booking-card {
+        padding: 35px;
+      }
+    }
+
+    @media (max-width: 576px) {
+      .booking-form {
+        grid-template-columns: 1fr;
+      }
+      .form-group-full {
+        grid-column: span 1;
+      }
+    }
+
+    /* AJAX Success / Error Banners */
+    .form-message {
+      grid-column: span 2;
+      padding: 16px;
+      border-radius: 4px;
+      font-size: 0.95rem;
+      display: none;
+      align-items: center;
+      gap: 12px;
+      animation: fadeIn 0.4s ease;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .form-message.success {
+      display: flex;
+      background-color: #e6f4f1;
+      border: 1px solid #14504b;
+      color: var(--brand-deep);
+    }
+
+    .form-message.error {
+      display: flex;
+      background-color: #fcece9;
+      border: 1px solid var(--brand-accent);
+      color: #9d2e13;
+    }
+
+    /* -------------------------------------------------------------
+       8. Testimonials
+       ------------------------------------------------------------- */
+    .testimonials {
+      background-color: var(--bg-stone);
+    }
+
+    .testimonials-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 30px;
+    }
+
+    .testimonial-card {
+      background-color: var(--white);
+      border: 1px solid var(--border-color);
+      padding: 40px;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      transition: var(--transition);
+    }
+
+    .testimonial-card:hover {
+      box-shadow: 0 10px 25px rgba(11, 51, 48, 0.03);
+    }
+
+    .stars {
+      color: var(--brand-accent);
+      margin-bottom: 20px;
+      letter-spacing: 2px;
+    }
+
+    .quote {
+      font-family: var(--font-display);
+      font-size: 1.15rem;
+      color: var(--brand-deep);
+      line-height: 1.5;
+      margin-bottom: 30px;
+      font-style: italic;
+    }
+
+    .author-info h5 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: var(--brand-deep);
+    }
+
+    .author-info p {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    @media (max-width: 991px) {
+      .testimonials-grid {
+        grid-template-columns: 1fr;
+        gap: 30px;
+      }
+    }
+
+    /* -------------------------------------------------------------
+       9. Footer
+       ------------------------------------------------------------- */
+    footer {
+      background-color: var(--brand-deep);
+      color: var(--bg-cream);
+      padding: 80px 0 40px;
+      border-top: 1px solid rgba(252, 251, 248, 0.1);
+    }
+
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 1.2fr 0.8fr 1fr;
+      gap: 60px;
+      margin-bottom: 60px;
+    }
+
+    .footer-brand p {
+      color: rgba(252, 251, 248, 0.7);
+      margin-top: 20px;
+      max-width: 320px;
+    }
+
+    .footer-title {
+      font-family: var(--font-display);
+      font-size: 1.2rem;
+      color: var(--white);
+      margin-bottom: 24px;
+    }
+
+    .footer-links {
+      list-style: none;
+    }
+
+    .footer-links li {
+      margin-bottom: 12px;
+    }
+
+    .footer-links a {
+      color: rgba(252, 251, 248, 0.7);
+      text-decoration: none;
+      transition: var(--transition);
+    }
+
+    .footer-links a:hover {
+      color: var(--brand-accent);
+      padding-left: 4px;
+    }
+
+    .footer-info p {
+      color: rgba(252, 251, 248, 0.7);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .footer-bottom {
+      border-top: 1px solid rgba(252, 251, 248, 0.1);
+      padding-top: 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.85rem;
+      color: rgba(252, 251, 248, 0.5);
+    }
+
+    .footer-bottom a {
+      color: rgba(252, 251, 248, 0.5);
+      text-decoration: none;
+      transition: var(--transition);
+    }
+
+    .footer-bottom a:hover {
+      color: var(--white);
+    }
+
+    @media (max-width: 768px) {
+      .footer-grid {
+        grid-template-columns: 1fr;
+        gap: 40px;
+      }
+      .footer-bottom {
+        flex-direction: column;
+        gap: 20px;
+        text-align: center;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <header>
+    <div class="container nav-bar">
+      <a href="#" class="logo" aria-label="DCA Cleaning Solutions Homepage">
+        <!-- Abstract custom SVG Logo -->
+        <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg" style="display: block;">
+          <rect width="40" height="40" rx="6" fill="#0b3330"/>
+          <path d="M12 28V18.5L20 12.5L28 18.5V28H23.5V22H16.5V28H12Z" fill="#f5f2ea"/>
+          <circle cx="20" cy="18" r="1.5" fill="#cc5a37"/>
+          <path d="M26 15L28 13" stroke="#cc5a37" stroke-width="1.5" stroke-linecap="round"/>
+          <path d="M29 16L30.5 15.5" stroke="#cc5a37" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <div>
+          <h1 class="logo-text">DCA</h1>
+          <div class="logo-sub">Cleaning Solutions</div>
+        </div>
+      </a>
+      
+      <nav aria-label="Main Navigation">
+        <ul class="nav-links">
+          <li><a href="#services">Services</a></li>
+          <li><a href="#why-choose-us">Our Philosophy</a></li>
+          <li><a href="#booking">Book Appointment</a></li>
+          <li><a href="#testimonials">Reviews</a></li>
+        </ul>
+      </nav>
+      
+      <a href="#booking" class="btn btn-primary">Book Free Assessment</a>
+    </div>
+  </header>
+
+  <!-- HERO SECTION -->
+  <section class="hero">
+    <div class="container hero-grid">
+      <div class="hero-content">
+        <span class="hero-tag">Professional Restoration & Hygiene</span>
+        <h1>We revive the <span>essence</span> of your indoor spaces.</h1>
+        <p>Premium carpet revitalization and industrial air duct purification for homes and workspaces. We merge specialized heavy-extraction tech with eco-conscious formulas to restore health, depth, and clarity.</p>
+        <div class="hero-actions">
+          <a href="#booking" class="btn btn-primary">Schedule Free Audit</a>
+          <a href="#services" class="btn btn-outline">Our Specialties</a>
+        </div>
+      </div>
+      <div class="hero-graphic" aria-hidden="true">
+        <!-- Dynamic layered abstract room concept illustration SVG -->
+        <svg viewBox="0 0 600 500" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="600" height="500" fill="#fcfbf8"/>
+          <!-- Abstract window & light beam -->
+          <path d="M100 120H280V380H100V120Z" fill="#f5f2ea"/>
+          <path d="M100 250H280" stroke="#e2ded5" stroke-width="2"/>
+          <path d="M190 120V380" stroke="#e2ded5" stroke-width="2"/>
+          <path d="M100 120L450 480H600V420L190 120H100Z" fill="url(#light-gradient)" opacity="0.4"/>
+          <!-- House plants and modern table -->
+          <rect x="360" y="320" width="120" height="80" rx="4" fill="#0b3330" opacity="0.8"/>
+          <circle cx="420" cy="270" r="24" fill="#cc5a37" opacity="0.9"/>
+          <!-- Carpet texture representation -->
+          <path d="M50 450H550" stroke="#14504b" stroke-width="8" stroke-linecap="round"/>
+          <path d="M80 435H520" stroke="#e2ded5" stroke-width="2" stroke-dasharray="4 8"/>
+          <!-- Sparkles -->
+          <path d="M480 180L485 185L480 190L475 185L480 180Z" fill="#cc5a37"/>
+          <path d="M510 220L513 223L510 226L507 223L510 220Z" fill="#cc5a37"/>
+          
+          <defs>
+            <linearGradient id="light-gradient" x1="145" y1="120" x2="450" y2="480" gradientUnits="userSpaceOnUse">
+              <stop stop-color="#cc5a37" stop-opacity="0.25"/>
+              <stop offset="1" stop-color="#fcfbf8" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- PHILOSOPHY / STATS -->
+  <section class="philosophy" id="why-choose-us">
+    <div class="container philosophy-grid">
+      <div class="philosophy-title">
+        <h2 style="font-family: var(--font-display);">A meticulous standard of purity.</h2>
+        <p>At DCA, we believe true cleanliness is more than aesthetic—it is foundational biological health. Every fiber of carpet and millimeter of air ducting we restore represents a healthier breath and a more tranquil atmosphere for your loved ones or team.</p>
+      </div>
+      <div class="stats-layout">
+        <div class="stat-card">
+          <div class="number">12k+</div>
+          <div class="label">Spaces Cleansed</div>
+          <div class="desc">Expertly revived properties across the residential and retail sectors.</div>
+        </div>
+        <div class="stat-card">
+          <div class="number">99.4%</div>
+          <div class="label">Approval Rating</div>
+          <div class="desc">A testament to our relentless pursuit of absolute execution quality.</div>
+        </div>
+        <div class="stat-card">
+          <div class="number">100%</div>
+          <div class="label">Eco-Certified</div>
+          <div class="desc">We exclusively deploy biodegradable, pet-safe, and infant-secure cleaning agents.</div>
+        </div>
+        <div class="stat-card">
+          <div class="number">24hr</div>
+          <div class="label">Guaranteed Response</div>
+          <div class="desc">Rapid and transparent scheduling backed by active customer support.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SERVICES SECTION (DESIGN_VARIANCE: 8 - ASYMMETRIC GRID) -->
+  <section id="services">
+    <div class="container">
+      <div class="services-header">
+        <h2>Uncompromising Specialties</h2>
+        <p>Specialized physical restoration procedures, bypassing superficial dusting for absolute core cleaning of materials and modern HVAC components.</p>
+      </div>
+
+      <!-- Asymmetric Pair 1 -->
+      <div class="services-grid">
+        <div class="service-card">
+          <div>
+            <div class="card-top">
+              <div class="card-icon">
+                <!-- Carpet clean custom SVG -->
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z"/>
+                  <path d="M12 6v12"/>
+                  <path d="M8 10h8"/>
+                  <path d="M8 14h8"/>
+                </svg>
+              </div>
+              <span class="card-num">01</span>
+            </div>
+            <h3>Deep Carpet Fiber Revitalization</h3>
+            <p>Our industrial extraction mechanism penetrates down to the secondary carpet backing. By deploying thermal steam at calibrated pressure alongside customized natural surfactants, we break down stubborn protein-based binding, neutralize biological allergens, extract deep silt, and restore original textile depth.</p>
+          </div>
+          <ul class="service-tags">
+            <li>Thermal Steam Injection</li>
+            <li>Stain Bond Breakdown</li>
+            <li>Odor Source Neutralizer</li>
+            <li>Allergen Extraction</li>
+          </ul>
+        </div>
+
+        <div class="service-card">
+          <div>
+            <div class="card-top">
+              <div class="card-icon">
+                <!-- Airflow custom SVG -->
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9.59 4.59A2 2 0 1 1 11 8H2M10.59 20.59A2 2 0 1 0 12 17H2M12 12h10"/>
+                  <path d="M16 8l4 4-4 4"/>
+                </svg>
+              </div>
+              <span class="card-num">02</span>
+            </div>
+            <h3>HVAC & Air Duct Purge</h3>
+            <p>We eliminate decades of accumulated dust mites, fungal spores, and heavy particulates lining your ductwork. Utilizing negative-pressure HEPA vacuums and physical mechanical agitation whips, we strip microbial layers to revitalize air flow, maximize system efficiency, and optimize breathing quality.</p>
+          </div>
+          <ul class="service-tags">
+            <li>Negative Pressure HEPA</li>
+            <li>Whip Agitation</li>
+            <li>Register Disinfection</li>
+            <li>Filter Optimization</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Asymmetric Pair 2 -->
+      <div class="services-grid-alt" style="margin-top: 40px;">
+        <div class="service-card">
+          <div>
+            <div class="card-top">
+              <div class="card-icon">
+                <!-- Commercial custom SVG -->
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 21h18M9 21V10a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v11M4 8h16M4 4h16"/>
+                </svg>
+              </div>
+              <span class="card-num">03</span>
+            </div>
+            <h3>Commercial Properties</h3>
+            <p>A corporate environment demands heavy-traffic performance and flawless professional presentation. We craft off-hours custom workflows for high-rise offices, retail showrooms, healthcare clinics, and educational complexes to minimize operational downtime.</p>
+          </div>
+          <ul class="service-tags">
+            <li>Off-Hour Flex Routing</li>
+            <li>Anti-Microbial Shield</li>
+            <li>High-Traffic Endurance</li>
+          </ul>
+        </div>
+
+        <div class="service-card">
+          <div>
+            <div class="card-top">
+              <div class="card-icon">
+                <!-- Specialized custom SVG -->
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                </svg>
+              </div>
+              <span class="card-num">04</span>
+            </div>
+            <h3>Post-Mitigation Finish</h3>
+            <p>Perfect for properties transitioning out of tenancy, recovering from light smoke exposure, or undergoing intensive remodeling. This process provides deep particle extraction, advanced fabric protection sealant, and systemic sanitization across all surfaces.</p>
+          </div>
+          <ul class="service-tags">
+            <li>Particulate Extraction</li>
+            <li>Fabric Protection Barrier</li>
+            <li>Certified Disinfection</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- INTERACTIVE BOOKING PLATFORM -->
+  <section id="booking" class="booking-section">
+    <div class="container booking-grid">
+      <div class="booking-info">
+        <h2>Initiate Your Clean Air Audit.</h2>
+        <p>Provide some brief details regarding your estate's dimensions and desired restoration programs. Our field coordinator will draft a tailored, clear estimate and secure your slot within one business day.</p>
+        
+        <div class="contact-item">
+          <div class="contact-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+            </svg>
+          </div>
+          <div class="contact-text">
+            <h4>Inquiry Helpline</h4>
+            <p>1-800-555-0192</p>
+          </div>
+        </div>
+
+        <div class="contact-item">
+          <div class="contact-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+              <polyline points="22,6 12,13 2,6"/>
+            </svg>
+          </div>
+          <div class="contact-text">
+            <h4>Corporate Mailbox</h4>
+            <p>operations@dcacleaningsolutions.com</p>
+          </div>
+        </div>
+
+        <div class="contact-item">
+          <div class="contact-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12,6 12,12 16,14"/>
+            </svg>
+          </div>
+          <div class="contact-text">
+            <h4>Office Hours</h4>
+            <p>Mon - Sat: 7:00 AM - 7:00 PM</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="booking-card">
+        <!-- NETLIFY FORM INTEGRATION -->
+        <form name="booking-request" method="POST" data-netlify="true" netlify-honeypot="bot-field" class="booking-form" id="booking-form">
+          <!-- Hidden field required for AJAX submission -->
+          <input type="hidden" name="form-name" value="booking-request" />
+          
+          <!-- Spam prevention honeypot -->
+          <p class="hidden-field">
+            <label>Do not fill this if you are a human: <input name="bot-field" /></label>
+          </p>
+
+          <!-- AJAX Message Container -->
+          <div id="message-container" class="form-message" aria-live="polite"></div>
+
+          <div>
+            <label for="fullname">Your Full Name</label>
+            <input type="text" id="fullname" name="fullname" placeholder="Julian Sterling" required />
+          </div>
+
+          <div>
+            <label for="email">Email Address</label>
+            <input type="email" id="email" name="email" placeholder="julian@sterlingrealestate.com" required />
+          </div>
+
+          <div>
+            <label for="phone">Phone Number</label>
+            <input type="tel" id="phone" name="phone" placeholder="(555) 019-2834" required />
+          </div>
+
+          <div>
+            <label for="service">Select Service Focus</label>
+            <select id="service" name="service" required>
+              <option value="" disabled selected>Choose a service</option>
+              <option value="carpet-cleaning">Deep Carpet Revitalization</option>
+              <option value="duct-cleaning">HVAC & Air Duct Purge</option>
+              <option value="full-service">Full Residential / Commercial Combo</option>
+              <option value="specialized">Specialized Post-Mitigation Finish</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="property-size">Approximate Square Footage</label>
+            <select id="property-size" name="property-size">
+              <option value="under-1000">&lt; 1,000 sq ft</option>
+              <option value="1000-2500">1,000 - 2,500 sq ft</option>
+              <option value="2500-5000">2,500 - 5,000 sq ft</option>
+              <option value="over-5000">5,000+ sq ft</option>
+            </select>
+          </div>
+
+          <div>
+            <label for="preferred-date">Preferred Date</label>
+            <input type="date" id="preferred-date" name="preferred-date" required />
+          </div>
+
+          <div class="form-group-full">
+            <label for="notes">Additional Project Scope / Notes</label>
+            <textarea id="notes" name="notes" rows="4" placeholder="Mention any heavy staining, specific duct configurations, pet details, or scheduling constraints..."></textarea>
+          </div>
+
+          <div class="form-group-full" style="margin-top: 10px;">
+            <button type="submit" class="btn btn-primary" style="width: 100%;">Transmit Booking Request</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- TESTIMONIALS -->
+  <section id="testimonials" class="testimonials">
+    <div class="container">
+      <div class="services-header">
+        <h2>Words of Preservation</h2>
+        <p>Read honest, unvarnished testimonials from prominent homeowners and estate managers who trust DCA with their interior biological quality.</p>
+      </div>
+
+      <div class="testimonials-grid">
+        <div class="testimonial-card">
+          <div>
+            <div class="stars">★★★★★</div>
+            <p class="quote">"Our 1920s historic residence had deep odors from previous pets that standard cleaners simply could not touch. DCA's extraction method returned the fibers to a state like new. An absolute masterpiece of engineering and care."</p>
+          </div>
+          <div class="author-info">
+            <h5>Eleanor Vance</h5>
+            <p>Historic District Resident, Richmond</p>
+          </div>
+        </div>
+
+        <div class="testimonial-card">
+          <div>
+            <div class="stars">★★★★★</div>
+            <p class="quote">"As an estate agent managing dozens of luxury listings, indoor environment quality is a premium sale criteria. DCA manages all our pre-market duct purges. The breathability and odor reduction in the air is instantly noticeable."</p>
+          </div>
+          <div class="author-info">
+            <h5>Julian Sterling</h5>
+            <p>Principal, Sterling Real Estate</p>
+          </div>
+        </div>
+
+        <div class="testimonial-card">
+          <div>
+            <div class="stars">★★★★★</div>
+            <p class="quote">"We scheduled a full commercial deep-clean after our major remodeling project. The technician's expertise with dust isolation and meticulous attention to detail saved us thousands in HVAC filters. Simply outstanding."</p>
+          </div>
+          <div class="author-info">
+            <h5>The Henderson Family</h5>
+            <p>Country Estate Proprietors</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a href="#" class="logo" style="margin-bottom: 24px; display: inline-flex;">
+            <svg width="32" height="32" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="40" height="40" rx="6" fill="#f5f2ea"/>
+              <path d="M12 28V18.5L20 12.5L28 18.5V28H23.5V22H16.5V28H12Z" fill="#0b3330"/>
+              <circle cx="20" cy="18" r="1.5" fill="#cc5a37"/>
+            </svg>
+            <span class="logo-text" style="color: var(--white); margin-left: 10px; font-size: 1.25rem;">DCA</span>
+          </a>
+          <p>Restoring physical textile depth and respiratory air quality to homes, estates, and workspaces since 2018.</p>
+        </div>
+        
+        <div>
+          <h3 class="footer-title">Our Capabilities</h3>
+          <ul class="footer-links">
+            <li><a href="#services">Deep Carpet Restoration</a></li>
+            <li><a href="#services">HVAC Duct Purification</a></li>
+            <li><a href="#services">Commercial Flex Services</a></li>
+            <li><a href="#services">Post-Construction Detailing</a></li>
+          </ul>
+        </div>
+
+        <div class="footer-info">
+          <h3 class="footer-title">Connect With Us</h3>
+          <p>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"/>
+              <circle cx="12" cy="10" r="3"/>
+            </svg>
+            Corporate HQ, Suite 410, Metro Office Park
+          </p>
+          <p>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="4" width="20" height="16" rx="2"/>
+              <path d="M22 7l-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+            </svg>
+            operations@dcacleaningsolutions.com
+          </p>
+          <p>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+            </svg>
+            1-800-555-0192 (Free Estimate)
+          </p>
+        </div>
+      </div>
+
+      <div class="footer-bottom">
+        <p>&copy; 2026 DCA Cleaning Firm. All rights reserved. Registered Professional Facility Services.</p>
+        <div>
+          <a href="#" style="margin-right: 16px;">Privacy Charter</a>
+          <a href="#">Service Agreement</a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- AJAX SUBMISSION SCRIPT -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const form = document.getElementById('booking-form');
+      const messageContainer = document.getElementById('message-container');
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        // Prepare message container state
+        messageContainer.style.display = 'none';
+        messageContainer.className = 'form-message';
+        messageContainer.innerHTML = '';
+
+        // Capture submit button and preserve initial state
+        const submitBtn = form.querySelector('button[type="submit"]');
+        const originalBtnText = submitBtn.textContent;
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Transmitting Secure Request...';
+
+        const formData = new FormData(form);
+
+        try {
+          const response = await fetch('/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams(formData).toString(),
+          });
+
+          if (response.ok) {
+            messageContainer.className = 'form-message success';
+            messageContainer.innerHTML = `
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
+                <polyline points="20 6 9 17 4 12"/>
+              </svg>
+              <span><strong>Submission Successful!</strong> Thank you, ${document.getElementById('fullname').value}. Your project request has been transmitted securely. Our field coordinator will contact you shortly.</span>
+            `;
+            messageContainer.style.display = 'flex';
+            form.reset();
+          } else {
+            throw new Error('Server returned a non-success status.');
+          }
+        } catch (error) {
+          messageContainer.className = 'form-message error';
+          messageContainer.innerHTML = `
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="8" x2="12" y2="12"/>
+              <line x1="12" y1="16" x2="12.01" y2="16"/>
+            </svg>
+            <span><strong>Transmission Failure.</strong> We encountered a connection issue. Please verify your internet connection or call our helpline directly at 1-800-555-0192.</span>
+          `;
+          messageContainer.style.display = 'flex';
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = originalBtnText;
+        }
+      });
+    });
+  </script>
+</body>
+</html>
