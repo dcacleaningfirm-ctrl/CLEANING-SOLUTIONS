@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>DCA Pro Manager</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/manager/manager.css" />
+
+  <!-- Installed-app metadata: lets a phone add DCA Pro Manager to the home
+       screen and run it full screen instead of in a browser tab. -->
+  <link rel="manifest" href="/manager/manifest.webmanifest" />
+  <meta name="theme-color" content="#0e1116" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="DCA Manager" />
+  <link rel="apple-touch-icon" href="/manager/apple-touch-icon.png" />
+</head>
+<body>
+  <!-- Login screen -->
+  <div id="login" class="login" hidden>
+    <form id="login-form" class="login-card" autocomplete="off">
+      <div class="brand">
+        <img src="/logo.svg" alt="" class="brand-mark" />
+        <div>
+          <h1>DCA Pro Manager</h1>
+          <p>Operations console · DCA Cleaning Solutions</p>
+        </div>
+      </div>
+      <label class="field">
+        <span>Crew member</span>
+        <select id="login-employee" required></select>
+      </label>
+      <label class="field">
+        <span>PIN</span>
+        <input id="login-pin" type="password" inputmode="numeric" pattern="[0-9]*"
+               maxlength="8" placeholder="••••" required />
+      </label>
+      <button type="submit" class="btn btn-primary" id="login-submit">Sign in</button>
+      <p class="login-error" id="login-error" hidden></p>
+      <a class="login-help" href="/manager/setup">Lost your code?</a>
+      <a class="install-link" href="/manager/install">Add to your phone's home screen</a>
+    </form>
+  </div>
+
+  <!-- Application shell -->
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <div class="topbar-brand">
+        <img src="/logo.svg" alt="" class="brand-mark" />
+        <div>
+          <strong>DCA Pro Manager</strong>
+          <span id="who"></span>
+        </div>
+      </div>
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-view="dashboard">Dashboard</button>
+        <button class="tab" data-view="book">Book</button>
+        <button class="tab" data-view="jobs">Jobs</button>
+        <button class="tab" data-view="customers">Customers</button>
+        <button class="tab" data-view="charges">Custom charge</button>
+        <button class="tab" data-view="crew">Crew</button>
+      </nav>
+      <a class="btn btn-ghost btn-sm install-link-top" href="/manager/install">Get the app</a>
+      <button class="btn btn-ghost" id="logout">Sign out</button>
+    </header>
+
+    <main class="content">
+      <section id="view-dashboard" class="view active"></section>
+      <section id="view-book" class="view"></section>
+      <section id="view-jobs" class="view"></section>
+      <section id="view-customers" class="view"></section>
+      <section id="view-charges" class="view"></section>
+      <section id="view-crew" class="view"></section>
+    </main>
+  </div>
+
+  <!-- Job detail drawer -->
+  <div id="drawer" class="drawer" hidden>
+    <div class="drawer-backdrop" data-close></div>
+    <aside class="drawer-panel" id="drawer-panel"></aside>
+  </div>
+
+  <!-- Login code / crew dialog -->
+  <div id="modal" class="modal" hidden>
+    <div class="modal-backdrop" data-modal-close></div>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <button class="drawer-close" data-modal-close aria-label="Close">×</button>
+      <h2 id="modal-title"></h2>
+      <form id="modal-form" autocomplete="off"></form>
+    </div>
+  </div>
+
+  <!-- The published price catalog, so a quote given over the phone matches the
+       figures on the public site exactly. -->
+  <script src="/data/pricing.js" defer></script>
+  <script src="/manager/manager.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,56 @@
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: SAMEORIGIN
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), geolocation=(), microphone=()
+  Cross-Origin-Opener-Policy: same-origin
+
+# The Meta Pixel needs three holes punched in the policies below, on every page
+# that sends one: connect.facebook.net in script-src (fbevents.js, which
+# /meta-pixel.js injects), www.facebook.com in img-src (the /tr beacon and the
+# noscript fallback), and both in connect-src (the newer beacon transport). The
+# pixel loader itself is served from /meta-pixel.js rather than inlined, so
+# 'unsafe-inline' is still not granted anywhere.
+
+/
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; media-src 'self' blob:; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
+
+/book
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; media-src 'self' blob:; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
+
+/service-terms
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
+
+/privacy
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
+
+/thank-you
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
+
+/manager/*
+  X-Robots-Tag: noindex, nofollow
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data:; script-src 'self' https://checkout.clover.com https://checkout.sandbox.dev.clover.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://checkout.clover.com https://checkout.sandbox.dev.clover.com; frame-src https://checkout.clover.com https://checkout.sandbox.dev.clover.com
+
+# The worker must be revalidated every load, otherwise a cached copy keeps
+# serving an old app shell to phones that already installed it.
+/manager/sw.js
+  Cache-Control: no-cache
+  Service-Worker-Allowed: /manager/
+
+/manager/manifest.webmanifest
+  Content-Type: application/manifest+json; charset=utf-8
+  Cache-Control: public, max-age=3600
+
+/api/*
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: no-store
+
+# Apple Pay domain verification. The file has no extension, so it would
+# otherwise be served as application/octet-stream and offered as a download;
+# Apple's verifier and anyone checking it by hand both want plain text. Kept out
+# of search results and only briefly cacheable, since Apple re-fetches it when
+# the merchant domain is re-verified or the payload is rotated.
+/.well-known/apple-developer-merchantid-domain-association
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=300
+  X-Robots-Tag: noindex, nofollow

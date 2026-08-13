@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Review and Send Your Request | DCA Cleaning Solutions</title>
+  <meta name="description" content="The final step of the booking flow. Check your line-by-line planning estimate, add your contact details and a photo, and send the request. Nothing is charged online.">
+  <link rel="canonical" href="https://www.dcacleaningsolutions.com/book/review">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <!-- Meta Pixel Code -->
+  <script src="/meta-pixel.js"></script>
+  <noscript><img height="1" width="1" class="pixel-noscript"
+  src="https://www.facebook.com/tr?id=1000652526109538&amp;ev=PageView&amp;noscript=1"
+  alt="" /><img height="1" width="1" class="pixel-noscript"
+  src="https://www.facebook.com/tr?id=27416224901380695&amp;ev=PageView&amp;noscript=1"
+  alt="" /></noscript>
+  <!-- End Meta Pixel Code -->
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="promo-strip">
+    <span><strong data-promo-field="name">Whole-home air duct promotion</strong> — <span data-price-compute="promoPrice">$199.00</span> with code <span class="promo-code" data-promo-field="code">VENTS199</span></span>
+    <a href="/promotions">See the terms</a>
+  </div>
+  <header class="site-header">
+    <div class="container nav-shell">
+      <a class="brand" href="/" aria-label="DCA Cleaning Solutions home"><span class="brand-mark" aria-hidden="true">DCA</span><span class="brand-copy"><strong>DCA Cleaning Solutions</strong><small>Carpet · Air Duct · Upholstery</small></span></a>
+      <button class="menu-toggle" type="button" aria-label="Toggle navigation" aria-expanded="false" data-menu-toggle>☰</button>
+      <nav class="nav-links" aria-label="Main navigation" data-menu><a href="/">Home</a><a href="/promotions">Promotion</a><a href="/service-terms">Service terms</a><a href="tel:4047162720">(404) 716-2720</a></nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="page-hero">
+      <div class="container">
+        <p class="eyebrow eyebrow-light">Step 07 of 07 · Review</p>
+        <h1>Review and send.</h1>
+        <p>Here is everything you selected, line by line, with the rate applied to each. Change anything by going back to that step — nothing is lost.</p>
+        <ol class="step-rail">
+          <li><a href="/book"><span class="step-index">01</span> Start</a></li>
+          <li><a href="/book/carpet"><span class="step-index">02</span> Carpet</a></li>
+          <li><a href="/book/air-ducts"><span class="step-index">03</span> Air ducts</a></li>
+          <li><a href="/book/upholstery"><span class="step-index">04</span> Upholstery</a></li>
+          <li><a href="/book/move"><span class="step-index">05</span> Move cleaning</a></li>
+          <li><a href="/book/add-ons"><span class="step-index">06</span> Add-ons</a></li>
+          <li><span class="is-current"><span class="step-index">07</span> Review</span></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container estimate-layout">
+        <form class="estimate-form" name="quick-estimate" method="POST" action="/thank-you" enctype="multipart/form-data" data-netlify="true" netlify-honeypot="bot-field" data-review-form>
+          <input type="hidden" name="form-name" value="quick-estimate">
+          <input type="hidden" name="carpet_rooms" value="0">
+          <input type="hidden" name="air_vents" value="0">
+          <input type="hidden" name="armchairs" value="0">
+          <input type="hidden" name="sofas" value="0">
+          <input type="hidden" name="sectionals" value="0">
+          <input type="hidden" name="move_packages" value="0">
+          <input type="hidden" name="selected_add_ons" value="None selected">
+          <input type="hidden" name="promotion_code" value="Not applied">
+          <input type="hidden" name="planning_estimate" value="$0.00">
+          <input type="hidden" name="estimate_breakdown" value="No priced services selected">
+          <input type="hidden" name="pricing_version" value="">
+          <p class="honeypot"><label>Do not fill this out: <input name="bot-field"></label></p>
+
+          <section class="form-card" aria-labelledby="review-heading">
+            <p class="eyebrow">Your selections</p>
+            <h2 id="review-heading">The estimate, line by line</h2>
+            <ul class="estimate-breakdown review-table" data-estimate-breakdown>
+              <li class="estimate-empty">Nothing selected yet. Go back to any step to add quantities.</li>
+            </ul>
+            <p class="quantity-hint">Every rate above comes from the same published catalog used across this site. If a figure here does not match a figure you saw elsewhere on the site, the catalog is the one that governs — tell us and we will fix the page.</p>
+            <p class="quantity-hint" style="margin-top:0.75rem;">Need to change something? <a href="/book/carpet">Carpet</a> · <a href="/book/air-ducts">Air ducts</a> · <a href="/book/upholstery">Upholstery</a> · <a href="/book/move">Move cleaning</a> · <a href="/book/add-ons">Add-ons</a></p>
+          </section>
+
+          <section class="form-card" aria-labelledby="contact-heading" style="margin-top:2rem;">
+            <p class="eyebrow">Contact and scheduling</p>
+            <h2 id="contact-heading">Where do we reach you?</h2>
+            <p class="form-intro">We use these details to check the service area and appointment availability. Nothing is charged online and no card details are collected here.</p>
+            <div class="field-grid">
+              <div class="field"><label for="customer-name">Name</label><input id="customer-name" name="customer_name" autocomplete="name" required></div>
+              <div class="field"><label for="phone">Phone</label><input id="phone" name="phone" type="tel" autocomplete="tel" required></div>
+              <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div>
+              <div class="field"><label for="zip">Service ZIP code</label><input id="zip" name="zip_code" inputmode="numeric" autocomplete="postal-code" pattern="[0-9]{5}(-[0-9]{4})?" required></div>
+              <div class="field"><label for="preferred-date">Preferred date</label><input id="preferred-date" name="preferred_date" type="date"></div>
+              <div class="field"><label for="contact-method">Best way to reach you</label><select id="contact-method" name="contact_method"><option value="Phone">Phone</option><option value="Text">Text</option><option value="Email">Email</option></select></div>
+            </div>
+          </section>
+
+          <section class="form-card" aria-labelledby="details-heading" style="margin-top:2rem;">
+            <p class="eyebrow">Job details</p>
+            <h2 id="details-heading">Anything we should know?</h2>
+            <div class="field-grid">
+              <div class="field field-full"><label for="description">Describe the project</label><textarea id="description" name="job_description" placeholder="Spots and their history, pets, stairs, access and parking, fabric types, a second air handler, property condition — anything that changes the scope."></textarea></div>
+              <div class="field field-full"><label for="media"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-camera"></use></svg> Photo or short video</label><input id="media" name="job_media" type="file" accept="image/*,video/*"><small>Optional, and the single most useful thing you can send us. One clear photo of the area usually settles the scope before we arrive. Files up to 8 MB.</small></div>
+              <div class="field field-full"><label class="consent-check"><input type="checkbox" name="terms_acknowledged" value="Yes" required><span>I understand this is a non-binding planning estimate, and that the final scope and price are confirmed before work begins. I have read the <a href="/service-terms" target="_blank" rel="noopener">service terms and limitations</a>.</span></label></div>
+              <div class="field field-full"><label class="consent-check"><input type="checkbox" name="contact_consent" value="Yes" required><span>I authorize DCA Cleaning Solutions to contact me about this estimate by phone, text or email. Consent is not a condition of purchase.</span></label></div>
+            </div>
+
+            <div class="workmanship">
+              <span class="icon-badge"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-shield"></use></svg></span>
+              <p>We stand behind the quality of our workmanship and will address concerns related to the agreed scope of service.</p>
+            </div>
+
+            <p class="estimate-note"><strong>What this figure is.</strong> A planning estimate, not a quote. Final scope and price are confirmed before work begins, after dimensions, material condition and accessibility are reviewed. Permanent dye loss, bleaching, sun fading, wear and existing material damage will not improve with cleaning, and some marks are permanent. Sanitizing and antimicrobial products are applied according to the manufacturer's EPA-registered label directions, and we make no claim beyond the label. We are cleaners, not remediation or HVAC contractors; where something needs a licensed trade we document it and say so. Please tell us about children, pets, allergies or sensitivities before service so we can choose suitable products.</p>
+
+            <div class="step-actions">
+              <a class="step-back" href="/book/add-ons">← Back to add-ons</a>
+              <button class="button button-dark" type="submit">Send my request</button>
+            </div>
+          </section>
+        </form>
+
+        <aside class="summary-rail">
+          <div class="estimate-summary" aria-live="polite">
+            <p class="eyebrow">Planning estimate</p>
+            <div class="estimate-total" data-estimate-total>$0.00</div>
+            <ul class="estimate-breakdown" data-estimate-breakdown><li class="estimate-empty">Nothing selected yet.</li></ul>
+            <p class="estimate-note">Not a final quote. Inspection, measurements, access, condition and the approved scope can change the figure. No card details are collected here.</p>
+            <button class="button button-ghost" type="button" data-clear-draft>Clear my selections</button>
+          </div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer"><div class="container"><div class="footer-bottom"><span>© 2026 Deluxe Carpet &amp; Air Duct Cleaning Solutions LLC, operating as DCA Cleaning Solutions. Atlanta, Georgia.</span><span><a href="/privacy">Privacy</a> · <a href="/service-terms">Service terms</a></span></div><p style="max-width:80ch; margin:1.25rem 0 0; color:#aaa59d; font-size:0.75rem; line-height:1.7;">Prices shown are planning estimates drawn from one shared catalog. Final scope and price are confirmed before work begins after dimensions, material condition and accessibility are reviewed. Cleaning removes soil and improves appearance; permanent dye loss, bleaching, sun fading, wear and existing material damage may not improve. Sanitizing and antimicrobial products are applied to compatible surfaces according to the manufacturer's EPA-registered label directions, and we make no claim beyond the label; this is not mold remediation. We stand behind the quality of our workmanship and will address concerns related to the agreed scope of service. See our <a href="/service-terms" style="color:#cbd5e1;">service terms and cleaning limitations</a>.</p></div></footer>
+  <script src="/data/pricing.js" defer></script>
+  <script src="/assets/site.js" defer></script>
+</body>
+</html>

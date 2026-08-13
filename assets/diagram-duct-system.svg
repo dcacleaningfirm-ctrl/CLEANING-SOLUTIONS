@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 420" role="img" aria-label="Diagram of a residential HVAC duct layout showing the air handler, the supply trunk, branch runs to four supply registers, the return run, and the access points opened during a cleaning visit.">
+  <g font-family="Trebuchet MS, Avenir, sans-serif">
+    <!-- ceiling line and registers -->
+    <path d="M40 58 H 760" stroke="#cdc1a8" stroke-width="4"/>
+    <g>
+      <rect x="250" y="58" width="66" height="18" fill="#8a7f6b"/>
+      <rect x="390" y="58" width="66" height="18" fill="#8a7f6b"/>
+      <rect x="530" y="58" width="66" height="18" fill="#8a7f6b"/>
+      <rect x="670" y="58" width="66" height="18" fill="#8a7f6b"/>
+    </g>
+    <text x="250" y="44" font-size="14" fill="#6d685f">Supply registers</text>
+
+    <!-- air handler -->
+    <rect x="52" y="196" width="132" height="140" rx="12" fill="none" stroke="#0b0b0c" stroke-width="2"/>
+    <text x="60" y="186" font-size="17" font-weight="bold" fill="#0b0b0c">Air handler</text>
+    <rect x="70" y="216" width="96" height="30" rx="5" fill="#6d685f" opacity="0.22"/>
+    <text x="80" y="237" font-size="13" fill="#0b0b0c">Filter</text>
+    <rect x="70" y="256" width="96" height="30" rx="5" fill="#6d685f" opacity="0.22"/>
+    <text x="80" y="277" font-size="13" fill="#0b0b0c">Blower</text>
+    <rect x="70" y="296" width="96" height="26" rx="5" fill="#6d685f" opacity="0.22"/>
+    <text x="80" y="315" font-size="13" fill="#0b0b0c">Coil</text>
+
+    <!-- supply trunk -->
+    <rect x="184" y="216" width="576" height="34" rx="6" fill="#d8cdb6"/>
+    <text x="672" y="272" font-size="14" fill="#6d685f">Supply trunk</text>
+
+    <!-- branch runs -->
+    <g fill="#d8cdb6">
+      <rect x="272" y="76" width="22" height="140"/>
+      <rect x="412" y="76" width="22" height="140"/>
+      <rect x="552" y="76" width="22" height="140"/>
+      <rect x="692" y="76" width="22" height="140"/>
+    </g>
+
+    <!-- airflow -->
+    <g stroke="#2f684d" stroke-width="4" stroke-linecap="round" opacity="0.9">
+      <path d="M200 233 H 740"/>
+      <path d="M283 200 V 100"/>
+      <path d="M423 200 V 100"/>
+      <path d="M563 200 V 100"/>
+      <path d="M703 200 V 100"/>
+    </g>
+    <g fill="#2f684d">
+      <path d="M283 88 l -9 18 h 18 z"/>
+      <path d="M423 88 l -9 18 h 18 z"/>
+      <path d="M563 88 l -9 18 h 18 z"/>
+      <path d="M703 88 l -9 18 h 18 z"/>
+    </g>
+
+    <!-- return run -->
+    <rect x="184" y="330" width="430" height="30" rx="6" fill="#c2b69d"/>
+    <text x="196" y="322" font-size="14" fill="#6d685f">Return run</text>
+    <path d="M600 345 H 210" stroke="#2f684d" stroke-width="4" stroke-linecap="round" opacity="0.6"/>
+    <path d="M198 345 l 18 -9 v 18 z" fill="#2f684d" opacity="0.6"/>
+    <rect x="614" y="330" width="66" height="30" fill="#8a7f6b"/>
+    <text x="614" y="382" font-size="14" fill="#6d685f">Return grille</text>
+
+    <!-- access points -->
+    <g fill="#d6a84f" stroke="#8a6a24" stroke-width="2">
+      <circle cx="240" cy="233" r="9"/>
+      <circle cx="352" cy="233" r="9"/>
+      <circle cx="492" cy="233" r="9"/>
+      <circle cx="632" cy="233" r="9"/>
+      <circle cx="283" cy="150" r="9"/>
+      <circle cx="423" cy="150" r="9"/>
+      <circle cx="563" cy="150" r="9"/>
+      <circle cx="703" cy="150" r="9"/>
+      <circle cx="420" cy="345" r="9"/>
+    </g>
+    <circle cx="52" cy="404" r="9" fill="#d6a84f" stroke="#8a6a24" stroke-width="2"/>
+    <text x="70" y="410" font-size="14" fill="#6d685f">Access points opened, cleaned and closed again. Vent and return counts drive the estimate.</text>
+  </g>
+</svg>

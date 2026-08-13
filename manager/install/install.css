@@ -1,0 +1,165 @@
+/* Install / "download to your phone" page for DCA Pro Manager.
+   Builds on the tokens in manager.css so the page matches the app itself. */
+
+.install-page { min-height: 100%; }
+
+.wrap {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 34px 20px 60px;
+  display: grid;
+  gap: 18px;
+}
+
+/* ---------- Hero ---------- */
+.hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 18px;
+}
+.hero-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 17px;
+  flex: none;
+  box-shadow: var(--shadow);
+}
+.eyebrow {
+  color: var(--faint);
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.hero h1 {
+  font-size: 1.6rem;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+  margin: 4px 0 8px;
+}
+.lede { color: var(--muted); font-size: 0.93rem; max-width: 56ch; }
+
+/* ---------- Cards ---------- */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+.card h2 { font-size: 1rem; letter-spacing: -0.01em; margin-bottom: 4px; }
+.muted { color: var(--muted); font-size: 0.86rem; }
+.fineprint { color: var(--faint); font-size: 0.78rem; line-height: 1.55; }
+
+/* ---------- Direct install ---------- */
+.install-now {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  border-color: var(--brand);
+  background: linear-gradient(180deg, var(--brand-soft), transparent), var(--surface);
+}
+.btn-install { padding: 11px 20px; font-size: 0.92rem; }
+
+.banner {
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.4);
+  color: var(--green);
+  border-radius: 11px;
+  padding: 11px 14px;
+  font-size: 0.86rem;
+}
+
+/* ---------- Platform steps ---------- */
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px;
+}
+.platform-tag {
+  display: inline-block;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 3px 11px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+/* The platform the visitor is actually on gets lifted out of the pair. */
+.step-card.is-current { border-color: var(--brand); }
+.step-card.is-current .platform-tag {
+  background: var(--brand-soft);
+  border-color: var(--brand);
+  color: #fff;
+}
+.step-card ol {
+  margin: 13px 0 13px 4px;
+  padding-left: 18px;
+  display: grid;
+  gap: 9px;
+  font-size: 0.88rem;
+}
+.step-card li { padding-left: 3px; }
+.step-card li strong { color: #fff; font-weight: 600; }
+
+/* ---------- Send to phone ---------- */
+.send-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 22px;
+  align-items: start;
+  margin-top: 16px;
+}
+.qr-panel { text-align: center; display: grid; gap: 9px; justify-items: center; }
+.qr {
+  width: 176px;
+  height: 176px;
+  border-radius: 11px;
+  background: #fff;
+  padding: 9px;
+  display: block;
+}
+.send-actions { display: grid; gap: 10px; align-content: start; }
+.send-actions .btn { justify-content: center; text-decoration: none; }
+.url-box {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 9px 11px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.url-inline { color: var(--muted); word-break: break-all; }
+
+/* ---------- Footer ---------- */
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  border-top: 1px solid var(--border);
+  padding-top: 18px;
+  margin-top: 4px;
+}
+.foot .btn { text-decoration: none; }
+.foot .fineprint { flex: 1; min-width: 220px; }
+
+@media (max-width: 620px) {
+  .wrap { padding: 24px 15px 48px; }
+  .hero { gap: 14px; }
+  .hero-icon { width: 56px; height: 56px; border-radius: 14px; }
+  .hero h1 { font-size: 1.34rem; }
+  .send-grid { grid-template-columns: 1fr; }
+  .qr-panel { justify-items: start; text-align: left; }
+  .install-now .btn-install { width: 100%; }
+}
+
+/* Opened from the home screen already — the whole page is redundant. */
+@media all and (display-mode: standalone) {
+  .install-now, .steps, .send { display: none; }
+}

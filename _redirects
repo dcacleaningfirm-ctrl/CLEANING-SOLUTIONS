@@ -1,0 +1,44 @@
+# Netlify evaluates these top to bottom, and an unforced rule does NOT fire
+# when a real file already exists at the requested path. That is why the old
+# /privacy-policy 301 never took effect: privacy-policy.html was still on disk,
+# so Google saw two live copies of the same policy. The file has been removed
+# and these two rules are forced, so the duplicate cannot come back silently.
+/privacy-policy       /privacy               301!
+/privacy-policy.html  /privacy               301!
+
+# Retired and duplicate paths, pointed at the page that replaced them.
+/terms                /service-terms         301
+/promotion            /promotions            301
+/testimonials         /reviews               301
+/refund-policy        /return-refund-policy  301
+/returns              /return-refund-policy  301
+
+# Short forms used on print material, vehicle signage and in call handling.
+/carpet                       /carpet-cleaning                     301
+/carpets                      /carpet-cleaning                     301
+/air-ducts                    /air-duct-cleaning                   301
+/duct-cleaning                /air-duct-cleaning                   301
+/upholstery                   /upholstery-cleaning                 301
+/designer-furniture-cleaning  /luxury-designer-furniture-cleaning  301
+/move-in-cleaning             /move-in-move-out-cleaning           301
+/move-out-cleaning            /move-in-move-out-cleaning           301
+/move-cleaning                /move-in-move-out-cleaning           301
+/areas                        /areas/atlanta-ga                    301
+
+# Pretty URLs for pages whose CSP is scoped to the path in _headers.
+/book            /book/index.html     200
+/book/           /book/index.html     200
+/promotions      /promotions.html     200
+/service-terms   /service-terms.html  200
+/privacy         /privacy.html        200
+/thank-you       /thank-you.html      200
+/manager/install   /manager/install/index.html  200
+/manager/install/  /manager/install/index.html  200
+/manager/setup     /manager/setup/index.html    200
+/manager/setup/    /manager/setup/index.html    200
+/manager         /manager/index.html  200
+/manager/        /manager/index.html  200
+
+# Short links for handing the phone install to crew
+/app             /manager/install     301
+/install         /manager/install     301

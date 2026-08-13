@@ -1,0 +1,2147 @@
+(function () {
+  "use strict";
+
+  var money = new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD"
+  });
+  function fmtMoney(cents) {
+    return money.format((Number(cents) || 0) / 100);
+  }
+
+  var STATUS_LABEL = {
+    scheduled: "Scheduled",
+    en_route: "En route",
+    in_progress: "In progress",
+    completed: "Completed",
+    cancelled: "Cancelled"
+  };
+  var STATUS_ORDER = ["scheduled", "en_route", "in_progress", "completed", "cancelled"];
+
+  var state = {
+    me: null,
+    crew: [],
+    jobFilter: "",
+    canManage: false,
+    cloverScript: null,
+    chargeClover: null,
+    booking: null,
+    // What this site can do: which card processor is configured and whether
+    // customers can be emailed or texted. Read once and reused.
+    settings: null,
+    settingsPromise: null,
+    // The job currently open in the drawer, and the payment being taken on it.
+    job: null,
+    pay: null
+  };
+
+  var CREW_ROLES = ["owner", "manager", "admin", "technician"];
+
+  // ---------- helpers ----------
+  function api(path, options) {
+    options = options || {};
+    return fetch("/api/manager/" + path, {
+      method: options.method || "GET",
+      headers: options.body ? { "content-type": "application/json" } : undefined,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+      credentials: "same-origin"
+    }).then(function (res) {
+      if (res.status === 401) {
+        closeModal();
+        showLogin();
+        throw new Error("unauthorized");
+      }
+      return res.json().then(function (data) {
+        if (!res.ok) {
+          // Keep the body on the error: a booking clash comes back as a 409
+          // carrying the appointments it collided with, and the booking screen
+          // shows them rather than just saying no.
+          var err = new Error(data.error || "Request failed");
+          err.status = res.status;
+          err.data = data;
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+
+  // What this site can actually do: which card processor is set up and whether
+  // confirmations can be emailed or texted. Read once per session — the answer
+  // only changes when the site's environment variables do.
+  function loadSettings() {
+    if (state.settings) return Promise.resolve(state.settings);
+    if (!state.settingsPromise) {
+      state.settingsPromise = api("settings")
+        .then(function (d) {
+          state.settings = d;
+          return d;
+        })
+        .catch(function (e) {
+          state.settingsPromise = null;
+          throw e;
+        });
+    }
+    return state.settingsPromise;
+  }
+
+  function cardSettings() {
+    return (state.settings && state.settings.payments && state.settings.payments.card) || {};
+  }
+  function paymentMethods() {
+    return (state.settings && state.settings.payments && state.settings.payments.methods) || [];
+  }
+  function methodLabel(value) {
+    var methods = paymentMethods();
+    for (var i = 0; i < methods.length; i++) {
+      if (methods[i].value === value) return methods[i].label.replace(" (charge now)", "");
+    }
+    return String(value || "Payment").replace(/_/g, " ");
+  }
+  // True when the server expects a card token for this method — every other
+  // method is money that has already changed hands and is simply recorded.
+  function collectsCard(value) {
+    var methods = paymentMethods();
+    for (var i = 0; i < methods.length; i++) {
+      if (methods[i].value === value) return methods[i].collects === "clover";
+    }
+    return value === "card";
+  }
+
+  function el(html) {
+    var t = document.createElement("template");
+    t.innerHTML = html.trim();
+    return t.content.firstChild;
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+  function initials(name) {
+    return String(name || "?")
+      .split(/\s+/)
+      .map(function (p) { return p[0]; })
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+  }
+  function avatarColor(name) {
+    var colors = ["#2f6df6", "#a78bfa", "#34d399", "#fbbf24", "#38bdf8", "#f472b6"];
+    var sum = 0;
+    for (var i = 0; i < (name || "").length; i++) sum += name.charCodeAt(i);
+    return colors[sum % colors.length];
+  }
+  function statusPill(status) {
+    return '<span class="pill ' + status + '">' + esc(STATUS_LABEL[status] || status) + "</span>";
+  }
+  function assigneeCell(name) {
+    if (!name) return '<span class="muted">Unassigned</span>';
+    return (
+      '<span class="assignee"><span class="avatar" style="background:' +
+      avatarColor(name) + '">' + esc(initials(name)) + "</span>" + esc(name) + "</span>"
+    );
+  }
+  function fmtDate(iso) {
+    if (!iso) return "—";
+    var d = new Date(iso);
+    return d.toLocaleString("en-US", {
+      month: "short", day: "numeric", hour: "numeric", minute: "2-digit"
+    });
+  }
+  function timeAgo(iso) {
+    if (!iso) return "";
+    var diff = (Date.now() - new Date(iso).getTime()) / 1000;
+    if (diff < 60) return "just now";
+    if (diff < 3600) return Math.floor(diff / 60) + "m ago";
+    if (diff < 86400) return Math.floor(diff / 3600) + "h ago";
+    return Math.floor(diff / 86400) + "d ago";
+  }
+
+  // ---------- dialog + toast ----------
+  var modalSubmit = null;
+
+  // Small centred form used for everything that issues or changes a login code.
+  function openModal(title, bodyHtml, onSubmit) {
+    var form = document.getElementById("modal-form");
+    document.getElementById("modal-title").textContent = title;
+    form.innerHTML =
+      bodyHtml +
+      '<p class="login-error modal-error" id="modal-error" hidden></p>' +
+      '<div class="modal-actions">' +
+      '<button type="button" class="btn btn-ghost" data-modal-close>Cancel</button>' +
+      '<button type="submit" class="btn btn-primary" id="modal-submit">Save</button>' +
+      "</div>";
+    modalSubmit = onSubmit;
+    document.getElementById("modal").hidden = false;
+    var first = form.querySelector("input, select");
+    if (first) first.focus();
+  }
+
+  function closeModal() {
+    document.getElementById("modal").hidden = true;
+    document.getElementById("modal-form").innerHTML = "";
+    modalSubmit = null;
+  }
+
+  function modalError(message) {
+    var p = document.getElementById("modal-error");
+    if (!p) return;
+    p.textContent = message;
+    p.hidden = false;
+  }
+
+  function toast(message) {
+    var existing = document.getElementById("toast");
+    if (existing) existing.remove();
+    var node = el('<div class="toast" id="toast">' + esc(message) + "</div>");
+    document.body.appendChild(node);
+    setTimeout(function () {
+      if (node.parentNode) node.remove();
+    }, 6000);
+  }
+
+  function val(id) {
+    var field = document.getElementById(id);
+    return field ? field.value.trim() : "";
+  }
+
+  // ---------- customer messaging ----------
+  // Email and text are offered side by side wherever the office can tell a
+  // customer something. A channel the site has no provider for, or that this
+  // customer has no address or number for, is shown switched off with the
+  // reason rather than quietly left out.
+  function channelChoices(prefix, opts) {
+    opts = opts || {};
+    var notify = (state.settings && state.settings.notifications) || {};
+    var needsRecipient = opts.requireRecipient !== false;
+
+    function row(channel, label, recipient, config) {
+      config = config || {};
+      var missing = config.missing || [];
+      var reason = "";
+      if (!config.configured) {
+        reason = "Not set up yet — add " + (missing.join(", ") || "a provider") + " to the site";
+      } else if (needsRecipient && !recipient) {
+        reason = channel === "email" ? "No email address on file" : "No phone number on file";
+      }
+      var ready = !reason;
+      return (
+        '<label class="channel' + (ready ? "" : " off") + '">' +
+        '<input type="checkbox" id="' + prefix + "-" + channel + '"' +
+        (ready ? (opts.checked ? " checked" : "") : " disabled") +
+        " /><span><strong>" + esc(label) + "</strong>" +
+        (ready && recipient ? "<small>" + esc(recipient) + "</small>" : "") +
+        (reason ? '<small class="muted">' + esc(reason) + "</small>" : "") +
+        "</span></label>"
+      );
+    }
+
+    return (
+      '<div class="channel-row">' +
+      row("email", "Email", opts.email, notify.email) +
+      row("sms", "Text message", opts.phone, notify.sms) +
+      "</div>"
+    );
+  }
+
+  function chosenChannels(prefix) {
+    var out = [];
+    ["email", "sms"].forEach(function (channel) {
+      var box = document.getElementById(prefix + "-" + channel);
+      if (box && box.checked && !box.disabled) out.push(channel);
+    });
+    return out;
+  }
+
+  function describeSends(results) {
+    return (results || [])
+      .map(function (r) {
+        var channel = r.channel === "email" ? "Email" : "Text";
+        return r.ok ? "" : channel + ": " + (r.error || "could not be sent");
+      })
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  function copyText(text, label) {
+    function fallback() {
+      var box = document.createElement("textarea");
+      box.value = text;
+      box.setAttribute("readonly", "readonly");
+      box.style.position = "fixed";
+      box.style.opacity = "0";
+      document.body.appendChild(box);
+      box.select();
+      try { document.execCommand("copy"); } catch (e) { /* nothing else to try */ }
+      box.remove();
+      toast(label + " copied.");
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast(label + " copied."); }, fallback);
+      return;
+    }
+    fallback();
+  }
+
+  // Login codes are always typed twice, so a mistyped code cannot lock someone
+  // out of the app.
+  function codeFields(label) {
+    return (
+      '<label class="field"><span>' + esc(label) + " (4–8 digits)</span>" +
+      '<input id="m-pin" class="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" ' +
+      'minlength="4" maxlength="8" placeholder="••••" required autocomplete="new-password" /></label>' +
+      '<label class="field"><span>Type it again</span>' +
+      '<input id="m-pin2" class="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" ' +
+      'minlength="4" maxlength="8" placeholder="••••" required autocomplete="new-password" /></label>'
+    );
+  }
+
+  function readNewCode() {
+    var pin = val("m-pin");
+    if (pin !== val("m-pin2")) throw new Error("The two codes do not match");
+    return pin;
+  }
+
+  // ---------- login ----------
+  function showLogin() {
+    document.getElementById("app").hidden = true;
+    document.getElementById("login").hidden = false;
+    var err = document.getElementById("login-error");
+    err.hidden = true;
+    var sel = document.getElementById("login-employee");
+    fetch("/api/manager-login", { credentials: "same-origin" })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        var people = data.employees || [];
+        if (!people.length) {
+          // Nobody to sign in as: point at the recovery page instead of leaving
+          // an empty dropdown and a button that cannot work.
+          sel.innerHTML = '<option value="">No crew members yet</option>';
+          err.textContent =
+            "There are no accounts yet. Use “Lost your code?” below to set the first one up.";
+          err.hidden = false;
+          return;
+        }
+        sel.innerHTML = people
+          .map(function (e) {
+            return '<option value="' + e.id + '">' + esc(e.name) + " · " + esc(e.role) + "</option>";
+          })
+          .join("");
+      })
+      .catch(function () {});
+  }
+
+  function handleLogin(ev) {
+    ev.preventDefault();
+    var err = document.getElementById("login-error");
+    var btn = document.getElementById("login-submit");
+    err.hidden = true;
+    btn.disabled = true;
+    btn.textContent = "Signing in…";
+    fetch("/api/manager-login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        employeeId: Number(document.getElementById("login-employee").value),
+        pin: document.getElementById("login-pin").value
+      })
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.d.error || "Sign in failed");
+        document.getElementById("login-pin").value = "";
+        boot();
+      })
+      .catch(function (e) {
+        err.textContent = e.message;
+        err.hidden = false;
+      })
+      .finally(function () {
+        btn.disabled = false;
+        btn.textContent = "Sign in";
+      });
+  }
+
+  // ---------- views ----------
+  function switchView(name) {
+    document.querySelectorAll(".tab").forEach(function (t) {
+      t.classList.toggle("active", t.dataset.view === name);
+    });
+    document.querySelectorAll(".view").forEach(function (v) {
+      v.classList.toggle("active", v.id === "view-" + name);
+    });
+    if (name === "dashboard") renderDashboard();
+    if (name === "book") renderBook();
+    if (name === "jobs") renderJobs();
+    if (name === "customers") renderCustomers();
+    if (name === "charges") renderCharges();
+    if (name === "crew") renderCrew();
+  }
+
+  function renderDashboard() {
+    var host = document.getElementById("view-dashboard");
+    host.innerHTML = '<div class="loading">Loading…</div>';
+    api("dashboard").then(function (d) {
+      var s = d.stats;
+      var statuses = STATUS_ORDER.filter(function (k) { return d.byStatus[k]; }).map(function (k) {
+        return statusPill(k) + ' <span class="mono">' + d.byStatus[k] + "</span>";
+      });
+      host.innerHTML =
+        '<div class="stat-grid">' +
+        stat("Jobs today", s.jobsToday) +
+        stat("Open pipeline", fmtMoney(s.pipelineCents)) +
+        stat("Completed value", fmtMoney(s.completedValueCents)) +
+        stat("Payments collected", fmtMoney(s.paidCents)) +
+        stat("Outstanding balance", fmtMoney(s.outstandingCents || 0)) +
+        stat("Customers", s.customers) +
+        stat("Active crew", s.activeCrew) +
+        "</div>" +
+        '<div class="grid-2">' +
+        '<div class="card"><div class="row-between"><h3 class="section-title">Upcoming jobs</h3>' +
+        '<button class="btn btn-primary btn-sm" data-goto="book">Book appointment</button></div>' +
+        upcomingTable(d.upcoming) +
+        "</div>" +
+        '<div class="card"><h3 class="section-title">Job pipeline</h3><div class="chips">' +
+        (statuses.length ? statuses.join(" ") : '<span class="muted">No jobs yet</span>') +
+        "</div><h3 class=\"section-title\" style=\"margin-top:20px\">Recent activity</h3>" +
+        activityFeed(d.recentEvents) +
+        "</div></div>";
+    });
+  }
+
+  function stat(label, value) {
+    return '<div class="stat"><div class="label">' + esc(label) + '</div><div class="value">' + value + "</div></div>";
+  }
+  function upcomingTable(rows) {
+    if (!rows.length) return '<p class="empty">Nothing scheduled.</p>';
+    return (
+      '<table><thead><tr><th>Service</th><th>Customer</th><th>When</th><th>Crew</th><th class="right">Value</th></tr></thead><tbody>' +
+      rows.map(function (j) {
+        return '<tr class="clickable" data-job="' + j.id + '"><td>' + esc(j.serviceType) + " " + statusPill(j.status) +
+          "</td><td>" + esc(j.customerName) + "</td><td class=\"muted\">" + fmtDate(j.scheduledFor) +
+          "</td><td>" + assigneeCell(j.assignedName) + '</td><td class="right mono">' + fmtMoney(j.priceCents) + "</td></tr>";
+      }).join("") +
+      "</tbody></table>"
+    );
+  }
+  function activityFeed(events) {
+    if (!events.length) return '<p class="empty">No activity yet.</p>';
+    return (
+      '<div class="feed">' +
+      events.map(function (e) {
+        return '<div class="feed-item"><span class="dot ' + esc(e.kind) + '"></span><div><div>' +
+          esc(e.message) + '</div><time>Job #' + e.jobId + " · " + timeAgo(e.createdAt) + "</time></div></div>";
+      }).join("") +
+      "</div>"
+    );
+  }
+
+  function renderJobs() {
+    var host = document.getElementById("view-jobs");
+    host.innerHTML = '<div class="loading">Loading…</div>';
+    var q = state.jobFilter ? "jobs?status=" + encodeURIComponent(state.jobFilter) : "jobs";
+    api(q).then(function (d) {
+      var chips =
+        '<div class="chips"><button class="chip' + (state.jobFilter ? "" : " active") + '" data-status="">All</button>' +
+        STATUS_ORDER.map(function (k) {
+          return '<button class="chip' + (state.jobFilter === k ? " active" : "") + '" data-status="' + k + '">' +
+            esc(STATUS_LABEL[k]) + "</button>";
+        }).join("") +
+        "</div>";
+      var table = d.jobs.length
+        ? '<div class="card"><table><thead><tr><th>#</th><th>Service</th><th>Customer</th><th>Status</th><th>Scheduled</th><th>Crew</th><th class="right">Value</th></tr></thead><tbody>' +
+          d.jobs.map(function (j) {
+            return '<tr class="clickable" data-job="' + j.id + '"><td class="muted mono">' + j.id +
+              "</td><td>" + esc(j.serviceType) + "</td><td>" + esc(j.customerName) +
+              "</td><td>" + statusPill(j.status) + '</td><td class="muted">' + fmtDate(j.scheduledFor) +
+              "</td><td>" + assigneeCell(j.assignedName) + '</td><td class="right mono">' + fmtMoney(j.priceCents) + "</td></tr>";
+          }).join("") +
+          "</tbody></table></div>"
+        : '<div class="card"><p class="empty">No jobs match this filter.</p></div>';
+      host.innerHTML = chips + table;
+    });
+  }
+
+  function renderCustomers() {
+    var host = document.getElementById("view-customers");
+    host.innerHTML = '<div class="loading">Loading…</div>';
+    api("customers").then(function (d) {
+      host.innerHTML =
+        '<div class="card"><table><thead><tr><th>Name</th><th>Contact</th><th>Location</th><th class="right">Jobs</th></tr></thead><tbody>' +
+        d.customers.map(function (c) {
+          var contact = [c.phone, c.email].filter(Boolean).map(esc).join(" · ") || '<span class="muted">—</span>';
+          var loc = [c.city, c.state].filter(Boolean).map(esc).join(", ") || '<span class="muted">—</span>';
+          return "<tr><td>" + esc(c.name) + "</td><td class=\"muted\">" + contact + "</td><td class=\"muted\">" +
+            loc + '</td><td class="right mono">' + c.jobCount + "</td></tr>";
+        }).join("") +
+        "</tbody></table></div>";
+    });
+  }
+
+  function renderCharges() {
+    var host = document.getElementById("view-charges");
+    host.innerHTML = '<div class="loading">Loading secure payment form…</div>';
+    api("custom-charges")
+      .then(function (d) {
+        var setup = d.enabled
+          ? '<form id="custom-charge-form" class="charge-form" autocomplete="off">' +
+            '<div class="charge-heading"><div><p class="eyebrow">Manual payment</p>' +
+            '<h2>Charge for a custom task</h2><p>Use this for approved work that was not booked through the website.</p></div>' +
+            '<div class="charge-total"><span>Charge total</span><strong id="charge-total">$0.00</strong></div></div>' +
+            '<div class="charge-fields"><label class="field"><span>Customer name</span>' +
+            '<input id="charge-name" required autocomplete="name" placeholder="Customer name" /></label>' +
+            '<label class="field"><span>Email</span><input id="charge-email" type="email" autocomplete="email" placeholder="Optional" /></label>' +
+            '<label class="field"><span>Phone</span><input id="charge-phone" type="tel" autocomplete="tel" placeholder="Optional" /></label>' +
+            '<label class="field"><span>Amount</span><div class="money-input"><span>$</span>' +
+            '<input id="charge-amount" required type="number" min="1" max="10000" step="0.01" inputmode="decimal" placeholder="0.00" /></div></label></div>' +
+            '<label class="field"><span>Task description</span><textarea id="charge-description" required maxlength="500" placeholder="Describe the work being charged"></textarea></label>' +
+            '<div class="card-fields"><label><span>Card number</span><div class="clover-field" id="card-number"></div></label>' +
+            '<label><span>Expiration</span><div class="clover-field" id="card-date"></div></label>' +
+            '<label><span>Security code</span><div class="clover-field" id="card-cvv"></div></label>' +
+            '<label><span>Billing ZIP</span><div class="clover-field" id="card-postal"></div></label></div>' +
+            '<p class="charge-error login-error" id="charge-error" hidden></p>' +
+            '<div class="charge-submit"><p>Card details go directly to Clover and are not stored in DCA Pro Manager.</p>' +
+            '<button class="btn btn-primary" id="charge-submit" type="submit" disabled>Loading card form…</button></div></form>'
+          : renderChargeSetupNotice(d);
+
+        var sandboxNotice = d.enabled && d.environment !== "production"
+          ? '<div class="charge-notice">Sandbox mode — these charges are test-only and never reach your Clover dashboard. ' +
+            'Set <code>CLOVER_ENVIRONMENT</code> to <code>production</code> and redeploy to take real payments.</div>'
+          : "";
+
+        host.innerHTML =
+          '<div class="charge-layout"><div class="card charge-panel">' + sandboxNotice + setup +
+          '</div><div><div class="row-between charge-history-heading"><div><p class="eyebrow">Payment history</p>' +
+          '<h2>Recent custom charges</h2></div><span class="pill completed">Paid</span></div>' +
+          renderChargeHistory(d.charges) + "</div></div>";
+
+        if (d.enabled) initChargeForm(d);
+      })
+      .catch(function (e) {
+        host.innerHTML = '<div class="card"><p class="login-error">' + esc(e.message) + "</p></div>";
+      });
+  }
+
+  function renderChargeSetupNotice(d) {
+    // The API reports exactly which credentials are absent so the setup step is
+    // unambiguous. Fall back to the full list for older API responses.
+    var missing = Array.isArray(d.missing) && d.missing.length
+      ? d.missing
+      : ["CLOVER_API_KEY", "CLOVER_PUBLIC_KEY", "CLOVER_MERCHANT_ID"];
+    var list = missing.map(function (name) {
+      return "<li><code>" + esc(name) + "</code></li>";
+    }).join("");
+    var envNote = d.environmentConfigured
+      ? "<p>Clover environment is set to <code>" + esc(d.environment) + "</code>.</p>"
+      : "<p>Also add <code>CLOVER_ENVIRONMENT</code> — use <code>production</code> for your live Clover Go account, " +
+        "or <code>sandbox</code> for test cards. Without it the app defaults to <code>sandbox</code>.</p>";
+
+    return '<div class="charge-unavailable"><span class="charge-lock">$</span><div><h2>Custom charging needs Clover setup</h2>' +
+      "<p>In Netlify, open Site configuration → Environment variables, add " +
+      (missing.length === 1 ? "this variable" : "these " + missing.length + " variables") +
+      ", then trigger a new deploy:</p>" +
+      '<ul class="charge-missing">' + list + "</ul>" + envNote +
+      "<p>The payment form stays unavailable until every Clover credential is set. " +
+      "Credentials are read on the server only and are never sent to this page.</p></div></div>";
+  }
+
+  function renderChargeHistory(charges) {
+    if (!charges.length) {
+      return '<div class="card"><p class="empty">No custom charges yet.</p></div>';
+    }
+    return '<div class="charge-list">' + charges.map(function (charge) {
+      var contact = [charge.customerPhone, charge.customerEmail].filter(Boolean).map(esc).join(" · ");
+      return '<article class="charge-record"><div class="charge-record-main"><strong>' + esc(charge.customerName) +
+        '</strong><span>' + esc(charge.description) + '</span><small>' + esc(contact || "No contact details") +
+        '</small></div><div class="charge-record-meta"><strong>' + fmtMoney(charge.amountCents) +
+        '</strong><span>' + fmtDate(charge.createdAt) + "</span></div></article>";
+    }).join("") + "</div>";
+  }
+
+  function loadClover(url) {
+    if (window.Clover) return Promise.resolve();
+    if (state.cloverScript) return state.cloverScript;
+    state.cloverScript = new Promise(function (resolve, reject) {
+      var script = document.createElement("script");
+      script.src = url;
+      script.async = true;
+      script.onload = resolve;
+      script.onerror = function () { reject(new Error("Could not load Clover's secure card form")); };
+      document.head.appendChild(script);
+    });
+    return state.cloverScript;
+  }
+
+  function initChargeForm(config) {
+    var form = document.getElementById("custom-charge-form");
+    var amount = document.getElementById("charge-amount");
+    amount.addEventListener("input", function () {
+      document.getElementById("charge-total").textContent = fmtMoney(Math.round((Number(amount.value) || 0) * 100));
+    });
+
+    loadClover(config.sdkUrl)
+      .then(function () {
+        if (!document.getElementById("card-number")) return;
+        var clover = new window.Clover(config.publicKey, { merchantId: config.merchantId });
+        var elements = clover.elements();
+        var styles = {
+          body: { fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif", fontSize: "16px" },
+          input: { color: "#e7ecf3", fontSize: "16px" },
+          "input::placeholder": { color: "#5f6c7f" }
+        };
+        elements.create("CARD_NUMBER", styles).mount("#card-number");
+        elements.create("CARD_DATE", styles).mount("#card-date");
+        elements.create("CARD_CVV", styles).mount("#card-cvv");
+        elements.create("CARD_POSTAL_CODE", styles).mount("#card-postal");
+        state.chargeClover = clover;
+        var button = document.getElementById("charge-submit");
+        button.disabled = false;
+        button.textContent = "Charge customer";
+      })
+      .catch(function (e) {
+        showChargeError(e.message);
+        var button = document.getElementById("charge-submit");
+        if (button) {
+          button.disabled = true;
+          button.textContent = "Card form unavailable";
+        }
+      });
+
+    form.addEventListener("submit", submitCustomCharge);
+  }
+
+  function cloverError(result) {
+    if (!result || !result.errors) return "Check the card details and try again";
+    var keys = Object.keys(result.errors);
+    if (!keys.length) return "Check the card details and try again";
+    var first = result.errors[keys[0]];
+    return typeof first === "string" ? first : first.message || "Check the card details and try again";
+  }
+
+  function showChargeError(message) {
+    var error = document.getElementById("charge-error");
+    if (!error) return;
+    error.textContent = message;
+    error.hidden = false;
+    var button = document.getElementById("charge-submit");
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Charge customer";
+    }
+  }
+
+  function submitCustomCharge(event) {
+    event.preventDefault();
+    var error = document.getElementById("charge-error");
+    var button = document.getElementById("charge-submit");
+    var amountCents = Math.round((Number(document.getElementById("charge-amount").value) || 0) * 100);
+    error.hidden = true;
+    button.disabled = true;
+    button.textContent = "Securing card…";
+
+    if (!state.chargeClover) {
+      showChargeError("The secure card form is not ready yet");
+      return;
+    }
+
+    state.chargeClover.createToken()
+      .then(function (result) {
+        if (!result || !result.token) throw new Error(cloverError(result));
+        button.textContent = "Processing charge…";
+        var idempotencyKey = window.crypto && window.crypto.randomUUID
+          ? window.crypto.randomUUID()
+          : String(Date.now()) + "_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+        return api("custom-charges", {
+          method: "POST",
+          body: {
+            token: result.token,
+            customerName: document.getElementById("charge-name").value,
+            customerEmail: document.getElementById("charge-email").value,
+            customerPhone: document.getElementById("charge-phone").value,
+            description: document.getElementById("charge-description").value,
+            amountCents: amountCents,
+            idempotencyKey: idempotencyKey.replace(/-/g, "_")
+          }
+        });
+      })
+      .then(function () {
+        toast("Custom charge collected successfully.");
+        renderCharges();
+      })
+      .catch(function (e) { showChargeError(e.message || "The charge could not be completed"); });
+  }
+
+  function renderCrew() {
+    var host = document.getElementById("view-crew");
+    host.innerHTML = '<div class="loading">Loading…</div>';
+    api("crew").then(function (d) {
+      state.crew = d.crew;
+      state.canManage = Boolean(d.canManageCrew);
+
+      var header =
+        '<div class="row-between" style="margin-bottom:14px">' +
+        '<h2 class="section-title" style="margin:0">Crew &amp; login codes</h2>' +
+        '<div class="btn-row">' +
+        '<button class="btn btn-ghost btn-sm" data-my-code>Change my code</button>' +
+        (state.canManage
+          ? '<button class="btn btn-primary btn-sm" data-add-crew>Add crew member</button>'
+          : "") +
+        "</div></div>";
+
+      var rows = d.crew
+        .map(function (e) {
+          var roleCell = state.canManage
+            ? '<select class="row-select" data-role-for="' + e.id + '">' +
+              CREW_ROLES.map(function (r) {
+                return '<option value="' + r + '"' + (r === e.role ? " selected" : "") + ">" + esc(r) + "</option>";
+              }).join("") +
+              "</select>"
+            : esc(e.role);
+          var codeCell = e.hasCode
+            ? '<span class="pill completed">Code set</span>'
+            : '<span class="pill in_progress">No code yet</span>';
+          var actions = state.canManage
+            ? '<button class="btn btn-ghost btn-sm" data-new-code="' + e.id + '">New code</button>' +
+              '<button class="btn btn-ghost btn-sm" data-toggle-active="' + e.id + '">' +
+              (e.active ? "Turn off access" : "Turn on access") +
+              "</button>"
+            : '<span class="muted">—</span>';
+          return (
+            '<tr><td><span class="assignee"><span class="avatar" style="background:' +
+            avatarColor(e.name) + '">' + esc(initials(e.name)) + "</span>" + esc(e.name) +
+            "</span></td><td>" + roleCell +
+            '</td><td class="muted">' + [e.phone, e.email].filter(Boolean).map(esc).join(" · ") +
+            "</td><td>" + codeCell +
+            "</td><td>" +
+            (e.active ? '<span class="pill completed">Active</span>' : '<span class="pill cancelled">Inactive</span>') +
+            '</td><td class="row-actions">' + actions + "</td></tr>"
+          );
+        })
+        .join("");
+
+      host.innerHTML =
+        header +
+        '<div class="card"><table><thead><tr><th>Name</th><th>Role</th><th>Contact</th>' +
+        "<th>Login code</th><th>Status</th><th></th></tr></thead><tbody>" +
+        (rows ||
+          '<tr><td colspan="6" class="empty">No crew members yet.</td></tr>') +
+        "</tbody></table></div>" +
+        '<p class="muted" style="margin-top:12px;font-size:0.82rem">Login codes are stored scrambled, so an existing code can never be looked up — issue a new one instead and hand it over in person.</p>';
+    });
+  }
+
+  function findCrew(id) {
+    for (var i = 0; i < state.crew.length; i++) {
+      if (state.crew[i].id === id) return state.crew[i];
+    }
+    return null;
+  }
+
+  // ---------- login codes ----------
+  function promptOwnCode() {
+    openModal(
+      "Change my login code",
+      '<label class="field"><span>Current code</span>' +
+        '<input id="m-current" class="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" ' +
+        'maxlength="8" placeholder="••••" required autocomplete="current-password" /></label>' +
+        codeFields("New code"),
+      function () {
+        var newPin = readNewCode();
+        return api("pin", {
+          method: "POST",
+          body: { currentPin: val("m-current"), newPin: newPin }
+        }).then(function () {
+          return "Your login code was changed.";
+        });
+      }
+    );
+  }
+
+  function promptNewCode(id) {
+    var member = findCrew(id);
+    if (!member) return;
+    openModal(
+      "New login code for " + member.name,
+      '<p class="muted" style="font-size:0.84rem;margin-bottom:4px">This replaces their old code straight away. Give them the new one in person.</p>' +
+        codeFields("New code"),
+      function () {
+        var newPin = readNewCode();
+        return api("crew/" + id + "/pin", {
+          method: "POST",
+          body: { newPin: newPin }
+        }).then(function () {
+          return "New code saved for " + member.name + ".";
+        });
+      }
+    );
+  }
+
+  function promptAddCrew() {
+    openModal(
+      "Add crew member",
+      '<label class="field"><span>Name</span><input id="m-name" type="text" maxlength="80" required /></label>' +
+        '<label class="field"><span>Role</span><select id="m-role">' +
+        CREW_ROLES.map(function (r) {
+          return '<option value="' + r + '"' + (r === "technician" ? " selected" : "") + ">" + esc(r) + "</option>";
+        }).join("") +
+        "</select></label>" +
+        '<label class="field"><span>Phone (optional)</span><input id="m-phone" type="tel" maxlength="30" /></label>' +
+        '<label class="field"><span>Email (optional)</span><input id="m-email" type="email" maxlength="120" /></label>' +
+        codeFields("Login code"),
+      function () {
+        var pin = readNewCode();
+        var name = val("m-name");
+        if (!name) throw new Error("Enter a name");
+        return api("crew", {
+          method: "POST",
+          body: {
+            name: name,
+            role: val("m-role"),
+            phone: val("m-phone"),
+            email: val("m-email"),
+            pin: pin
+          }
+        }).then(function () {
+          return name + " can now sign in with that code.";
+        });
+      }
+    );
+  }
+
+  function toggleAccess(id) {
+    var member = findCrew(id);
+    if (!member) return;
+    var turningOff = member.active;
+    if (
+      turningOff &&
+      !confirm("Turn off app access for " + member.name + "? Their code stops working immediately.")
+    ) {
+      return;
+    }
+    api("crew/" + id, { method: "PATCH", body: { active: !member.active } })
+      .then(function () {
+        toast(
+          member.name + (turningOff ? " can no longer sign in." : " can sign in again.")
+        );
+        renderCrew();
+      })
+      .catch(function (e) {
+        toast(e.message || "Could not update access");
+      });
+  }
+
+  function changeRole(id, role) {
+    api("crew/" + id, { method: "PATCH", body: { role: role } })
+      .then(function () {
+        toast("Role updated.");
+        renderCrew();
+      })
+      .catch(function (e) {
+        toast(e.message || "Could not change the role");
+        renderCrew();
+      });
+  }
+
+  // ---------- booking (call center) ----------
+  //
+  // Everything an agent needs while the customer is still on the line: look the
+  // caller up (or take their details), price the visit from the published
+  // catalog, see what the day already looks like, and put it on the calendar.
+
+  // The job's headline service. Deliberately the same short list the public
+  // site sells, so the Jobs tab stays filterable and reportable.
+  var SERVICE_TYPES = [
+    "Carpet cleaning",
+    "Air duct cleaning",
+    "Dryer vent cleaning",
+    "Upholstery cleaning",
+    "Luxury designer furniture cleaning",
+    "Move-in / move-out cleaning",
+    "Other cleaning work"
+  ];
+
+  var VISIT_LENGTHS = [
+    { minutes: 60, label: "1 hour" },
+    { minutes: 90, label: "1 hour 30" },
+    { minutes: 120, label: "2 hours" },
+    { minutes: 180, label: "3 hours" },
+    { minutes: 240, label: "4 hours" },
+    { minutes: 300, label: "5 hours" },
+    { minutes: 360, label: "6 hours" },
+    { minutes: 480, label: "8 hours" }
+  ];
+
+  // Slots the office actually books into, on the half hour.
+  function bookingTimes() {
+    var out = [];
+    for (var h = 7; h <= 19; h++) {
+      out.push(pad2(h) + ":00");
+      if (h < 19) out.push(pad2(h) + ":30");
+    }
+    return out;
+  }
+
+  // "13:30" the way it is said on the phone: "1:30 PM".
+  function clockLabel(hhmm) {
+    var parts = String(hhmm).split(":");
+    var hour = Number(parts[0]);
+    var suffix = hour < 12 ? "AM" : "PM";
+    var shown = hour % 12 === 0 ? 12 : hour % 12;
+    return shown + ":" + parts[1] + " " + suffix;
+  }
+
+  function pad2(n) {
+    return (n < 10 ? "0" : "") + n;
+  }
+  function dateValue(d) {
+    return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+  }
+  // Date + time as the office says them out loud, turned into a real instant in
+  // the browser's own zone. Sent to the API as UTC so the stored time is exact.
+  function instantFrom(dateStr, timeStr) {
+    var d = String(dateStr || "").split("-");
+    var t = String(timeStr || "").split(":");
+    if (d.length !== 3 || t.length < 2) return null;
+    var when = new Date(Number(d[0]), Number(d[1]) - 1, Number(d[2]), Number(t[0]), Number(t[1]), 0, 0);
+    return isNaN(when.getTime()) ? null : when;
+  }
+  function fmtTime(iso) {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  }
+  function fmtTimeRange(iso, minutes) {
+    if (!iso) return "—";
+    var start = new Date(iso);
+    var end = new Date(start.getTime() + (Number(minutes) || 0) * 60000);
+    return fmtTime(start.toISOString()) + " – " + fmtTime(end.toISOString());
+  }
+  function fmtDayLabel(dateStr) {
+    var when = instantFrom(dateStr, "12:00");
+    if (!when) return dateStr;
+    return when.toLocaleDateString("en-US", {
+      weekday: "long", month: "long", day: "numeric"
+    });
+  }
+  function fmtLength(minutes) {
+    var m = Number(minutes) || 0;
+    var h = Math.floor(m / 60);
+    var rest = m % 60;
+    return (h ? h + "h" : "") + (rest ? (h ? " " : "") + rest + "m" : h ? "" : "0m");
+  }
+
+  // The catalog every quote is built from. Read straight out of data/pricing.js,
+  // the same file the public pages price themselves from, so a figure quoted on
+  // the phone can never drift from the figure the customer saw online.
+  function priceCatalog() {
+    var p = window.DCA_PRICING;
+    if (!p) return { services: [], addons: [], version: null };
+
+    var services = Object.keys(p.services).map(function (key) {
+      return { key: "service:" + key, kind: "service", label: p.services[key].label, price: p.services[key].price };
+    });
+    Object.keys(p.packages || {}).forEach(function (key) {
+      var pkg = p.packages[key];
+      // The entry tier has no price of its own — it is the move package rate.
+      var price = pkg.price || (p.services.movePackage && p.services.movePackage.price) || 0;
+      services.push({ key: "package:" + key, kind: "service", label: "Package — " + pkg.label, price: price });
+    });
+    if (p.promotion) {
+      services.push({
+        key: "promotion",
+        kind: "service",
+        label: p.promotion.name + " (" + p.promotion.code + ")",
+        price: p.promotion.price
+      });
+    }
+    var addons = Object.keys(p.treatments || {}).map(function (key) {
+      return { key: "treatment:" + key, kind: "addon", label: p.treatments[key].label, price: p.treatments[key].price };
+    });
+    return { services: services, addons: addons, version: p.version || null };
+  }
+
+  function findCatalogEntry(key) {
+    var cat = priceCatalog();
+    var all = cat.services.concat(cat.addons);
+    for (var i = 0; i < all.length; i++) {
+      if (all[i].key === key) return all[i];
+    }
+    return null;
+  }
+
+  function newBookingState() {
+    return {
+      customer: null,
+      items: [],
+      date: dateValue(new Date()),
+      searchTimer: null,
+      crew: [],
+      booked: null
+    };
+  }
+
+  function bookingTotalCents() {
+    return state.booking.items.reduce(function (sum, i) {
+      return sum + i.unitPriceCents * i.quantity;
+    }, 0);
+  }
+
+  function renderBook() {
+    var host = document.getElementById("view-book");
+    if (!state.booking) state.booking = newBookingState();
+    var b = state.booking;
+    var cat = priceCatalog();
+
+    var catalogOptions =
+      '<option value="">Add a service…</option>' +
+      '<optgroup label="Services">' +
+      cat.services.map(function (s) {
+        return '<option value="' + esc(s.key) + '">' + esc(s.label) + " · " + fmtMoney(Math.round(s.price * 100)) + "</option>";
+      }).join("") +
+      "</optgroup><optgroup label=\"Add-ons and treatments\">" +
+      cat.addons.map(function (s) {
+        return '<option value="' + esc(s.key) + '">' + esc(s.label) + " · " + fmtMoney(Math.round(s.price * 100)) + "</option>";
+      }).join("") +
+      "</optgroup>";
+
+    var catalogNote = cat.services.length
+      ? '<p class="hint">Catalog ' + esc(cat.version || "") + " — the same prices the website quotes.</p>"
+      : '<p class="hint warn">The price catalog did not load. Add each line by hand with “Other charge”.</p>';
+
+    host.innerHTML =
+      '<div class="booking-layout">' +
+      '<div class="card booking-panel">' +
+      '<div class="charge-heading"><div><p class="eyebrow">Call center</p>' +
+      "<h2>Book an appointment</h2>" +
+      "<p>Take the booking while the customer is on the line. It goes straight onto the crew's schedule.</p></div>" +
+      '<div class="charge-total"><span>Quoted total</span><strong id="bk-total">$0.00</strong></div></div>' +
+
+      '<div id="bk-booked"></div>' +
+
+      '<form id="booking-form" autocomplete="off">' +
+
+      '<section class="booking-step"><h3 class="step-title"><span>1</span>Who is calling</h3>' +
+      '<div class="lookup"><input id="bk-search" type="search" placeholder="Search by name, phone, email or street…" ' +
+      'autocomplete="off" maxlength="80" /><div id="bk-results" class="lookup-results" hidden></div></div>' +
+      '<div id="bk-customer"></div>' +
+      '<div class="booking-fields">' +
+      '<label class="field"><span>Name</span><input id="bk-name" maxlength="120" required placeholder="Customer name" /></label>' +
+      '<label class="field"><span>Phone</span><input id="bk-phone" type="tel" maxlength="30" placeholder="(404) 555-0134" /></label>' +
+      '<label class="field"><span>Email</span><input id="bk-email" type="email" maxlength="120" placeholder="Optional" /></label>' +
+      '<label class="field"><span>Street address</span><input id="bk-address" maxlength="160" placeholder="Where the crew is going" /></label>' +
+      '<label class="field"><span>City</span><input id="bk-city" maxlength="80" /></label>' +
+      '<label class="field bk-narrow"><span>State</span><input id="bk-state" maxlength="20" placeholder="GA" /></label>' +
+      '<label class="field bk-narrow"><span>ZIP</span><input id="bk-zip" maxlength="12" inputmode="numeric" /></label>' +
+      "</div></section>" +
+
+      '<section class="booking-step"><h3 class="step-title"><span>2</span>What they are booking</h3>' +
+      '<div class="booking-fields">' +
+      '<label class="field"><span>Service</span><select id="bk-service-type">' +
+      SERVICE_TYPES.map(function (s) {
+        return '<option value="' + esc(s) + '">' + esc(s) + "</option>";
+      }).join("") +
+      "</select></label>" +
+      '<label class="field"><span>Price list</span><select id="bk-catalog">' + catalogOptions + "</select></label>" +
+      "</div>" + catalogNote +
+      '<div id="bk-items" class="booking-items"></div>' +
+      '<div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" id="bk-add-custom">Other charge</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="bk-clear-items">Clear list</button></div>' +
+      "</section>" +
+
+      '<section class="booking-step"><h3 class="step-title"><span>3</span>When</h3>' +
+      '<div class="booking-fields">' +
+      '<label class="field"><span>Date</span><input id="bk-date" type="date" value="' + esc(b.date) + '" required /></label>' +
+      '<label class="field"><span>Arrival time</span><select id="bk-time">' +
+      bookingTimes().map(function (t) {
+        return '<option value="' + t + '"' + (t === "09:00" ? " selected" : "") + ">" + esc(clockLabel(t)) + "</option>";
+      }).join("") +
+      "</select></label>" +
+      '<label class="field"><span>Visit length</span><select id="bk-duration">' +
+      VISIT_LENGTHS.map(function (v) {
+        return '<option value="' + v.minutes + '"' + (v.minutes === 120 ? " selected" : "") + ">" + esc(v.label) + "</option>";
+      }).join("") +
+      "</select></label>" +
+      '<label class="field"><span>Crew member</span><select id="bk-crew"><option value="">Decide later</option></select></label>' +
+      "</div>" +
+      '<label class="field"><span>Notes for the crew</span><textarea id="bk-notes" maxlength="2000" ' +
+      'placeholder="Gate code, pets, parking, what the customer wants looked at…"></textarea></label>' +
+      "</section>" +
+
+      '<section class="booking-step"><h3 class="step-title"><span>4</span>Confirm it with the customer</h3>' +
+      '<div id="bk-confirm"><p class="hint">Checking what this site can send…</p></div></section>' +
+
+      '<div id="bk-conflict"></div>' +
+      '<p class="login-error" id="bk-error" hidden></p>' +
+      '<div class="charge-submit"><p>The customer is added to the customer list automatically if this is their first booking.</p>' +
+      '<button type="submit" class="btn btn-primary" id="bk-submit">Book appointment</button></div>' +
+      "</form></div>" +
+
+      '<div><div class="row-between charge-history-heading"><div><p class="eyebrow">Crew calendar</p>' +
+      '<h2 id="bk-day-title">' + esc(fmtDayLabel(b.date)) + "</h2></div>" +
+      '<button type="button" class="btn btn-ghost btn-sm" id="bk-refresh">Refresh</button></div>' +
+      '<div id="bk-schedule"><div class="loading">Loading…</div></div></div>' +
+      "</div>";
+
+    renderBookingCustomer();
+    renderBookingItems();
+    wireBooking();
+    loadSchedule();
+    renderBookingConfirmChoices();
+  }
+
+  // The booking screen offers to confirm the appointment in writing the moment
+  // it is taken, while the customer is still on the line.
+  function renderBookingConfirmChoices() {
+    loadSettings()
+      .catch(function () { return null; })
+      .then(function () {
+        var host = document.getElementById("bk-confirm");
+        if (!host) return;
+        var notify = (state.settings && state.settings.notifications) || {};
+        var ready = (notify.email && notify.email.configured) || (notify.sms && notify.sms.configured);
+        host.innerHTML =
+          channelChoices("bk-send", { checked: true, requireRecipient: false }) +
+          (ready
+            ? '<p class="hint">Sent as soon as the appointment is booked, to whichever contact details are on file.</p>'
+            : '<p class="hint warn">No email or text provider is set up yet, so nothing can be sent automatically. ' +
+              "Open the job afterwards to copy the confirmation wording.</p>");
+      });
+  }
+
+  function wireBooking() {
+    document.getElementById("booking-form").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      submitBooking(false);
+    });
+    document.getElementById("bk-search").addEventListener("input", function () {
+      var term = this.value.trim();
+      clearTimeout(state.booking.searchTimer);
+      if (term.length < 2) {
+        hideLookup();
+        return;
+      }
+      // One request per pause in typing, not one per keystroke.
+      state.booking.searchTimer = setTimeout(function () {
+        searchCustomers(term);
+      }, 250);
+    });
+    document.getElementById("bk-catalog").addEventListener("change", function () {
+      if (!this.value) return;
+      addCatalogItem(this.value);
+      this.value = "";
+    });
+    document.getElementById("bk-add-custom").addEventListener("click", promptCustomLine);
+    document.getElementById("bk-clear-items").addEventListener("click", function () {
+      state.booking.items = [];
+      renderBookingItems();
+    });
+    document.getElementById("bk-date").addEventListener("change", loadSchedule);
+    document.getElementById("bk-refresh").addEventListener("click", loadSchedule);
+    document.getElementById("bk-items").addEventListener("input", function (ev) {
+      var row = ev.target.closest("[data-item-index]");
+      if (!row) return;
+      var item = state.booking.items[Number(row.dataset.itemIndex)];
+      if (!item) return;
+      if (ev.target.dataset.itemQty !== undefined) {
+        item.quantity = Math.min(99, Math.max(1, Math.round(Number(ev.target.value) || 1)));
+      }
+      if (ev.target.dataset.itemPrice !== undefined) {
+        item.unitPriceCents = Math.max(0, Math.round((Number(ev.target.value) || 0) * 100));
+      }
+      updateBookingTotal();
+    });
+    document.getElementById("bk-items").addEventListener("click", function (ev) {
+      var remove = ev.target.closest("[data-item-remove]");
+      if (!remove) return;
+      state.booking.items.splice(Number(remove.dataset.itemRemove), 1);
+      renderBookingItems();
+    });
+    document.getElementById("bk-results").addEventListener("mousedown", function (ev) {
+      // mousedown, not click: the blur below would close the list first.
+      var hit = ev.target.closest("[data-pick-customer]");
+      if (!hit) return;
+      ev.preventDefault();
+      pickCustomer(JSON.parse(hit.dataset.pickCustomer));
+    });
+    document.getElementById("bk-search").addEventListener("blur", function () {
+      setTimeout(hideLookup, 150);
+    });
+  }
+
+  function hideLookup() {
+    var box = document.getElementById("bk-results");
+    if (box) box.hidden = true;
+  }
+
+  function searchCustomers(term) {
+    api("customers?q=" + encodeURIComponent(term))
+      .then(function (d) {
+        var box = document.getElementById("bk-results");
+        if (!box) return;
+        if (!d.customers.length) {
+          box.innerHTML = '<p class="lookup-empty">No match — the details below create a new customer.</p>';
+          box.hidden = false;
+          return;
+        }
+        box.innerHTML = d.customers
+          .map(function (c) {
+            var lines = [c.phone, c.email].filter(Boolean).join(" · ");
+            var place = [c.address, c.city, c.state].filter(Boolean).join(", ");
+            return '<button type="button" class="lookup-hit" data-pick-customer="' +
+              esc(JSON.stringify(c)) + '"><strong>' + esc(c.name) + "</strong>" +
+              '<span>' + esc(lines || "No contact details") + "</span>" +
+              '<small>' + esc(place || "No address on file") + " · " + c.jobCount + " job" + (c.jobCount === 1 ? "" : "s") + "</small></button>";
+          })
+          .join("");
+        box.hidden = false;
+      })
+      .catch(function () { hideLookup(); });
+  }
+
+  function pickCustomer(customer) {
+    state.booking.customer = customer;
+    document.getElementById("bk-search").value = "";
+    hideLookup();
+    setValue("bk-name", customer.name);
+    setValue("bk-phone", customer.phone);
+    setValue("bk-email", customer.email);
+    setValue("bk-address", customer.address);
+    setValue("bk-city", customer.city);
+    setValue("bk-state", customer.state);
+    setValue("bk-zip", customer.zip);
+    renderBookingCustomer();
+  }
+
+  function setValue(id, value) {
+    var field = document.getElementById(id);
+    if (field) field.value = value == null ? "" : value;
+  }
+
+  function renderBookingCustomer() {
+    var host = document.getElementById("bk-customer");
+    if (!host) return;
+    var c = state.booking.customer;
+    if (!c) {
+      host.innerHTML = '<p class="hint">No account picked — the details below are filed as a new customer.</p>';
+      return;
+    }
+    host.innerHTML =
+      '<div class="picked"><span class="avatar" style="background:' + avatarColor(c.name) + '">' +
+      esc(initials(c.name)) + "</span><div><strong>" + esc(c.name) + "</strong>" +
+      '<small>Existing customer · ' + c.jobCount + " previous job" + (c.jobCount === 1 ? "" : "s") + "</small></div>" +
+      '<button type="button" class="btn btn-ghost btn-sm" data-clear-customer>Not them</button></div>';
+    host.querySelector("[data-clear-customer]").addEventListener("click", function () {
+      state.booking.customer = null;
+      ["bk-name", "bk-phone", "bk-email", "bk-address", "bk-city", "bk-state", "bk-zip"].forEach(function (id) {
+        setValue(id, "");
+      });
+      renderBookingCustomer();
+      document.getElementById("bk-name").focus();
+    });
+  }
+
+  function addCatalogItem(key) {
+    var entry = findCatalogEntry(key);
+    if (!entry) return;
+    var items = state.booking.items;
+    for (var i = 0; i < items.length; i++) {
+      // Same line twice means two rooms, two chairs, two systems.
+      if (items[i].key === key) {
+        items[i].quantity = Math.min(99, items[i].quantity + 1);
+        renderBookingItems();
+        return;
+      }
+    }
+    items.push({
+      key: entry.key,
+      kind: entry.kind,
+      label: entry.label,
+      quantity: 1,
+      unitPriceCents: Math.round(entry.price * 100)
+    });
+    renderBookingItems();
+  }
+
+  function promptCustomLine() {
+    openModal(
+      "Other charge",
+      '<label class="field"><span>What is being charged</span><input id="m-label" maxlength="160" required ' +
+        'placeholder="e.g. Stair carpet, 12 steps" /></label>' +
+        '<label class="field"><span>Price</span><div class="money-input"><span>$</span>' +
+        '<input id="m-amount" type="number" min="0" max="10000" step="0.01" inputmode="decimal" required placeholder="0.00" /></div></label>',
+      function () {
+        var label = val("m-label");
+        var amount = Math.round((Number(val("m-amount")) || 0) * 100);
+        if (!label) throw new Error("Describe what is being charged");
+        if (amount < 0) throw new Error("Enter a price of $0.00 or more");
+        state.booking.items.push({
+          key: "custom:" + Date.now(),
+          kind: "custom",
+          label: label,
+          quantity: 1,
+          unitPriceCents: amount
+        });
+        renderBookingItems();
+        return "";
+      }
+    );
+  }
+
+  function renderBookingItems() {
+    var host = document.getElementById("bk-items");
+    if (!host) return;
+    if (!state.booking.items.length) {
+      host.innerHTML = '<p class="empty">Nothing quoted yet. Pick from the price list above.</p>';
+      updateBookingTotal();
+      return;
+    }
+    host.innerHTML = state.booking.items
+      .map(function (item, index) {
+        return (
+          '<div class="booking-item" data-item-index="' + index + '">' +
+          '<span class="booking-item-label">' + esc(item.label) +
+          (item.kind === "addon" ? ' <small class="muted">add-on</small>' : "") + "</span>" +
+          '<label class="booking-item-qty"><small>Qty</small><input type="number" min="1" max="99" step="1" ' +
+          'data-item-qty value="' + item.quantity + '" /></label>' +
+          '<label class="booking-item-price"><small>Each</small><div class="money-input"><span>$</span>' +
+          '<input type="number" min="0" max="10000" step="0.01" data-item-price value="' +
+          (item.unitPriceCents / 100).toFixed(2) + '" /></div></label>' +
+          '<span class="booking-item-amount mono" data-item-amount>' + fmtMoney(item.unitPriceCents * item.quantity) + "</span>" +
+          '<button type="button" class="btn btn-ghost btn-sm" data-item-remove="' + index + '" aria-label="Remove">×</button>' +
+          "</div>"
+        );
+      })
+      .join("");
+    updateBookingTotal();
+  }
+
+  function updateBookingTotal() {
+    var total = document.getElementById("bk-total");
+    if (total) total.textContent = fmtMoney(bookingTotalCents());
+    document.querySelectorAll("[data-item-index]").forEach(function (row) {
+      var item = state.booking.items[Number(row.dataset.itemIndex)];
+      var cell = row.querySelector("[data-item-amount]");
+      if (item && cell) cell.textContent = fmtMoney(item.unitPriceCents * item.quantity);
+    });
+  }
+
+  function loadSchedule() {
+    var host = document.getElementById("bk-schedule");
+    if (!host) return;
+    var date = val("bk-date") || state.booking.date;
+    state.booking.date = date;
+    var start = instantFrom(date, "00:00");
+    if (!start) return;
+    var end = new Date(start.getTime());
+    end.setDate(end.getDate() + 1);
+
+    var title = document.getElementById("bk-day-title");
+    if (title) title.textContent = fmtDayLabel(date);
+    host.innerHTML = '<div class="loading">Loading…</div>';
+
+    api("schedule?from=" + encodeURIComponent(start.toISOString()) + "&to=" + encodeURIComponent(end.toISOString()))
+      .then(function (d) {
+        state.booking.crew = d.crew;
+        fillCrewSelect(d.crew);
+        renderScheduleList(d.appointments);
+      })
+      .catch(function (e) {
+        host.innerHTML = '<div class="card"><p class="login-error">' + esc(e.message) + "</p></div>";
+      });
+  }
+
+  function fillCrewSelect(crew) {
+    var select = document.getElementById("bk-crew");
+    if (!select) return;
+    var keep = select.value;
+    select.innerHTML =
+      '<option value="">Decide later</option>' +
+      crew.map(function (c) {
+        return '<option value="' + c.id + '">' + esc(c.name) + "</option>";
+      }).join("");
+    if (keep) select.value = keep;
+  }
+
+  function renderScheduleList(appointments) {
+    var host = document.getElementById("bk-schedule");
+    if (!host) return;
+    var booked = appointments.filter(function (a) {
+      return a.status !== "cancelled";
+    });
+    var minutes = booked.reduce(function (sum, a) {
+      return sum + (Number(a.durationMinutes) || 0);
+    }, 0);
+
+    var summary =
+      '<div class="schedule-summary"><div><strong>' + booked.length + "</strong><span>visit" +
+      (booked.length === 1 ? "" : "s") + " booked</span></div><div><strong>" + esc(fmtLength(minutes)) +
+      "</strong><span>crew time</span></div></div>";
+
+    host.innerHTML =
+      summary +
+      '<div class="card">' +
+      (appointments.length
+        ? '<div class="schedule-list">' +
+          appointments.map(function (a) {
+            return (
+              '<div class="schedule-row clickable" data-job="' + a.id + '">' +
+              '<div class="schedule-time mono">' + esc(fmtTimeRange(a.scheduledFor, a.durationMinutes)) + "</div>" +
+              "<div><strong>" + esc(a.customerName) + "</strong><small>" + esc(a.serviceType) +
+              (a.address ? " · " + esc(a.address) : "") + "</small></div>" +
+              "<div>" + assigneeCell(a.assignedName) + " " + statusPill(a.status) + "</div></div>"
+            );
+          }).join("") +
+          "</div>"
+        : '<p class="empty">Nothing booked this day — the whole day is open.</p>') +
+      "</div>";
+  }
+
+  function bookingError(message) {
+    var box = document.getElementById("bk-error");
+    if (!box) return;
+    box.textContent = message;
+    box.hidden = false;
+    box.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
+  function renderConflict(payload) {
+    var host = document.getElementById("bk-conflict");
+    if (!host) return;
+    if (!payload || !payload.conflicts || !payload.conflicts.length) {
+      host.innerHTML = "";
+      return;
+    }
+    host.innerHTML =
+      '<div class="conflict"><h4>That crew member is already booked</h4><ul>' +
+      payload.conflicts.map(function (c) {
+        return "<li>" + esc(fmtTimeRange(c.scheduledFor, c.durationMinutes)) + " — " +
+          esc(c.customerName) + " · " + esc(c.serviceType) + "</li>";
+      }).join("") +
+      '</ul><p>Offer another time, pick a different crew member, or book it anyway if they are working both.</p>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="bk-force">Book it anyway</button></div>';
+    document.getElementById("bk-force").addEventListener("click", function () {
+      submitBooking(true);
+    });
+  }
+
+  function bookingPayload(force) {
+    var b = state.booking;
+    var when = instantFrom(val("bk-date"), val("bk-time"));
+    if (!when) throw new Error("Pick the date and time of the visit");
+    var name = val("bk-name");
+    if (!name) throw new Error("Enter the customer's name");
+    if (!b.customer && !val("bk-phone") && !val("bk-email")) {
+      throw new Error("Enter a phone number or an email for a new customer");
+    }
+
+    var contact = {
+      name: name,
+      phone: val("bk-phone"),
+      email: val("bk-email"),
+      address: val("bk-address"),
+      city: val("bk-city"),
+      state: val("bk-state"),
+      zip: val("bk-zip")
+    };
+    var payload = {
+      customer: contact,
+      serviceType: val("bk-service-type"),
+      scheduledFor: when.toISOString(),
+      durationMinutes: Number(val("bk-duration")) || 120,
+      assignedTo: val("bk-crew") ? Number(val("bk-crew")) : null,
+      address: [contact.address, contact.city, contact.state, contact.zip].filter(Boolean).join(", "),
+      notes: val("bk-notes"),
+      items: b.items.map(function (i) {
+        return {
+          kind: i.kind,
+          label: i.label,
+          quantity: i.quantity,
+          unitPriceCents: i.unitPriceCents
+        };
+      }),
+      priceCents: bookingTotalCents(),
+      force: force === true,
+      sendConfirmation: chosenChannels("bk-send")
+    };
+    if (b.customer) payload.customerId = b.customer.id;
+    return payload;
+  }
+
+  function submitBooking(force) {
+    var button = document.getElementById("bk-submit");
+    var error = document.getElementById("bk-error");
+    if (error) error.hidden = true;
+
+    var payload;
+    try {
+      payload = bookingPayload(force);
+    } catch (e) {
+      bookingError(e.message);
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = "Booking…";
+    api("jobs", { method: "POST", body: payload })
+      .then(function (data) {
+        renderConflict(null);
+        showBooked(data.job);
+        resetBookingForm();
+        loadSchedule();
+        var failed = describeSends(data.confirmation);
+        toast(
+          "Appointment booked for " + data.job.customerName + "." +
+          (failed
+            ? " Confirmation not sent — " + failed
+            : (data.confirmation || []).length
+              ? " Confirmation sent."
+              : "")
+        );
+      })
+      .catch(function (e) {
+        if (e.status === 409 && e.data && e.data.conflicts) {
+          // The customer record was created (or found) before the clash was
+          // spotted. Hold on to its id so "book it anyway" reuses that account
+          // instead of filing the same person twice.
+          if (e.data.customerId && !state.booking.customer) {
+            state.booking.customer = {
+              id: e.data.customerId,
+              name: val("bk-name"),
+              jobCount: 0
+            };
+            renderBookingCustomer();
+          }
+          renderConflict(e.data);
+          bookingError(e.message);
+          return;
+        }
+        renderConflict(null);
+        bookingError(e.message || "The appointment could not be booked");
+      })
+      .finally(function () {
+        button.disabled = false;
+        button.textContent = "Book appointment";
+      });
+  }
+
+  function showBooked(job) {
+    var host = document.getElementById("bk-booked");
+    if (!host) return;
+    host.innerHTML =
+      '<div class="booked-note"><div><strong>Booked — ' + esc(job.customerName) + "</strong>" +
+      "<span>" + esc(job.serviceType) + " · " + esc(fmtDate(job.scheduledFor)) + " · " +
+      esc(fmtLength(job.durationMinutes)) + " · " + fmtMoney(job.priceCents) + "</span>" +
+      (job.assignedName ? "<small>Crew: " + esc(job.assignedName) + "</small>" : "<small>No crew assigned yet</small>") +
+      '</div><button type="button" class="btn btn-ghost btn-sm" data-job="' + job.id + '">Open job #' + job.id + "</button></div>";
+  }
+
+  // Clears the caller-specific fields but keeps the date, so a run of bookings
+  // for the same day is quick to take.
+  function resetBookingForm() {
+    state.booking.customer = null;
+    state.booking.items = [];
+    ["bk-name", "bk-phone", "bk-email", "bk-address", "bk-city", "bk-state", "bk-zip", "bk-notes", "bk-search"].forEach(
+      function (id) { setValue(id, ""); }
+    );
+    renderBookingCustomer();
+    renderBookingItems();
+  }
+
+  // ---------- job drawer ----------
+  function openJob(id) {
+    var drawer = document.getElementById("drawer");
+    var panel = document.getElementById("drawer-panel");
+    drawer.hidden = false;
+    panel.innerHTML = '<div class="loading">Loading…</div>';
+    state.pay = null;
+    Promise.all([
+      api("jobs/" + id),
+      state.crew.length ? Promise.resolve({ crew: state.crew }) : api("crew"),
+      // Settings decide which payment methods and message channels the panel
+      // below can offer. A failure here must not hide the job itself.
+      loadSettings().catch(function () { return null; })
+    ]).then(function (results) {
+      state.crew = results[1].crew;
+      renderDrawer(results[0]);
+    });
+  }
+
+  function renderDrawer(data) {
+    var j = data.job;
+    state.job = data;
+    var panel = document.getElementById("drawer-panel");
+    var itemsTotal = data.items.reduce(function (s, i) { return s + i.amountCents; }, 0);
+    var crewOptions =
+      '<option value="">Unassigned</option>' +
+      state.crew.map(function (c) {
+        return '<option value="' + c.id + '"' + (c.id === j.assignedTo ? " selected" : "") + ">" + esc(c.name) + "</option>";
+      }).join("");
+    var statusOptions = STATUS_ORDER.map(function (k) {
+      return '<option value="' + k + '"' + (k === j.status ? " selected" : "") + ">" + esc(STATUS_LABEL[k]) + "</option>";
+    }).join("");
+    var when = j.scheduledFor ? new Date(j.scheduledFor) : null;
+    var durationOptions = VISIT_LENGTHS.map(function (v) {
+      return '<option value="' + v.minutes + '"' + (v.minutes === j.durationMinutes ? " selected" : "") + ">" + esc(v.label) + "</option>";
+    }).join("");
+
+    panel.innerHTML =
+      '<button class="drawer-close" data-close>×</button>' +
+      "<h2>" + esc(j.serviceType) + "</h2>" +
+      '<div style="margin-top:6px">' + statusPill(j.status) +
+      (j.source === "phone" ? ' <span class="pill scheduled">Booked by phone</span>' : "") + "</div>" +
+      '<div class="control-row">' +
+      '<label>Status<select id="d-status">' + statusOptions + "</select></label>" +
+      '<label>Assigned crew<select id="d-assign">' + crewOptions + "</select></label>" +
+      "</div>" +
+      // Rescheduling: the same clash check the booking screen uses runs here, so
+      // a job moved from the drawer cannot quietly land on top of another.
+      '<div class="reschedule"><h3 class="section-title">Appointment</h3><div class="reschedule-row">' +
+      '<label>Date<input type="date" id="d-date" value="' + (when ? esc(dateValue(when)) : "") + '" /></label>' +
+      '<label>Arrival<input type="time" id="d-time" value="' +
+      (when ? pad2(when.getHours()) + ":" + pad2(when.getMinutes()) : "") + '" /></label>' +
+      "<label>Length<select id=\"d-duration\">" + durationOptions + "</select></label>" +
+      '<button class="btn btn-primary btn-sm" type="button" id="d-reschedule">Save time</button>' +
+      "</div></div>" +
+      '<dl class="kv">' +
+      "<dt>Customer</dt><dd>" + esc(j.customerName) + "</dd>" +
+      "<dt>Phone</dt><dd>" + esc(j.customerPhone || "—") + "</dd>" +
+      "<dt>Email</dt><dd>" + esc(j.customerEmail || "—") + "</dd>" +
+      "<dt>Address</dt><dd>" + esc([j.address || j.customerAddress, j.customerCity, j.customerState, j.customerZip].filter(Boolean).join(", ") || "—") + "</dd>" +
+      "<dt>Scheduled</dt><dd>" + fmtDate(j.scheduledFor) +
+      (j.scheduledFor ? " · " + esc(fmtLength(j.durationMinutes)) : "") + "</dd>" +
+      "<dt>Booked by</dt><dd>" + esc(j.bookedByName || "—") + "</dd>" +
+      "</dl>" +
+      '<h3 class="section-title">Line items</h3><div class="line-items">' +
+      (data.items.length
+        ? data.items.map(function (i) {
+            return '<div class="li"><span>' + esc(i.label) + (i.detail ? ' <small>' + esc(i.detail) + "</small>" : "") +
+              (i.quantity > 1 ? ' <small>×' + i.quantity + "</small>" : "") + '</span><span class="mono">' + fmtMoney(i.amountCents) + "</span></div>";
+          }).join("")
+        : '<p class="muted">No line items recorded. Job value ' + fmtMoney(j.priceCents) + ".</p>") +
+      '<div class="total-row"><span>Total</span><span class="mono">' + fmtMoney(itemsTotal || j.priceCents) + "</span></div></div>" +
+      paymentsSection(data) +
+      '<h3 class="section-title" style="margin-top:20px">Activity</h3>' +
+      '<form class="note-form" id="d-note"><input type="text" id="d-note-input" placeholder="Add a note…" maxlength="500" /><button class="btn btn-primary btn-sm" type="submit">Add</button></form>' +
+      activityFeed(data.events);
+
+    document.getElementById("d-status").addEventListener("change", function () {
+      patchJob(j.id, { status: this.value });
+    });
+    document.getElementById("d-assign").addEventListener("change", function () {
+      patchJob(j.id, { assignedTo: this.value === "" ? null : Number(this.value) });
+    });
+    document.getElementById("d-reschedule").addEventListener("click", function () {
+      var moved = instantFrom(document.getElementById("d-date").value, document.getElementById("d-time").value);
+      if (!moved) {
+        toast("Pick both a date and an arrival time.");
+        return;
+      }
+      rescheduleJob(j.id, moved, Number(document.getElementById("d-duration").value), false);
+    });
+    document.getElementById("d-note").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var input = document.getElementById("d-note-input");
+      var msg = input.value.trim();
+      if (!msg) return;
+      api("jobs/" + j.id + "/notes", { method: "POST", body: { message: msg } }).then(renderDrawer);
+    });
+
+    wirePayments(data);
+  }
+
+  // ---------- money collected on a job ----------
+  // Every way the money can arrive lives here: a card run on the spot through
+  // Clover, or cash, a check, a transfer or a phone app recorded so the job's
+  // balance, the dashboard and the customer's receipt all agree.
+  function paymentsSection(data) {
+    var j = data.job;
+    var paid = data.paidCents || 0;
+    var balance = data.balanceCents != null ? data.balanceCents : Math.max(0, j.priceCents - paid);
+    var history = (data.payments || []).length
+      ? '<div class="line-items">' +
+        data.payments.map(function (p) {
+          var meta = [fmtDate(p.createdAt), p.receivedByName, p.reference].filter(Boolean).map(esc).join(" · ");
+          return '<div class="li"><span>' + esc(methodLabel(p.method)) +
+            "<small>" + meta + "</small></span>" +
+            '<span class="mono">' + fmtMoney(p.amountCents) + "</span></div>";
+        }).join("") +
+        "</div>"
+      : '<p class="muted">Nothing collected yet.</p>';
+
+    var open = state.pay && state.pay.jobId === j.id;
+    var messages = (data.notifications || []).length
+      ? '<p class="muted sent-note">Last sent: ' +
+        data.notifications.slice(0, 2).map(function (n) {
+          return esc((n.channel === "email" ? "Email" : "Text") + " · " +
+            (n.status === "sent" ? "sent " : "failed ") + fmtDate(n.createdAt));
+        }).join(" · ") +
+        "</p>"
+      : "";
+
+    return (
+      '<h3 class="section-title" style="margin-top:20px">Payment</h3>' +
+      '<div class="pay-summary"><div><span>Collected</span><strong class="mono">' + fmtMoney(paid) + "</strong></div>" +
+      '<div><span>Balance due</span><strong class="mono' + (balance ? " owing" : " clear") + '">' +
+      fmtMoney(balance) + "</strong></div></div>" +
+      history +
+      '<div class="btn-row pay-actions">' +
+      (open
+        ? ""
+        : '<button type="button" class="btn btn-primary btn-sm" id="d-collect">Collect payment</button>') +
+      '<button type="button" class="btn btn-ghost btn-sm" id="d-confirm">Send confirmation</button>' +
+      ((data.payments || []).length
+        ? '<button type="button" class="btn btn-ghost btn-sm" id="d-receipt">Send receipt</button>'
+        : "") +
+      "</div>" +
+      messages +
+      (open ? payPanel(data) : "")
+    );
+  }
+
+  function defaultMethod() {
+    return cardSettings().enabled ? "card" : "cash";
+  }
+
+  function payPanel(data) {
+    var p = state.pay;
+    var card = cardSettings();
+    var methods = paymentMethods();
+    var isCard = collectsCard(p.method);
+
+    var options = methods.length
+      ? methods.map(function (m) {
+          var disabled = m.collects === "clover" && !card.enabled;
+          return '<option value="' + esc(m.value) + '"' +
+            (m.value === p.method ? " selected" : "") + (disabled ? " disabled" : "") + ">" +
+            esc(m.label) + (disabled ? " — needs Clover setup" : "") + "</option>";
+        }).join("")
+      : '<option value="cash">Cash</option>';
+
+    var cardBlock = isCard
+      ? card.enabled
+        ? '<div class="card-fields pay-card"><label><span>Card number</span><div class="clover-field" id="pay-card-number"></div></label>' +
+          '<label><span>Expiration</span><div class="clover-field" id="pay-card-date"></div></label>' +
+          '<label><span>Security code</span><div class="clover-field" id="pay-card-cvv"></div></label>' +
+          '<label><span>Billing ZIP</span><div class="clover-field" id="pay-card-postal"></div></label></div>' +
+          '<p class="hint">Card details go straight to Clover and are never stored in DCA Pro Manager.' +
+          (card.environment !== "production"
+            ? " Sandbox mode — these charges are test-only."
+            : "") +
+          "</p>"
+        : '<p class="hint warn">Card charging needs ' + esc((card.missing || []).join(", ") || "Clover credentials") +
+          " on the site. Take the payment another way, or add the credentials and redeploy.</p>"
+      : '<p class="hint">Recorded as money already received — nothing is charged to a card.</p>';
+
+    return (
+      '<div class="pay-panel">' +
+      '<div class="pay-grid">' +
+      '<label class="field"><span>How they are paying</span><select id="pay-method">' + options + "</select></label>" +
+      '<label class="field"><span>Amount</span><div class="money-input"><span>$</span>' +
+      '<input id="pay-amount" type="number" min="1" step="0.01" inputmode="decimal" value="' +
+      esc(p.amount || (data.balanceCents ? (data.balanceCents / 100).toFixed(2) : "")) + '" /></div></label>' +
+      '<label class="field"><span>Reference' + (isCard ? " (optional)" : "") + "</span>" +
+      '<input id="pay-reference" maxlength="120" placeholder="Check number, confirmation code…" value="' +
+      esc(p.reference || "") + '" /></label>' +
+      '<label class="field"><span>Note</span><input id="pay-note" maxlength="500" placeholder="Anything worth recording" value="' +
+      esc(p.note || "") + '" /></label>' +
+      "</div>" +
+      cardBlock +
+      '<label class="checkline"><input type="checkbox" id="pay-complete" checked /><span>Mark the job completed if this clears the balance</span></label>' +
+      '<div class="pay-receipt"><p class="eyebrow">Send a receipt</p>' +
+      channelChoices("pay-receipt", {
+        email: data.job.customerEmail,
+        phone: data.job.customerPhone,
+        checked: true
+      }) +
+      "</div>" +
+      '<p class="login-error" id="pay-error" hidden></p>' +
+      '<div class="btn-row"><button type="button" class="btn btn-primary btn-sm" id="pay-submit">Take payment</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="pay-cancel">Cancel</button></div>' +
+      "</div>"
+    );
+  }
+
+  // Keeps whatever has been typed when the panel re-renders — switching from a
+  // card to cash must not clear the amount someone just entered.
+  function capturePayFields() {
+    if (!state.pay) return;
+    var amount = document.getElementById("pay-amount");
+    if (amount) state.pay.amount = amount.value;
+    var reference = document.getElementById("pay-reference");
+    if (reference) state.pay.reference = reference.value.trim();
+    var note = document.getElementById("pay-note");
+    if (note) state.pay.note = note.value.trim();
+  }
+
+  function wirePayments(data) {
+    var j = data.job;
+
+    var collect = document.getElementById("d-collect");
+    if (collect) {
+      collect.addEventListener("click", function () {
+        loadSettings()
+          .catch(function () { return null; })
+          .then(function () {
+            state.pay = { jobId: j.id, method: defaultMethod(), amount: "", reference: "", note: "" };
+            renderDrawer(state.job);
+          });
+      });
+    }
+
+    var confirm = document.getElementById("d-confirm");
+    if (confirm) {
+      confirm.addEventListener("click", function () { openSendModal(j.id, "booking_confirmation"); });
+    }
+    var receipt = document.getElementById("d-receipt");
+    if (receipt) {
+      receipt.addEventListener("click", function () { openSendModal(j.id, "payment_receipt"); });
+    }
+
+    if (!state.pay || state.pay.jobId !== j.id) return;
+
+    document.getElementById("pay-method").addEventListener("change", function () {
+      capturePayFields();
+      state.pay.method = this.value;
+      state.pay.clover = null;
+      renderDrawer(state.job);
+    });
+    document.getElementById("pay-cancel").addEventListener("click", function () {
+      state.pay = null;
+      renderDrawer(state.job);
+    });
+    document.getElementById("pay-submit").addEventListener("click", function () {
+      submitJobPayment(j.id);
+    });
+
+    if (collectsCard(state.pay.method) && cardSettings().enabled) mountPayCard();
+  }
+
+  // Clover's hosted card inputs are mounted fresh each time the panel renders:
+  // the previous nodes are gone with the old markup, so the old instance has
+  // nothing left to talk to.
+  function mountPayCard() {
+    var card = cardSettings();
+    var button = document.getElementById("pay-submit");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Loading card form…";
+    }
+    loadClover(card.sdkUrl)
+      .then(function () {
+        if (!document.getElementById("pay-card-number") || !state.pay) return;
+        var clover = new window.Clover(card.publicKey, { merchantId: card.merchantId });
+        var elements = clover.elements();
+        var styles = {
+          body: { fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif", fontSize: "16px" },
+          input: { color: "#e7ecf3", fontSize: "16px" },
+          "input::placeholder": { color: "#5f6c7f" }
+        };
+        elements.create("CARD_NUMBER", styles).mount("#pay-card-number");
+        elements.create("CARD_DATE", styles).mount("#pay-card-date");
+        elements.create("CARD_CVV", styles).mount("#pay-card-cvv");
+        elements.create("CARD_POSTAL_CODE", styles).mount("#pay-card-postal");
+        state.pay.clover = clover;
+        if (button) {
+          button.disabled = false;
+          button.textContent = "Charge card";
+        }
+      })
+      .catch(function (e) {
+        payError(e.message || "Could not load Clover's secure card form");
+        if (button) {
+          button.disabled = true;
+          button.textContent = "Card form unavailable";
+        }
+      });
+  }
+
+  function payError(message) {
+    var box = document.getElementById("pay-error");
+    if (box) {
+      box.textContent = message;
+      box.hidden = false;
+    }
+    var button = document.getElementById("pay-submit");
+    if (button) {
+      button.disabled = false;
+      button.textContent = state.pay && collectsCard(state.pay.method) ? "Charge card" : "Take payment";
+    }
+  }
+
+  function submitJobPayment(jobId) {
+    capturePayFields();
+    var p = state.pay;
+    if (!p) return;
+    var box = document.getElementById("pay-error");
+    if (box) box.hidden = true;
+
+    var amountCents = Math.round((Number(p.amount) || 0) * 100);
+    if (amountCents < 100) {
+      payError("Enter the amount being paid");
+      return;
+    }
+
+    var body = {
+      method: p.method,
+      amountCents: amountCents,
+      reference: p.reference || "",
+      note: p.note || "",
+      markPaidInFull: document.getElementById("pay-complete").checked,
+      sendReceipt: chosenChannels("pay-receipt")
+    };
+
+    var button = document.getElementById("pay-submit");
+    button.disabled = true;
+    button.textContent = "Working…";
+
+    var prepared;
+    if (collectsCard(p.method)) {
+      if (!p.clover) {
+        payError("The secure card form is not ready yet");
+        return;
+      }
+      prepared = p.clover.createToken().then(function (result) {
+        if (!result || !result.token) throw new Error(cloverError(result));
+        var key = window.crypto && window.crypto.randomUUID
+          ? window.crypto.randomUUID()
+          : String(Date.now()) + "_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+        body.token = result.token;
+        body.idempotencyKey = key.replace(/-/g, "_");
+        return body;
+      });
+    } else {
+      prepared = Promise.resolve(body);
+    }
+
+    prepared
+      .then(function (payload) {
+        return api("jobs/" + jobId + "/payments", { method: "POST", body: payload });
+      })
+      .then(function (data) {
+        state.pay = null;
+        renderDrawer(data);
+        var failed = describeSends(data.receipt);
+        toast(
+          fmtMoney(amountCents) + " recorded — balance " + fmtMoney(data.balanceCents) +
+          (failed ? ". Receipt not sent — " + failed : (data.receipt || []).length ? ". Receipt sent." : "")
+        );
+        var active = document.querySelector(".tab.active");
+        if (active) switchView(active.dataset.view);
+      })
+      .catch(function (e) {
+        payError(e.message || "The payment could not be taken");
+      });
+  }
+
+  // ---------- confirmations and receipts ----------
+  // The wording is built on the server and shown before anything is sent, so
+  // the office always knows exactly what the customer will read — and can copy
+  // it and send it by hand when no provider is set up.
+  function openSendModal(jobId, kind) {
+    loadSettings()
+      .catch(function () { return null; })
+      .then(function () {
+        return api("jobs/" + jobId + "/confirmation?kind=" + encodeURIComponent(kind));
+      })
+      .then(function (preview) {
+        var isReceipt = kind === "payment_receipt";
+        var nothingReady = !preview.email.available && !preview.sms.available;
+        var body =
+          '<p class="muted send-intro">' +
+          (isReceipt
+            ? "Send the customer a receipt for the payment just taken."
+            : "Send the customer written confirmation of the appointment.") +
+          "</p>" +
+          channelChoices("send", {
+            email: preview.email.recipient,
+            phone: preview.sms.recipient,
+            checked: true
+          }) +
+          (nothingReady
+            ? '<p class="hint warn">No email or text provider is set up on this site yet. Copy the wording below and send it from your own phone or inbox.</p>'
+            : "") +
+          '<label class="field"><span>Email wording</span>' +
+          '<textarea id="send-email-text" rows="8" readonly>' + esc(preview.email.text) + "</textarea></label>" +
+          '<label class="field"><span>Text message wording</span>' +
+          '<textarea id="send-sms-text" rows="3" readonly>' + esc(preview.sms.text) + "</textarea></label>" +
+          '<div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" id="send-copy-email">Copy email</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" id="send-copy-sms">Copy text message</button></div>';
+
+        openModal(isReceipt ? "Send a receipt" : "Send the booking confirmation", body, function () {
+          var channels = chosenChannels("send");
+          if (!channels.length) {
+            throw new Error("Pick email or text — or copy the wording and send it yourself");
+          }
+          return api("jobs/" + jobId + "/confirmation", {
+            method: "POST",
+            body: { channels: channels, kind: kind }
+          }).then(function (data) {
+            renderDrawer(data);
+            var failed = describeSends(data.sent);
+            if (failed) throw new Error(failed);
+            return (isReceipt ? "Receipt" : "Confirmation") + " sent to " + data.job.customerName + ".";
+          });
+        });
+
+        var submit = document.getElementById("modal-submit");
+        if (submit) submit.textContent = "Send";
+        document.getElementById("send-copy-email").addEventListener("click", function () {
+          copyText(preview.email.subject + "\n\n" + preview.email.text, "Email wording");
+        });
+        document.getElementById("send-copy-sms").addEventListener("click", function () {
+          copyText(preview.sms.text, "Text message");
+        });
+      })
+      .catch(function (e) {
+        toast(e.message || "Could not prepare that message");
+      });
+  }
+
+  function patchJob(id, body) {
+    api("jobs/" + id, { method: "PATCH", body: body }).then(function (data) {
+      renderDrawer(data);
+      var active = document.querySelector(".tab.active");
+      if (active) switchView(active.dataset.view);
+    });
+  }
+
+  // Moving an appointment from the job drawer. A clash comes back as a 409 with
+  // the jobs it hits, which is offered to whoever is looking as a yes/no rather
+  // than silently overbooking the crew member.
+  function rescheduleJob(id, when, minutes, force) {
+    api("jobs/" + id, {
+      method: "PATCH",
+      body: {
+        scheduledFor: when.toISOString(),
+        durationMinutes: minutes,
+        force: force === true
+      }
+    })
+      .then(function (data) {
+        toast("Appointment moved to " + fmtDate(when.toISOString()) + ".");
+        renderDrawer(data);
+        var active = document.querySelector(".tab.active");
+        if (active) switchView(active.dataset.view);
+      })
+      .catch(function (e) {
+        if (e.status === 409 && e.data && e.data.conflicts) {
+          var clash = e.data.conflicts
+            .map(function (c) {
+              return fmtTimeRange(c.scheduledFor, c.durationMinutes) + " — " + c.customerName;
+            })
+            .join("\n");
+          if (confirm("That crew member is already booked:\n\n" + clash + "\n\nBook this time anyway?")) {
+            rescheduleJob(id, when, minutes, true);
+          }
+          return;
+        }
+        toast(e.message || "Could not move that appointment");
+      });
+  }
+
+  function closeDrawer() {
+    document.getElementById("drawer").hidden = true;
+  }
+
+  // ---------- boot ----------
+  function showApp() {
+    document.getElementById("login").hidden = true;
+    document.getElementById("app").hidden = false;
+  }
+
+  // Home-screen shortcuts in the manifest open the app straight on a tab.
+  function initialView() {
+    var allowed = ["dashboard", "book", "jobs", "customers", "crew"];
+    if (state.me && state.me.canManageCrew) allowed.push("charges");
+    var want = new URLSearchParams(location.search).get("view");
+    return allowed.indexOf(want) === -1 ? "dashboard" : want;
+  }
+
+  function boot() {
+    api("session")
+      .then(function (d) {
+        state.me = d.employee;
+        document.getElementById("who").textContent = d.employee.name + " · " + d.employee.role;
+        var chargeTab = document.querySelector('[data-view="charges"]');
+        if (chargeTab) chargeTab.hidden = !d.employee.canManageCrew;
+        showApp();
+        switchView(initialView());
+      })
+      .catch(function () { showLogin(); });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    document.getElementById("login-form").addEventListener("submit", handleLogin);
+    document.getElementById("logout").addEventListener("click", function () {
+      api("logout", { method: "POST" }).finally(showLogin);
+    });
+    document.getElementById("tabs").addEventListener("click", function (e) {
+      if (e.target.dataset.view) switchView(e.target.dataset.view);
+    });
+    document.getElementById("modal-form").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      if (!modalSubmit) return;
+      var btn = document.getElementById("modal-submit");
+      var label = btn.textContent;
+      var err = document.getElementById("modal-error");
+      if (err) err.hidden = true;
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+      var run = modalSubmit;
+      Promise.resolve()
+        .then(function () { return run(); })
+        .then(function (message) {
+          closeModal();
+          if (message) toast(message);
+          var active = document.querySelector(".tab.active");
+          if (active && active.dataset.view === "crew") renderCrew();
+        })
+        .catch(function (e) {
+          modalError(e.message || "Could not save that");
+          btn.disabled = false;
+          btn.textContent = label;
+        });
+    });
+    document.getElementById("modal-form").addEventListener("change", function (ev) {
+      if (ev.target.id === "m-pin" || ev.target.id === "m-pin2") {
+        var err = document.getElementById("modal-error");
+        if (err) err.hidden = true;
+      }
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !document.getElementById("modal").hidden) closeModal();
+    });
+    document.body.addEventListener("change", function (e) {
+      var roleFor = e.target.dataset ? e.target.dataset.roleFor : null;
+      if (roleFor) changeRole(Number(roleFor), e.target.value);
+    });
+    document.body.addEventListener("click", function (e) {
+      if (e.target.closest("[data-modal-close]")) { closeModal(); return; }
+      var goTo = e.target.closest("[data-goto]");
+      if (goTo) { switchView(goTo.dataset.goto); return; }
+      if (e.target.closest("[data-my-code]")) { promptOwnCode(); return; }
+      if (e.target.closest("[data-add-crew]")) { promptAddCrew(); return; }
+      var newCode = e.target.closest("[data-new-code]");
+      if (newCode) { promptNewCode(Number(newCode.dataset.newCode)); return; }
+      var toggle = e.target.closest("[data-toggle-active]");
+      if (toggle) { toggleAccess(Number(toggle.dataset.toggleActive)); return; }
+      var row = e.target.closest("[data-job]");
+      if (row) { openJob(Number(row.dataset.job)); return; }
+      if (e.target.matches("[data-close]")) { closeDrawer(); return; }
+      var chip = e.target.closest("[data-status]");
+      if (chip && chip.classList.contains("chip")) {
+        state.jobFilter = chip.dataset.status;
+        renderJobs();
+      }
+    });
+    boot();
+
+    // Registers the worker that makes the app installable on a phone.
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .register("/manager/sw.js", { scope: "/manager/" })
+        .catch(function () { /* install support is optional; app still works */ });
+    }
+  });
+})();

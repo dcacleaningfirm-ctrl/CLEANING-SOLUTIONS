@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="DCA Pro Manager">
+  <defs>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#F59E0B"/>
+      <stop offset="100%" stop-color="#D97706"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="#1A365D"/>
+  <text x="256" y="282" font-family="DejaVu Sans, Segoe UI, Arial, sans-serif" font-size="150"
+        font-weight="bold" fill="url(#gold)" text-anchor="middle" letter-spacing="4">DCA</text>
+  <text x="256" y="348" font-family="DejaVu Sans, Segoe UI, Arial, sans-serif" font-size="42"
+        font-weight="bold" fill="#8FA9C9" text-anchor="middle" letter-spacing="6">MANAGER</text>
+</svg>

@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 430" role="img" aria-label="Decision diagram for upholstery cleaning. Every piece starts with fibre identification and a colourfast test in a hidden area. Durable synthetic and cotton-blend fabrics are cleaned by hot-water extraction. Silk, velvet, viscose, rayon and linen are cleaned by a low-moisture or solvent method. When the fabric or its condition puts the piece at risk we say so before starting.">
+  <g font-family="Trebuchet MS, Avenir, sans-serif">
+    <rect x="248" y="18" width="304" height="62" rx="12" fill="#d6a84f" opacity="0.26"/>
+    <text x="400" y="45" font-size="16" font-weight="bold" fill="#0b0b0c" text-anchor="middle">1. Fibre identification</text>
+    <text x="400" y="68" font-size="13" fill="#55504a" text-anchor="middle">Label codes, construction and current condition</text>
+
+    <path d="M400 80 V 116" stroke="#0b0b0c" stroke-width="2"/>
+    <path d="M400 128 l -8 -16 h 16 z" fill="#0b0b0c"/>
+
+    <rect x="248" y="128" width="304" height="62" rx="12" fill="#d6a84f" opacity="0.26"/>
+    <text x="400" y="155" font-size="16" font-weight="bold" fill="#0b0b0c" text-anchor="middle">2. Colourfast test</text>
+    <text x="400" y="178" font-size="13" fill="#55504a" text-anchor="middle">Applied in an inconspicuous area first</text>
+
+    <path d="M400 190 V 214 H 140 V 250" stroke="#0b0b0c" stroke-width="2" fill="none"/>
+    <path d="M400 190 V 214 H 400 V 250" stroke="#0b0b0c" stroke-width="2" fill="none"/>
+    <path d="M400 190 V 214 H 660 V 250" stroke="#0b0b0c" stroke-width="2" fill="none"/>
+    <g fill="#0b0b0c">
+      <path d="M140 262 l -8 -16 h 16 z"/>
+      <path d="M400 262 l -8 -16 h 16 z"/>
+      <path d="M660 262 l -8 -16 h 16 z"/>
+    </g>
+
+    <rect x="24" y="262" width="232" height="120" rx="12" fill="none" stroke="#2f684d" stroke-width="2"/>
+    <text x="140" y="290" font-size="15" font-weight="bold" fill="#2f684d" text-anchor="middle">Hot-water extraction</text>
+    <text x="140" y="316" font-size="13" fill="#55504a" text-anchor="middle">Durable synthetics and</text>
+    <text x="140" y="336" font-size="13" fill="#55504a" text-anchor="middle">cotton blends</text>
+    <text x="140" y="364" font-size="12" fill="#6d685f" text-anchor="middle">Rinsed and extracted</text>
+
+    <rect x="284" y="262" width="232" height="120" rx="12" fill="none" stroke="#2f684d" stroke-width="2"/>
+    <text x="400" y="290" font-size="15" font-weight="bold" fill="#2f684d" text-anchor="middle">Low-moisture or solvent</text>
+    <text x="400" y="316" font-size="13" fill="#55504a" text-anchor="middle">Silk, velvet, viscose,</text>
+    <text x="400" y="336" font-size="13" fill="#55504a" text-anchor="middle">rayon and linen</text>
+    <text x="400" y="364" font-size="12" fill="#6d685f" text-anchor="middle">Controlled moisture</text>
+
+    <rect x="544" y="262" width="232" height="120" rx="12" fill="none" stroke="#9c7228" stroke-width="2" stroke-dasharray="7 5"/>
+    <text x="660" y="290" font-size="15" font-weight="bold" fill="#9c7228" text-anchor="middle">We advise against it</text>
+    <text x="660" y="316" font-size="13" fill="#55504a" text-anchor="middle">Fabric or condition puts</text>
+    <text x="660" y="336" font-size="13" fill="#55504a" text-anchor="middle">the piece at risk</text>
+    <text x="660" y="364" font-size="12" fill="#6d685f" text-anchor="middle">Said before we start</text>
+
+    <text x="400" y="414" font-size="13" fill="#6d685f" text-anchor="middle">The method follows the fabric in front of us, not a fixed script.</text>
+  </g>
+</svg>

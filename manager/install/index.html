@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Install on your phone · DCA Pro Manager</title>
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/manager/manager.css" />
+  <link rel="stylesheet" href="/manager/install/install.css" />
+  <link rel="manifest" href="/manager/manifest.webmanifest" />
+  <meta name="theme-color" content="#0e1116" />
+  <meta name="apple-touch-fullscreen" content="yes" />
+  <link rel="apple-touch-icon" href="/manager/apple-touch-icon.png" />
+</head>
+<body class="install-page">
+  <main class="wrap">
+
+    <header class="hero">
+      <img src="/manager/icon-192.png" alt="" class="hero-icon" width="72" height="72" />
+      <div>
+        <p class="eyebrow">DCA Cleaning Solutions</p>
+        <h1>Put DCA Pro Manager on your phone</h1>
+        <p class="lede">
+          Install the operations console as an app: it opens from your home screen,
+          runs full screen with no browser bars, and stays signed in between shifts.
+          Nothing to download from an app store.
+        </p>
+      </div>
+    </header>
+
+    <!-- Shown only where the browser can install directly (Android/Chrome, desktop Chrome & Edge). -->
+    <section class="card install-now" id="install-now" hidden>
+      <div>
+        <h2>Install now</h2>
+        <p class="muted">Your browser can add the app in one step.</p>
+      </div>
+      <button type="button" class="btn btn-primary btn-install" id="install-btn">Install app</button>
+    </section>
+
+    <!-- Confirmation / already-installed notice, driven by install.js -->
+    <p class="banner" id="banner" hidden></p>
+
+    <section class="steps">
+      <article class="card step-card" id="steps-ios">
+        <h2><span class="platform-tag">iPhone &amp; iPad</span></h2>
+        <p class="muted">Open this page in <strong>Safari</strong>, then:</p>
+        <ol>
+          <li>Tap the <strong>Share</strong> button — the square with an arrow pointing up.</li>
+          <li>Scroll down and tap <strong>Add to Home Screen</strong>.</li>
+          <li>Tap <strong>Add</strong>. The DCA Manager icon appears on your home screen.</li>
+        </ol>
+        <p class="fineprint">
+          Add to Home Screen is only offered in Safari. If you are reading this in Chrome
+          or another browser on iOS, open <span class="url-inline" data-url-text></span> in Safari first.
+        </p>
+      </article>
+
+      <article class="card step-card" id="steps-android">
+        <h2><span class="platform-tag">Android</span></h2>
+        <p class="muted">Open this page in <strong>Chrome</strong>, then:</p>
+        <ol>
+          <li>Tap <strong>Install app</strong> above, or the <strong>⋮</strong> menu in the top right.</li>
+          <li>Choose <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>
+          <li>Confirm <strong>Install</strong>. The app is added to your app drawer.</li>
+        </ol>
+        <p class="fineprint">
+          Samsung Internet and Firefox also work: look for <strong>Add page to</strong> or
+          <strong>Install</strong> in the browser menu.
+        </p>
+      </article>
+    </section>
+
+    <section class="card send">
+      <h2>Reading this on a computer?</h2>
+      <p class="muted">Get the install link onto the phone you want to use.</p>
+
+      <div class="send-grid">
+        <div class="qr-panel">
+          <img src="/manager/install-qr.svg" alt="QR code linking to this install page"
+               width="176" height="176" class="qr" />
+          <p class="fineprint">Point your phone camera at the code.</p>
+        </div>
+
+        <div class="send-actions">
+          <a class="btn btn-ghost" id="send-sms"
+             href="sms:?&amp;body=Install%20DCA%20Pro%20Manager%3A%20https%3A%2F%2Fwww.dcacleaningsolutions.com%2Fmanager%2Finstall">
+            Text the link
+          </a>
+          <a class="btn btn-ghost" id="send-email"
+             href="mailto:?subject=Install%20DCA%20Pro%20Manager&amp;body=Install%20the%20DCA%20Pro%20Manager%20app%20on%20your%20phone%3A%20https%3A%2F%2Fwww.dcacleaningsolutions.com%2Fmanager%2Finstall">
+            Email the link
+          </a>
+          <button type="button" class="btn btn-ghost" id="copy-link">Copy link</button>
+          <p class="url-box" data-url-text></p>
+        </div>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <a class="btn btn-ghost btn-sm" href="/manager/">Open DCA Pro Manager</a>
+      <span class="fineprint">
+        Crew sign-in required. This console is for DCA staff only and is not indexed publicly.
+      </span>
+    </footer>
+
+  </main>
+  <script src="/manager/install/install.js" defer></script>
+</body>
+</html>

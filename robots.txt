@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /.netlify/
+Disallow: /manager
+Disallow: /app
+Disallow: /install
+Disallow: /api/
+
+Sitemap: https://www.dcacleaningsolutions.com/sitemap.xml
