@@ -1,0 +1,66 @@
+[build]
+publish = "."
+
+# Before running the build, Netlify does a separate `npm install` inside
+# .netlify/plugins/ for build plugins and installed extensions. That install has
+# no retry budget by default, so a single dropped socket ("read ECONNRESET")
+# aborts the whole deploy even though nothing is wrong with the site. Give npm a
+# real retry window there so a flaky read is retried instead of fatal.
+[build.environment]
+NPM_CONFIG_FETCH_RETRIES = "5"
+NPM_CONFIG_FETCH_RETRY_MINTIMEOUT = "20000"
+NPM_CONFIG_FETCH_RETRY_MAXTIMEOUT = "120000"
+NPM_CONFIG_FETCH_TIMEOUT = "600000"
+
+[build.processing.html]
+pretty_urls = true
+
+# @netlify/plugin-lighthouse used to be declared here. It only produced a
+# build-time audit report — it contributed nothing to the deployed site — while
+# dragging Lighthouse and a headless-Chrome tree into that same plugins install,
+# making it by far the largest and most failure-prone part of it. Auditing can be
+# re-enabled from the Netlify UI if it is wanted again.
+
+[[headers]]
+for = "/*"
+[headers.values]
+X-Frame-Options = "SAMEORIGIN"
+X-Content-Type-Options = "nosniff"
+Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Block common WordPress scanner paths (return 404)
+[[redirects]]
+from = "/wp-admin/*"
+to = "/"
+status = 404
+
+[[redirects]]
+from = "/wp-login.php"
+to = "/"
+status = 404
+
+[[redirects]]
+from = "/xmlrpc.php"
+to = "/"
+status = 404
+
+# Redirect non-www to www
+[[redirects]]
+from = "https://dcacleaningsolutions.com/*"
+to = "https://www.dcacleaningsolutions.com/:splat"
+status = 301
+force = true
+
+# Redirect old domain
+[[redirects]]
+from = "https://deluxecarpetandairduct.com/*"
+to = "https://www.dcacleaningsolutions.com/:splat"
+status = 301
+force = true
+
+# Redirect old www domain
+[[redirects]]
+from = "https://www.deluxecarpetandairduct.com/*"
+to = "https://www.dcacleaningsolutions.com/:splat"
+status = 301
+force = true
