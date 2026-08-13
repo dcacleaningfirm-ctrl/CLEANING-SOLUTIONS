@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" role="img" aria-label="Cross-section illustration of a duct run. After — debris removed within the service scope">
+  <rect width="800" height="500" fill="#f7f3ea"/>
+  <rect x="56" y="112" width="688" height="278" rx="18" fill="#b3a892"/>
+  <rect x="72" y="128" width="656" height="246" rx="10" fill="#f1eade"/>
+    <path d="M132 176 H 620" stroke="#2f684d" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <path d="M640 176 l -20 -10 v 20 z" fill="#2f684d" opacity="0.85"/>
+    <path d="M132 196 H 620" stroke="#2f684d" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <path d="M640 196 l -20 -10 v 20 z" fill="#2f684d" opacity="0.85"/>
+    <path d="M132 216 H 620" stroke="#2f684d" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <path d="M640 216 l -20 -10 v 20 z" fill="#2f684d" opacity="0.85"/>
+    <path d="M132 236 H 620" stroke="#2f684d" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <path d="M640 236 l -20 -10 v 20 z" fill="#2f684d" opacity="0.85"/>
+    <path d="M132 256 H 620" stroke="#2f684d" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <path d="M640 256 l -20 -10 v 20 z" fill="#2f684d" opacity="0.85"/>
+    <path d="M132 276 H 620" stroke="#2f684d" stroke-width="5" stroke-linecap="round" opacity="0.85"/>
+    <path d="M640 276 l -20 -10 v 20 z" fill="#2f684d" opacity="0.85"/>
+  <rect x="72" y="358" width="656" height="16" rx="6" fill="#655c4c" opacity="0.3"/>
+  <rect x="330" y="390" width="140" height="44" rx="6" fill="#8a7f6b"/>
+  <g stroke="#f7f3ea" stroke-width="3">
+    <path d="M354 396 v 32M384 396 v 32M414 396 v 32M444 396 v 32"/>
+  </g>
+  <g font-family="Trebuchet MS, Avenir, sans-serif" font-size="19">
+    <text x="28" y="44" font-size="22" font-weight="bold" fill="#0b0b0c">After — debris removed within the service scope</text>
+    <text x="28" y="86" fill="#2f684d">Airflow through the run</text>
+    <text x="330" y="464" fill="#4a453d">Supply register</text>
+  </g>
+</svg>

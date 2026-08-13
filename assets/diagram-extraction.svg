@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360" role="img" aria-label="Diagram of a truck-mounted hot-water extraction circuit. The unit stays in the service vehicle, sends heated cleaning solution through a supply hose to the cleaning wand, and returns used solution and suspended soil through a vacuum hose to a recovery tank in the vehicle.">
+  <g font-family="Trebuchet MS, Avenir, sans-serif">
+    <!-- service vehicle -->
+    <rect x="18" y="70" width="250" height="196" rx="14" fill="none" stroke="#0b0b0c" stroke-width="2"/>
+    <text x="34" y="58" font-size="17" font-weight="bold" fill="#0b0b0c">Service vehicle</text>
+
+    <rect x="40" y="94" width="94" height="44" rx="8" fill="#d6a84f" opacity="0.28"/>
+    <text x="52" y="121" font-size="14" fill="#0b0b0c">Heater</text>
+
+    <rect x="150" y="94" width="96" height="44" rx="8" fill="#d6a84f" opacity="0.28"/>
+    <text x="198" y="121" font-size="13" fill="#0b0b0c" text-anchor="middle">Pressure pump</text>
+
+    <rect x="40" y="152" width="94" height="44" rx="8" fill="#6d685f" opacity="0.2"/>
+    <text x="87" y="179" font-size="13" fill="#0b0b0c" text-anchor="middle">Vacuum</text>
+
+    <rect x="150" y="152" width="96" height="44" rx="8" fill="#6d685f" opacity="0.2"/>
+    <text x="198" y="179" font-size="13" fill="#0b0b0c" text-anchor="middle">Recovery tank</text>
+
+    <text x="40" y="226" font-size="12.5" fill="#6d685f">The equipment stays outside.</text>
+    <text x="40" y="246" font-size="12.5" fill="#6d685f">Used water leaves with the van.</text>
+
+    <!-- supply line -->
+    <path d="M268 116 H 560" stroke="#d6a84f" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <path d="M576 116 l -20 -10 v 20 z" fill="#d6a84f"/>
+    <text x="300" y="104" font-size="14" fill="#8a6a24">Heated solution at pressure</text>
+
+    <!-- return line -->
+    <path d="M560 176 H 268" stroke="#6d685f" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <path d="M252 176 l 20 -10 v 20 z" fill="#6d685f"/>
+    <text x="288" y="200" font-size="14" fill="#55504a">Vacuum recovery of water and soil</text>
+
+    <!-- wand -->
+    <rect x="576" y="70" width="120" height="150" rx="12" fill="none" stroke="#0b0b0c" stroke-width="2"/>
+    <path d="M636 90 V 190" stroke="#0b0b0c" stroke-width="6" stroke-linecap="round"/>
+    <path d="M604 190 H 668" stroke="#0b0b0c" stroke-width="10" stroke-linecap="round"/>
+    <text x="590" y="58" font-size="17" font-weight="bold" fill="#0b0b0c">Cleaning wand</text>
+
+    <!-- carpet -->
+    <rect x="330" y="266" width="440" height="26" fill="#cdc1a8"/>
+    <rect x="330" y="292" width="440" height="20" fill="#8a7f6b"/>
+    <g stroke="#a1957c" stroke-width="4" stroke-linecap="round">
+      <path d="M346 266 v -16M366 266 v -16M386 266 v -16M406 266 v -16M426 266 v -16M446 266 v -16M466 266 v -16M486 266 v -16M506 266 v -16M526 266 v -16M546 266 v -16M566 266 v -16M586 266 v -16M606 266 v -16M626 266 v -16M646 266 v -16M666 266 v -16M686 266 v -16M706 266 v -16M726 266 v -16M746 266 v -16"/>
+    </g>
+    <path d="M636 220 V 246" stroke="#0b0b0c" stroke-width="2" stroke-dasharray="5 5"/>
+    <text x="40" y="336" font-size="13.5" fill="#6d685f">Pre-treatment and spotting products are chosen for the fibre, then rinsed and extracted.</text>
+  </g>
+</svg>

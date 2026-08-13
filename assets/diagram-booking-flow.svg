@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 250" role="img" aria-label="Diagram of the booking flow. Each service has its own step: start, carpet, air ducts, upholstery and move cleaning, add-ons, then review and send. Your running planning estimate follows you from step to step, and the final scope and price are confirmed before work begins.">
+  <g font-family="Trebuchet MS, Avenir, sans-serif">
+    <g>
+      <rect x="16" y="46" width="112" height="70" rx="12" fill="#d6a84f" opacity="0.3"/>
+      <text x="72" y="76" font-size="13" font-weight="bold" fill="#0b0b0c" text-anchor="middle">Start</text>
+      <text x="72" y="98" font-size="12" fill="#55504a" text-anchor="middle">Pick services</text>
+    </g>
+    <g>
+      <rect x="152" y="46" width="112" height="70" rx="12" fill="none" stroke="#0b0b0c" stroke-width="2"/>
+      <text x="208" y="76" font-size="13" font-weight="bold" fill="#0b0b0c" text-anchor="middle">Carpet</text>
+      <text x="208" y="98" font-size="12" fill="#55504a" text-anchor="middle">Rooms</text>
+    </g>
+    <g>
+      <rect x="288" y="46" width="112" height="70" rx="12" fill="none" stroke="#0b0b0c" stroke-width="2"/>
+      <text x="344" y="76" font-size="13" font-weight="bold" fill="#0b0b0c" text-anchor="middle">Air ducts</text>
+      <text x="344" y="98" font-size="12" fill="#55504a" text-anchor="middle">Vents, returns</text>
+    </g>
+    <g>
+      <rect x="424" y="46" width="112" height="70" rx="12" fill="none" stroke="#0b0b0c" stroke-width="2"/>
+      <text x="480" y="76" font-size="13" font-weight="bold" fill="#0b0b0c" text-anchor="middle">Furniture</text>
+      <text x="480" y="98" font-size="12" fill="#55504a" text-anchor="middle">Pieces, moves</text>
+    </g>
+    <g>
+      <rect x="560" y="46" width="112" height="70" rx="12" fill="none" stroke="#0b0b0c" stroke-width="2"/>
+      <text x="616" y="76" font-size="13" font-weight="bold" fill="#0b0b0c" text-anchor="middle">Add-ons</text>
+      <text x="616" y="98" font-size="12" fill="#55504a" text-anchor="middle">Optional</text>
+    </g>
+    <g>
+      <rect x="680" y="46" width="104" height="70" rx="12" fill="#0b0b0c"/>
+      <text x="732" y="76" font-size="13" font-weight="bold" fill="#f7f3ea" text-anchor="middle">Review</text>
+      <text x="732" y="98" font-size="12" fill="#cdc1a8" text-anchor="middle">and send</text>
+    </g>
+
+    <g stroke="#9c7228" stroke-width="2" fill="none">
+      <path d="M128 81 H 146"/>
+      <path d="M264 81 H 282"/>
+      <path d="M400 81 H 418"/>
+      <path d="M536 81 H 554"/>
+      <path d="M672 81 H 676"/>
+    </g>
+    <g fill="#9c7228">
+      <path d="M152 81 l -10 -6 v 12 z"/>
+      <path d="M288 81 l -10 -6 v 12 z"/>
+      <path d="M424 81 l -10 -6 v 12 z"/>
+      <path d="M560 81 l -10 -6 v 12 z"/>
+      <path d="M682 81 l -10 -6 v 12 z"/>
+    </g>
+
+    <rect x="16" y="150" width="768" height="46" rx="10" fill="#6d685f" opacity="0.14"/>
+    <text x="34" y="179" font-size="14" fill="#3a352d">Your running planning estimate follows you across every step — one shared price catalogue, no re-entry.</text>
+
+    <text x="16" y="226" font-size="13" fill="#6d685f">Nothing is charged online. Final scope and price are confirmed before work begins.</text>
+  </g>
+</svg>

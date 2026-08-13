@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" role="img" aria-label="Cross-section illustration of upholstery fabric. After — weave cleaned by the method chosen for the fabric">
+  <rect width="800" height="500" fill="#f7f3ea"/>
+  <rect x="0" y="0" width="800" height="118" fill="#fffdf8"/>
+    <path d="M40 176 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M104 176 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M168 176 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M232 176 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M296 176 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M360 176 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M424 176 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M488 176 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M552 176 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M616 176 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M680 176 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M744 176 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M40 238 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M104 238 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M168 238 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M232 238 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M296 238 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M360 238 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M424 238 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M488 238 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M552 238 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M616 238 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M680 238 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+    <path d="M744 238 q 16 -32 32 0 q 16 32 32 0" stroke="#cdc1a8" stroke-width="13" fill="none" stroke-linecap="round"/>
+  <rect x="0" y="288" width="800" height="34" fill="#a2977f"/>
+  <rect x="0" y="322" width="800" height="94" fill="#d5c9b1"/>
+  <rect x="0" y="416" width="800" height="40" fill="#6f6151"/>
+  <g font-family="Trebuchet MS, Avenir, sans-serif" font-size="19">
+    <text x="28" y="44" font-size="22" font-weight="bold" fill="#0b0b0c">After — weave cleaned by the method chosen for the fabric</text>
+    <text x="28" y="311" fill="#2b2721">Backing cloth</text>
+    <text x="28" y="374" fill="#3a352d">Foam cushion</text>
+    <text x="28" y="443" fill="#f7f3ea">Frame</text>
+    <text x="612" y="164" fill="#5b5449">Face fabric</text>
+  </g>
+</svg>
