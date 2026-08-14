@@ -27,6 +27,7 @@ import {
   normalizePhone,
   notifySettings,
   paymentReceipt,
+  quoteUpdate,
   sendEmail,
   sendSms,
   type AppointmentSummary,
@@ -68,6 +69,19 @@ interface BookingItem {
   unitPriceCents: number;
   amountCents: number;
 }
+
+// The account details the office can correct from the app, with the length each
+// one is stored at. A customer's name is the only field that cannot be blanked.
+const CUSTOMER_FIELDS = [
+  { key: "name", label: "name", max: 120 },
+  { key: "phone", label: "phone number", max: 40 },
+  { key: "email", label: "email", max: 160 },
+  { key: "address", label: "street address", max: 200 },
+  { key: "city", label: "city", max: 80 },
+  { key: "state", label: "state", max: 40 },
+  { key: "zip", label: "ZIP", max: 20 },
+  { key: "notes", label: "notes", max: 2000 }
+] as const;
 
 // Line items arrive already priced from the booking screen, which reads the
 // published catalog in data/pricing.js. Prices are not re-derived here on
@@ -699,7 +713,10 @@ export default async (req: Request, context: Context) => {
           ? ((await req.json().catch(() => ({}))) as { channels?: string[]; kind?: string })
           : { channels: [] as string[], kind: url.searchParams.get("kind") || undefined };
 
-      const kind = body.kind === "payment_receipt" ? "payment_receipt" : "booking_confirmation";
+      const kind =
+        body.kind === "payment_receipt" || body.kind === "quote_update"
+          ? body.kind
+          : "booking_confirmation";
       const summary = summarizeJob(detail);
       const lastPayment = detail.payments[0];
       if (kind === "payment_receipt" && !lastPayment) {
@@ -715,10 +732,16 @@ export default async (req: Request, context: Context) => {
           }
         : undefined;
 
-      const content =
-        kind === "payment_receipt"
-          ? paymentReceipt(summary, paymentContext!)
-          : bookingConfirmation(summary);
+      // A re-send of the current total has no "previous" figure to compare
+      // against, so the template reads out today's ticket rather than a change.
+      const changeContext = { previousCents: detail.job.priceCents, note: null };
+
+      const content = jobMessageContent({
+        summary,
+        kind,
+        payment: paymentContext,
+        change: changeContext
+      });
 
       const notify = notifySettings();
       const preview = {
@@ -753,7 +776,8 @@ export default async (req: Request, context: Context) => {
         phone: detail.job.customerPhone,
         employeeId: account.id,
         customerId: detail.job.customerId,
-        payment: kind === "payment_receipt" ? paymentContext : undefined
+        payment: kind === "payment_receipt" ? paymentContext : undefined,
+        change: kind === "quote_update" ? changeContext : undefined
       });
 
       const updated = await loadJob(jobId);
@@ -980,6 +1004,87 @@ export default async (req: Request, context: Context) => {
       return json({
         customers: rows.map((c) => ({ ...c, jobCount: counts.get(c.id) || 0 }))
       });
+    }
+
+    // --- One customer account --------------------------------------------
+    const customerMatch = path.match(/^customers\/(\d+)$/);
+    if (customerMatch && method === "GET") {
+      const id = Number(customerMatch[1]);
+      const [customer] = await db.select().from(customers).where(eq(customers.id, id));
+      if (!customer) return json({ error: "That customer no longer exists" }, { status: 404 });
+      const [count] = await db
+        .select({ value: sql<number>`cast(count(*) as int)` })
+        .from(jobs)
+        .where(eq(jobs.customerId, id));
+      return json({ customer: { ...customer, jobCount: count?.value || 0 } });
+    }
+
+    // Correcting what is on file. A wrong phone number or a misheard street name
+    // is the single most common thing a crew member finds at the door, so any
+    // signed-in crew member can fix it — and the job they were looking at when
+    // they did keeps a line in its history saying so.
+    if (customerMatch && method === "PATCH") {
+      const id = Number(customerMatch[1]);
+      const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+
+      const [existing] = await db.select().from(customers).where(eq(customers.id, id));
+      if (!existing) return json({ error: "That customer no longer exists" }, { status: 404 });
+
+      const updates: Record<string, string | null> = {};
+      const changed: string[] = [];
+      for (const field of CUSTOMER_FIELDS) {
+        const raw = body[field.key];
+        if (typeof raw !== "string") continue;
+        const value = raw.trim().slice(0, field.max);
+        if (field.key === "name" && !value) {
+          return json({ error: "Enter the customer's name" }, { status: 400 });
+        }
+        const next = value || null;
+        if ((existing[field.key] || null) === next) continue;
+        updates[field.key] = next;
+        changed.push(field.label);
+      }
+
+      // Whatever the edit leaves behind still has to be reachable: a crew member
+      // standing outside a locked gate needs some way to raise the customer.
+      const nextPhone = updates.phone !== undefined ? updates.phone : existing.phone;
+      const nextEmail = updates.email !== undefined ? updates.email : existing.email;
+      if (!nextPhone && !nextEmail) {
+        return json(
+          { error: "Keep a phone number or an email so the crew can reach them" },
+          { status: 400 }
+        );
+      }
+      if (nextEmail && !looksLikeEmail(nextEmail)) {
+        return json({ error: "Check the email address" }, { status: 400 });
+      }
+
+      if (!changed.length) {
+        return json({ customer: existing, changed: [] });
+      }
+
+      await db.update(customers).set(updates).where(eq(customers.id, id));
+      const [updated] = await db.select().from(customers).where(eq(customers.id, id));
+
+      // Edited from a job? Say so on that job's trail, so a changed address or
+      // number is traceable to the visit it came from.
+      if (body.jobId !== undefined && body.jobId !== null) {
+        const [job] = await db
+          .select({ id: jobs.id, customerId: jobs.customerId })
+          .from(jobs)
+          .where(eq(jobs.id, Number(body.jobId)));
+        if (job && job.customerId === id) {
+          await db.insert(jobEvents).values({
+            jobId: job.id,
+            employeeId: account.id,
+            kind: "customer",
+            message: `${account.name} updated the customer's ${changed.join(", ")}`
+          });
+        }
+      }
+
+      console.log(`customer ${id} updated by employee ${account.id}`);
+      return json({ customer: updated, changed });
     }
 
     // --- Day schedule ----------------------------------------------------
@@ -1388,6 +1493,102 @@ export default async (req: Request, context: Context) => {
       return json(job);
     }
 
+    // --- Reprice a job's ticket while the crew is on site -----------------
+    // The customer at the door asks for the hallway as well, or a second couch,
+    // or a quote given on the phone turns out to have missed a room. This
+    // replaces the whole ticket in one write — the app sends the full list of
+    // lines it wants the job to end up with — and recomputes the total from it,
+    // so the figure on the crew member's phone and the figure in the database
+    // can never disagree.
+    const itemsMatch = path.match(/^jobs\/(\d+)\/items$/);
+    if (itemsMatch && method === "PUT") {
+      const id = Number(itemsMatch[1]);
+      const body = (await req.json().catch(() => ({}))) as {
+        items?: unknown;
+        note?: string;
+        sendUpdate?: string[];
+      };
+
+      const existing = await loadJob(id);
+      if (!existing) return json({ error: "Job not found" }, { status: 404 });
+      if (existing.job.status === "cancelled") {
+        return json(
+          { error: "This job is cancelled — reopen it before changing the price" },
+          { status: 409 }
+        );
+      }
+
+      const parsed = readBookingItems(body.items);
+      if (parsed.error) return json({ error: parsed.error }, { status: 400 });
+      if (!parsed.items.length) {
+        return json({ error: "A ticket needs at least one line" }, { status: 400 });
+      }
+
+      const priceCents = parsed.items.reduce((sum, i) => sum + i.amountCents, 0);
+      if (priceCents > MAX_JOB_TOTAL_CENTS) {
+        return json(
+          { error: `A single job cannot total more than ${money(MAX_JOB_TOTAL_CENTS)}` },
+          { status: 400 }
+        );
+      }
+
+      // Read what has actually been banked rather than trusting the figure the
+      // phone was holding. This app cannot issue refunds, so a new total below
+      // what the customer has already handed over has to be refused outright.
+      const collected = await collectedForJob(id);
+      if (priceCents < collected) {
+        return json(
+          {
+            error: `${money(collected)} has already been collected on this job — the new total cannot be less than that`
+          },
+          { status: 409 }
+        );
+      }
+
+      const previousCents = existing.job.priceCents;
+      const note = (body.note || "").trim().slice(0, 300) || null;
+
+      await db.delete(jobItems).where(eq(jobItems.jobId, id));
+      await db.insert(jobItems).values(parsed.items.map((i) => ({ ...i, jobId: id })));
+      await db.update(jobs).set({ priceCents }).where(eq(jobs.id, id));
+
+      const moved = priceCents !== previousCents;
+      await db.insert(jobEvents).values({
+        jobId: id,
+        employeeId: account.id,
+        kind: "price",
+        message:
+          (moved
+            ? `${account.name} changed the total from ${money(previousCents)} to ${money(priceCents)}`
+            : `${account.name} revised the ticket, total unchanged at ${money(priceCents)}`) +
+          ` (${parsed.items.length} ${parsed.items.length === 1 ? "line" : "lines"})` +
+          (note ? ` — ${note}` : "")
+      });
+
+      console.log(`job ${id} repriced by employee ${account.id}`);
+
+      // The customer standing there agreed to the add-on out loud; the written
+      // total is what stops a dispute later, so it can go out in the same tap.
+      const updated = await loadJob(id);
+      const updateChannels = readChannels(body.sendUpdate);
+      let sent: Awaited<ReturnType<typeof deliverJobMessage>> | null = null;
+      if (updated && updateChannels.length) {
+        sent = await deliverJobMessage({
+          summary: summarizeJob(updated),
+          kind: "quote_update",
+          channels: updateChannels,
+          email: updated.job.customerEmail,
+          phone: updated.job.customerPhone,
+          employeeId: account.id,
+          customerId: updated.job.customerId,
+          change: { previousCents, note }
+        });
+      }
+
+      const final = updateChannels.length ? await loadJob(id) : updated;
+      return json({ ...final, sent, previousCents });
+    }
+
     // --- Add a note to a job --------------------------------------------
     const noteMatch = path.match(/^jobs\/(\d+)\/notes$/);
     if (noteMatch && method === "POST") {
@@ -1462,6 +1663,7 @@ async function loadJob(id: number) {
   const events = await db
     .select({
       id: jobEvents.id,
+      jobId: jobEvents.jobId,
       kind: jobEvents.kind,
       message: jobEvents.message,
       createdAt: jobEvents.createdAt,
@@ -1568,12 +1770,41 @@ function summarizeJob(detail: NonNullable<Awaited<ReturnType<typeof loadJob>>>):
   };
 }
 
+// The three things this app ever says to a customer, and the wording each one
+// uses. Kept in one place so the preview the office reads back and the message
+// actually delivered can never drift apart.
+const MESSAGE_LABELS = {
+  booking_confirmation: "Booking confirmation",
+  payment_receipt: "Receipt",
+  quote_update: "Updated total"
+} as const;
+
+function jobMessageContent(options: {
+  summary: AppointmentSummary;
+  kind: keyof typeof MESSAGE_LABELS;
+  payment?: {
+    amountCents: number;
+    method: string;
+    reference: string | null;
+    balanceCents: number;
+  };
+  change?: { previousCents: number; note?: string | null };
+}) {
+  if (options.kind === "payment_receipt" && options.payment) {
+    return paymentReceipt(options.summary, options.payment);
+  }
+  if (options.kind === "quote_update") {
+    return quoteUpdate(options.summary, options.change || { previousCents: options.summary.priceCents });
+  }
+  return bookingConfirmation(options.summary);
+}
+
 // Sends one message per requested channel, writes what was sent (or why it was
 // not) to the notifications table, and leaves a single line on the job's
 // activity trail. A failure on one channel never stops the other.
 async function deliverJobMessage(options: {
   summary: AppointmentSummary;
-  kind: "booking_confirmation" | "payment_receipt";
+  kind: "booking_confirmation" | "payment_receipt" | "quote_update";
   channels: NotifyChannel[];
   email: string | null;
   phone: string | null;
@@ -1585,11 +1816,9 @@ async function deliverJobMessage(options: {
     reference: string | null;
     balanceCents: number;
   };
+  change?: { previousCents: number; note?: string | null };
 }) {
-  const content =
-    options.kind === "payment_receipt" && options.payment
-      ? paymentReceipt(options.summary, options.payment)
-      : bookingConfirmation(options.summary);
+  const content = jobMessageContent(options);
 
   const results: {
     channel: NotifyChannel;
@@ -1651,7 +1880,7 @@ async function deliverJobMessage(options: {
   }
 
   const delivered = results.filter((r) => r.ok).map((r) => (r.channel === "email" ? "email" : "text"));
-  const label = options.kind === "payment_receipt" ? "Receipt" : "Booking confirmation";
+  const label = MESSAGE_LABELS[options.kind];
   await db.insert(jobEvents).values({
     jobId: options.summary.jobId,
     employeeId: options.employeeId,

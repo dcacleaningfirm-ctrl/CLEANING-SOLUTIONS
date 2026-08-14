@@ -30,9 +30,14 @@
     // customers can be emailed or texted. Read once and reused.
     settings: null,
     settingsPromise: null,
-    // The job currently open in the drawer, and the payment being taken on it.
+    // The job currently open in the drawer, the payment being taken on it, and
+    // the ticket being reworked while the crew is standing at the door.
     job: null,
-    pay: null
+    pay: null,
+    ticket: null,
+    // Customers tab: the search term in force and its debounce timer.
+    customerSearch: "",
+    customerTimer: null
   };
 
   var CREW_ROLES = ["owner", "manager", "admin", "technician"];
@@ -206,6 +211,59 @@
     return field ? field.value.trim() : "";
   }
 
+  // ---------- reaching the customer from the handset ----------
+  // This app is used on a phone, so a number on screen should dial. tel: and
+  // sms: hand straight to the handset's own dialler and messages app, which
+  // needs no provider, no credentials and works on whatever signal the crew
+  // member has. Numbers are kept exactly as typed for display and reduced to
+  // digits only for the link, because a stored "(404) 555-0134" must still dial.
+  function telDigits(phone) {
+    var raw = String(phone || "").trim();
+    if (!raw) return "";
+    var plus = raw.charAt(0) === "+" ? "+" : "";
+    var digits = raw.replace(/[^0-9]/g, "");
+    if (digits.length < 7) return "";
+    return plus + digits;
+  }
+
+  // A phone number rendered as a tap-to-dial link, falling back to plain text
+  // when what is on file cannot be dialled.
+  function phoneText(phone) {
+    var dial = telDigits(phone);
+    if (!phone) return '<span class="muted">—</span>';
+    if (!dial) return esc(phone);
+    return '<a class="contact-link" href="tel:' + dial + '">' + esc(phone) + "</a>";
+  }
+
+  function emailText(email) {
+    if (!email) return '<span class="muted">—</span>';
+    return '<a class="contact-link" href="mailto:' + esc(email) + '">' + esc(email) + "</a>";
+  }
+
+  // Call / Text / Email / Edit, sized for a thumb. Shown in the job drawer and
+  // wherever else the crew is looking at one customer.
+  function contactActions(person, jobId) {
+    var dial = telDigits(person.phone);
+    var buttons = [];
+    if (dial) {
+      buttons.push('<a class="btn btn-primary btn-sm" href="tel:' + dial + '">Call</a>');
+      buttons.push('<a class="btn btn-ghost btn-sm" href="sms:' + dial + '">Text</a>');
+    }
+    if (person.email) {
+      buttons.push('<a class="btn btn-ghost btn-sm" href="mailto:' + esc(person.email) + '">Email</a>');
+    }
+    if (person.id) {
+      buttons.push(
+        '<button type="button" class="btn btn-ghost btn-sm" data-edit-customer="' + person.id + '"' +
+        (jobId ? ' data-from-job="' + jobId + '"' : "") + ">Edit customer</button>"
+      );
+    }
+    return (
+      '<div class="contact-bar">' + buttons.join("") + "</div>" +
+      (dial ? "" : '<p class="hint">No dialable number on file — add one to call or text from here.</p>')
+    );
+  }
+
   // ---------- customer messaging ----------
   // Email and text are offered side by side wherever the office can tell a
   // customer something. A channel the site has no provider for, or that this
@@ -307,6 +365,12 @@
   function showLogin() {
     document.getElementById("app").hidden = true;
     document.getElementById("login").hidden = false;
+    // Nothing from the last session stays on screen behind the login card: the
+    // next person to sign in gets a clean Customers tab, not someone else's
+    // search.
+    state.customerSearch = "";
+    state.ticket = null;
+    document.getElementById("view-customers").innerHTML = "";
     var err = document.getElementById("login-error");
     err.hidden = true;
     var sel = document.getElementById("login-employee");
@@ -466,17 +530,100 @@
 
   function renderCustomers() {
     var host = document.getElementById("view-customers");
-    host.innerHTML = '<div class="loading">Loading…</div>';
-    api("customers").then(function (d) {
+    var term = state.customerSearch || "";
+
+    // The search box is built once and left alone. Only the list below it is
+    // replaced, so a keystroke typed while the lookup is in flight is not lost.
+    if (!document.getElementById("cu-search")) {
       host.innerHTML =
-        '<div class="card"><table><thead><tr><th>Name</th><th>Contact</th><th>Location</th><th class="right">Jobs</th></tr></thead><tbody>' +
-        d.customers.map(function (c) {
-          var contact = [c.phone, c.email].filter(Boolean).map(esc).join(" · ") || '<span class="muted">—</span>';
-          var loc = [c.city, c.state].filter(Boolean).map(esc).join(", ") || '<span class="muted">—</span>';
-          return "<tr><td>" + esc(c.name) + "</td><td class=\"muted\">" + contact + "</td><td class=\"muted\">" +
-            loc + '</td><td class="right mono">' + c.jobCount + "</td></tr>";
-        }).join("") +
-        "</tbody></table></div>";
+        '<div class="card customer-search"><label class="field"><span>Find a customer</span>' +
+        '<input id="cu-search" type="search" maxlength="80" placeholder="Name, phone, email or street…" value="' +
+        esc(term) + '" /></label>' +
+        '<p class="hint">Tap a number to call, or Text to open a message. Edit fixes what is on file.</p></div>' +
+        '<div id="cu-list"><div class="loading">Loading…</div></div>';
+
+      document.getElementById("cu-search").addEventListener("input", function () {
+        var value = this.value.trim();
+        clearTimeout(state.customerTimer);
+        state.customerTimer = setTimeout(function () {
+          if (value === (state.customerSearch || "")) return;
+          state.customerSearch = value;
+          renderCustomers();
+        }, 300);
+      });
+    }
+
+    var list = document.getElementById("cu-list");
+    list.innerHTML = '<div class="loading">Loading…</div>';
+    api("customers" + (term ? "?q=" + encodeURIComponent(term) : "")).then(function (d) {
+      list.innerHTML = d.customers.length
+        ? '<div class="card"><table><thead><tr><th>Name</th><th>Contact</th><th>Location</th>' +
+          '<th class="right">Jobs</th><th class="right">Edit</th></tr></thead><tbody>' +
+          d.customers.map(function (c) {
+            var dial = telDigits(c.phone);
+            var contact =
+              '<div class="cell-contact">' + phoneText(c.phone) +
+              (dial ? ' <a class="btn btn-ghost btn-xs" href="sms:' + dial + '">Text</a>' : "") +
+              (c.email ? "<br />" + emailText(c.email) : "") +
+              "</div>";
+            var loc = [c.city, c.state].filter(Boolean).map(esc).join(", ") || '<span class="muted">—</span>';
+            return "<tr><td>" + esc(c.name) + "</td><td>" + contact + '</td><td class="muted">' +
+              loc + '</td><td class="right mono">' + c.jobCount + "</td>" +
+              '<td class="right"><button type="button" class="btn btn-ghost btn-sm" data-edit-customer="' +
+              c.id + '">Edit</button></td></tr>';
+          }).join("") +
+          "</tbody></table></div>"
+        : '<div class="card"><p class="empty">' +
+          (term ? "Nobody matches “" + esc(term) + "”." : "No customers yet.") + "</p></div>";
+    });
+  }
+
+  // Correcting what is on file. Every field the office keeps is editable here,
+  // because the wrong phone number or a misheard street name is exactly what a
+  // crew member finds when they are already outside. Saving from a job's drawer
+  // also leaves a line on that job's history.
+  function openCustomerEditor(customerId, jobId) {
+    api("customers/" + customerId).then(function (d) {
+      var c = d.customer;
+      openModal(
+        "Edit " + c.name,
+        '<div class="booking-fields">' +
+          '<label class="field"><span>Name</span><input id="cf-name" maxlength="120" required value="' + esc(c.name || "") + '" /></label>' +
+          '<label class="field"><span>Phone</span><input id="cf-phone" type="tel" maxlength="30" value="' + esc(c.phone || "") + '" placeholder="(404) 555-0134" /></label>' +
+          '<label class="field"><span>Email</span><input id="cf-email" type="email" maxlength="160" value="' + esc(c.email || "") + '" /></label>' +
+          '<label class="field"><span>Street address</span><input id="cf-address" maxlength="200" value="' + esc(c.address || "") + '" /></label>' +
+          '<label class="field"><span>City</span><input id="cf-city" maxlength="80" value="' + esc(c.city || "") + '" /></label>' +
+          '<label class="field bk-narrow"><span>State</span><input id="cf-state" maxlength="20" value="' + esc(c.state || "") + '" /></label>' +
+          '<label class="field bk-narrow"><span>ZIP</span><input id="cf-zip" maxlength="12" inputmode="numeric" value="' + esc(c.zip || "") + '" /></label>' +
+          "</div>" +
+          '<label class="field"><span>Notes the office keeps</span><textarea id="cf-notes" maxlength="2000" rows="3">' +
+          esc(c.notes || "") + "</textarea></label>" +
+          '<p class="hint">' + c.jobCount + (c.jobCount === 1 ? " job" : " jobs") +
+          " on this account. Changes apply to every one of them.</p>",
+        function () {
+          var body = {
+            name: val("cf-name"),
+            phone: val("cf-phone"),
+            email: val("cf-email"),
+            address: val("cf-address"),
+            city: val("cf-city"),
+            state: val("cf-state"),
+            zip: val("cf-zip"),
+            notes: val("cf-notes")
+          };
+          if (!body.name) throw new Error("Enter the customer's name");
+          if (jobId) body.jobId = jobId;
+          return api("customers/" + customerId, { method: "PATCH", body: body }).then(function (res) {
+            // Anything on screen showing this customer needs the new details.
+            var active = document.querySelector(".tab.active");
+            if (active && active.dataset.view === "customers") renderCustomers();
+            if (jobId && state.job && state.job.job.id === jobId) openJob(jobId);
+            return res.changed && res.changed.length
+              ? "Updated " + res.changed.join(", ") + "."
+              : "Nothing needed changing.";
+          });
+        }
+      );
     });
   }
 
@@ -574,6 +721,24 @@
     return state.cloverScript;
   }
 
+  // How Clover's hosted inputs are told to draw the digits. These fields sit on
+  // a white background so the numbers are solid black and a size up: a crew
+  // member reading a card back to a customer in a bright doorway needs the
+  // expiration, security code and ZIP to be legible at a glance.
+  function cardFieldStyles() {
+    return {
+      body: { fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif", fontSize: "17px" },
+      input: {
+        color: "#000000",
+        fontSize: "17px",
+        fontWeight: "600",
+        letterSpacing: "0.02em"
+      },
+      "input::placeholder": { color: "#6b7280", fontWeight: "400" },
+      "input:focus": { color: "#000000" }
+    };
+  }
+
   function initChargeForm(config) {
     var form = document.getElementById("custom-charge-form");
     var amount = document.getElementById("charge-amount");
@@ -586,11 +751,7 @@
         if (!document.getElementById("card-number")) return;
         var clover = new window.Clover(config.publicKey, { merchantId: config.merchantId });
         var elements = clover.elements();
-        var styles = {
-          body: { fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif", fontSize: "16px" },
-          input: { color: "#e7ecf3", fontSize: "16px" },
-          "input::placeholder": { color: "#5f6c7f" }
-        };
+        var styles = cardFieldStyles();
         elements.create("CARD_NUMBER", styles).mount("#card-number");
         elements.create("CARD_DATE", styles).mount("#card-date");
         elements.create("CARD_CVV", styles).mount("#card-cvv");
@@ -1319,7 +1480,9 @@
   function updateBookingTotal() {
     var total = document.getElementById("bk-total");
     if (total) total.textContent = fmtMoney(bookingTotalCents());
-    document.querySelectorAll("[data-item-index]").forEach(function (row) {
+    // Scoped to the booking list: the job drawer's ticket editor uses the same
+    // row markup, and its rows keep their own totals.
+    document.querySelectorAll("#bk-items [data-item-index]").forEach(function (row) {
       var item = state.booking.items[Number(row.dataset.itemIndex)];
       var cell = row.querySelector("[data-item-amount]");
       if (item && cell) cell.textContent = fmtMoney(item.unitPriceCents * item.quantity);
@@ -1384,12 +1547,20 @@
       (appointments.length
         ? '<div class="schedule-list">' +
           appointments.map(function (a) {
+            var dial = telDigits(a.customerPhone);
             return (
               '<div class="schedule-row clickable" data-job="' + a.id + '">' +
               '<div class="schedule-time mono">' + esc(fmtTimeRange(a.scheduledFor, a.durationMinutes)) + "</div>" +
               "<div><strong>" + esc(a.customerName) + "</strong><small>" + esc(a.serviceType) +
               (a.address ? " · " + esc(a.address) : "") + "</small></div>" +
-              "<div>" + assigneeCell(a.assignedName) + " " + statusPill(a.status) + "</div></div>"
+              // Straight to the handset: the crew member running late calls from
+              // the row itself rather than hunting for the number.
+              "<div>" +
+              (dial
+                ? '<a class="btn btn-ghost btn-xs" href="tel:' + dial + '">Call</a> ' +
+                  '<a class="btn btn-ghost btn-xs" href="sms:' + dial + '">Text</a> '
+                : "") +
+              assigneeCell(a.assignedName) + " " + statusPill(a.status) + "</div></div>"
             );
           }).join("") +
           "</div>"
@@ -1555,6 +1726,7 @@
     drawer.hidden = false;
     panel.innerHTML = '<div class="loading">Loading…</div>';
     state.pay = null;
+    state.ticket = null;
     Promise.all([
       api("jobs/" + id),
       state.crew.length ? Promise.resolve({ crew: state.crew }) : api("crew"),
@@ -1571,7 +1743,6 @@
     var j = data.job;
     state.job = data;
     var panel = document.getElementById("drawer-panel");
-    var itemsTotal = data.items.reduce(function (s, i) { return s + i.amountCents; }, 0);
     var crewOptions =
       '<option value="">Unassigned</option>' +
       state.crew.map(function (c) {
@@ -1605,21 +1776,20 @@
       "</div></div>" +
       '<dl class="kv">' +
       "<dt>Customer</dt><dd>" + esc(j.customerName) + "</dd>" +
-      "<dt>Phone</dt><dd>" + esc(j.customerPhone || "—") + "</dd>" +
-      "<dt>Email</dt><dd>" + esc(j.customerEmail || "—") + "</dd>" +
+      "<dt>Phone</dt><dd>" + phoneText(j.customerPhone) + "</dd>" +
+      "<dt>Email</dt><dd>" + emailText(j.customerEmail) + "</dd>" +
       "<dt>Address</dt><dd>" + esc([j.address || j.customerAddress, j.customerCity, j.customerState, j.customerZip].filter(Boolean).join(", ") || "—") + "</dd>" +
       "<dt>Scheduled</dt><dd>" + fmtDate(j.scheduledFor) +
       (j.scheduledFor ? " · " + esc(fmtLength(j.durationMinutes)) : "") + "</dd>" +
       "<dt>Booked by</dt><dd>" + esc(j.bookedByName || "—") + "</dd>" +
       "</dl>" +
-      '<h3 class="section-title">Line items</h3><div class="line-items">' +
-      (data.items.length
-        ? data.items.map(function (i) {
-            return '<div class="li"><span>' + esc(i.label) + (i.detail ? ' <small>' + esc(i.detail) + "</small>" : "") +
-              (i.quantity > 1 ? ' <small>×' + i.quantity + "</small>" : "") + '</span><span class="mono">' + fmtMoney(i.amountCents) + "</span></div>";
-          }).join("")
-        : '<p class="muted">No line items recorded. Job value ' + fmtMoney(j.priceCents) + ".</p>") +
-      '<div class="total-row"><span>Total</span><span class="mono">' + fmtMoney(itemsTotal || j.priceCents) + "</span></div></div>" +
+      contactActions(
+        { id: j.customerId, phone: j.customerPhone, email: j.customerEmail },
+        j.id
+      ) +
+      // The ticket renders itself into this container so it can be reworked
+      // without rebuilding the drawer around it.
+      '<div id="d-ticket"></div>' +
       paymentsSection(data) +
       '<h3 class="section-title" style="margin-top:20px">Activity</h3>' +
       '<form class="note-form" id="d-note"><input type="text" id="d-note-input" placeholder="Add a note…" maxlength="500" /><button class="btn btn-primary btn-sm" type="submit">Add</button></form>' +
@@ -1648,6 +1818,341 @@
     });
 
     wirePayments(data);
+    renderTicket();
+  }
+
+  // ---------- the ticket, reworked at the door ----------
+  // A customer who opens the door and asks for the hallway as well, or a second
+  // couch, or a treatment the crew can see is needed, is the most common way a
+  // job's price changes. The crew member rebuilds the ticket here from the same
+  // published catalog the website quotes, and the customer can be sent the new
+  // total in the same tap so there is nothing to argue about afterwards.
+  function ticketLinesFrom(data) {
+    if (data.items && data.items.length) {
+      return data.items.map(function (i, n) {
+        var quantity = i.quantity || 1;
+        return {
+          key: "line:" + (i.id != null ? i.id : n),
+          kind: i.kind || "service",
+          label: i.label,
+          detail: i.detail || null,
+          quantity: quantity,
+          unitPriceCents:
+            i.unitPriceCents != null ? i.unitPriceCents : Math.round((i.amountCents || 0) / quantity)
+        };
+      });
+    }
+    // A job taken as a single flat quote has nothing itemised yet. Start with
+    // its own value as one line so there is something to add on to.
+    return [
+      {
+        key: "line:quote",
+        kind: "service",
+        label: data.job.serviceType,
+        detail: null,
+        quantity: 1,
+        unitPriceCents: data.job.priceCents
+      }
+    ];
+  }
+
+  function ticketTotalCents() {
+    return state.ticket.items.reduce(function (sum, i) {
+      return sum + i.unitPriceCents * i.quantity;
+    }, 0);
+  }
+
+  function renderTicket() {
+    var host = document.getElementById("d-ticket");
+    if (!host || !state.job) return;
+    var data = state.job;
+    var editing = state.ticket && state.ticket.jobId === data.job.id;
+    host.innerHTML = editing ? ticketEditorHtml(data) : ticketReadHtml(data);
+    if (editing) {
+      renderTicketLines();
+      wireTicketEditor(data);
+    } else {
+      var open = document.getElementById("d-edit-ticket");
+      if (open) {
+        open.addEventListener("click", function () {
+          startTicketEdit(data);
+        });
+      }
+    }
+  }
+
+  function ticketReadHtml(data) {
+    var j = data.job;
+    var itemsTotal = (data.items || []).reduce(function (s, i) { return s + i.amountCents; }, 0);
+    return (
+      '<div class="row-between section-head"><h3 class="section-title">Ticket</h3>' +
+      (j.status === "cancelled"
+        ? '<span class="muted">Cancelled — reopen it to change the price</span>'
+        : '<button type="button" class="btn btn-ghost btn-sm" id="d-edit-ticket">Add on / change price</button>') +
+      "</div>" +
+      '<div class="line-items">' +
+      ((data.items || []).length
+        ? data.items.map(function (i) {
+            return '<div class="li"><span>' + esc(i.label) + (i.detail ? " <small>" + esc(i.detail) + "</small>" : "") +
+              (i.quantity > 1 ? ' <small>×' + i.quantity + "</small>" : "") +
+              '</span><span class="mono">' + fmtMoney(i.amountCents) + "</span></div>";
+          }).join("")
+        : '<p class="muted">No line items recorded. Job value ' + fmtMoney(j.priceCents) + ".</p>") +
+      '<div class="total-row"><span>Total</span><span class="mono">' +
+      fmtMoney(itemsTotal || j.priceCents) + "</span></div></div>"
+    );
+  }
+
+  function ticketEditorHtml(data) {
+    var j = data.job;
+    var cat = priceCatalog();
+    var paid = data.paidCents || 0;
+
+    var catalogOptions =
+      '<option value="">Add from the price list…</option>' +
+      '<optgroup label="Services">' +
+      cat.services.map(function (s) {
+        return '<option value="' + esc(s.key) + '">' + esc(s.label) + " · " + fmtMoney(Math.round(s.price * 100)) + "</option>";
+      }).join("") +
+      '</optgroup><optgroup label="Add-ons and treatments">' +
+      cat.addons.map(function (s) {
+        return '<option value="' + esc(s.key) + '">' + esc(s.label) + " · " + fmtMoney(Math.round(s.price * 100)) + "</option>";
+      }).join("") +
+      "</optgroup>";
+
+    return (
+      '<div class="ticket-editor">' +
+      '<div class="row-between section-head"><h3 class="section-title">Ticket</h3>' +
+      '<span class="pill scheduled">Editing</span></div>' +
+      (cat.services.length
+        ? '<div class="ticket-add"><label class="field"><span>Add a service or treatment</span>' +
+          '<select id="d-catalog">' + catalogOptions + "</select></label>" +
+          '<button type="button" class="btn btn-ghost btn-sm" id="d-add-custom">Other charge</button></div>'
+        : '<div class="ticket-add"><p class="hint warn">The price list did not load — add each line by hand.</p>' +
+          '<button type="button" class="btn btn-ghost btn-sm" id="d-add-custom">Other charge</button></div>') +
+      '<div id="d-ticket-items" class="booking-items"></div>' +
+      '<div class="total-row"><span>New total</span><span class="mono" id="d-ticket-total">$0.00</span></div>' +
+      (paid
+        ? '<p class="hint">' + fmtMoney(paid) +
+          " has already been collected on this job, so the new total cannot be less than that." +
+          "</p>"
+        : "") +
+      '<label class="field"><span>What changed (goes to the customer)</span>' +
+      '<input id="d-ticket-note" maxlength="300" placeholder="e.g. Added hallway and stairs on site" /></label>' +
+      '<div class="pay-receipt"><p class="eyebrow">Send the new total</p>' +
+      channelChoices("d-ticket", {
+        email: j.customerEmail,
+        phone: j.customerPhone,
+        checked: true
+      }) +
+      "</div>" +
+      '<p class="login-error" id="d-ticket-error" hidden></p>' +
+      '<div class="btn-row"><button type="button" class="btn btn-primary btn-sm" id="d-ticket-save">Save new price</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="d-ticket-cancel">Cancel</button></div>' +
+      "</div>"
+    );
+  }
+
+  function renderTicketLines() {
+    var host = document.getElementById("d-ticket-items");
+    if (!host || !state.ticket) return;
+    host.innerHTML = state.ticket.items.length
+      ? state.ticket.items.map(function (item, index) {
+          return (
+            '<div class="booking-item" data-item-index="' + index + '">' +
+            '<span class="booking-item-label">' + esc(item.label) +
+            (item.kind === "addon" ? ' <small class="muted">add-on</small>' : "") +
+            (item.detail ? ' <small class="muted">' + esc(item.detail) + "</small>" : "") + "</span>" +
+            '<label class="booking-item-qty"><small>Qty</small><input type="number" min="1" max="99" step="1" ' +
+            'data-item-qty value="' + item.quantity + '" /></label>' +
+            '<label class="booking-item-price"><small>Each</small><div class="money-input"><span>$</span>' +
+            '<input type="number" min="0" max="10000" step="0.01" data-item-price value="' +
+            (item.unitPriceCents / 100).toFixed(2) + '" /></div></label>' +
+            '<span class="booking-item-amount mono" data-item-amount>' +
+            fmtMoney(item.unitPriceCents * item.quantity) + "</span>" +
+            '<button type="button" class="btn btn-ghost btn-sm" data-item-remove="' + index + '" aria-label="Remove">×</button>' +
+            "</div>"
+          );
+        }).join("")
+      : '<p class="empty">Nothing on the ticket. Add at least one line.</p>';
+    updateTicketTotal();
+  }
+
+  function updateTicketTotal() {
+    var total = document.getElementById("d-ticket-total");
+    if (total) total.textContent = fmtMoney(ticketTotalCents());
+  }
+
+  function startTicketEdit(data) {
+    // A half-filled payment panel and a moving total do not mix: the balance is
+    // about to change, so the panel closes and is reopened against the new
+    // figure once the ticket is saved.
+    if (state.pay) {
+      state.pay = null;
+      toast("Finish the ticket first — then collect against the new balance.");
+    }
+    state.ticket = { jobId: data.job.id, items: ticketLinesFrom(data) };
+    renderDrawer(state.job);
+  }
+
+  function addTicketLine(key) {
+    var entry = findCatalogEntry(key);
+    if (!entry || !state.ticket) return;
+    var items = state.ticket.items;
+    for (var i = 0; i < items.length; i++) {
+      // The same line twice means two rooms, two chairs, two systems.
+      if (items[i].key === entry.key) {
+        items[i].quantity = Math.min(99, items[i].quantity + 1);
+        renderTicketLines();
+        return;
+      }
+    }
+    items.push({
+      key: entry.key,
+      kind: entry.kind,
+      label: entry.label,
+      detail: null,
+      quantity: 1,
+      unitPriceCents: Math.round(entry.price * 100)
+    });
+    renderTicketLines();
+  }
+
+  function promptTicketLine() {
+    openModal(
+      "Other charge",
+      '<label class="field"><span>What is being charged</span><input id="m-label" maxlength="160" required ' +
+        'placeholder="e.g. Pet treatment, one room" /></label>' +
+        '<label class="field"><span>Price</span><div class="money-input"><span>$</span>' +
+        '<input id="m-amount" type="number" min="0" max="10000" step="0.01" inputmode="decimal" required placeholder="0.00" /></div></label>',
+      function () {
+        var label = val("m-label");
+        var amount = Math.round((Number(val("m-amount")) || 0) * 100);
+        if (!label) throw new Error("Describe what is being charged");
+        if (amount < 0) throw new Error("Enter a price of $0.00 or more");
+        if (!state.ticket) throw new Error("The ticket is no longer open");
+        state.ticket.items.push({
+          key: "custom:" + new Date().getTime(),
+          kind: "custom",
+          label: label,
+          detail: null,
+          quantity: 1,
+          unitPriceCents: amount
+        });
+        renderTicketLines();
+        return "";
+      }
+    );
+  }
+
+  function wireTicketEditor(data) {
+    var catalog = document.getElementById("d-catalog");
+    if (catalog) {
+      catalog.addEventListener("change", function () {
+        if (!this.value) return;
+        addTicketLine(this.value);
+        this.value = "";
+      });
+    }
+    document.getElementById("d-add-custom").addEventListener("click", promptTicketLine);
+
+    var rows = document.getElementById("d-ticket-items");
+    rows.addEventListener("input", function (ev) {
+      var row = ev.target.closest("[data-item-index]");
+      if (!row || !state.ticket) return;
+      var item = state.ticket.items[Number(row.dataset.itemIndex)];
+      if (!item) return;
+      if (ev.target.dataset.itemQty !== undefined) {
+        item.quantity = Math.min(99, Math.max(1, Math.round(Number(ev.target.value) || 1)));
+      }
+      if (ev.target.dataset.itemPrice !== undefined) {
+        item.unitPriceCents = Math.max(0, Math.round((Number(ev.target.value) || 0) * 100));
+      }
+      var cell = row.querySelector("[data-item-amount]");
+      if (cell) cell.textContent = fmtMoney(item.unitPriceCents * item.quantity);
+      updateTicketTotal();
+    });
+    rows.addEventListener("click", function (ev) {
+      var remove = ev.target.closest("[data-item-remove]");
+      if (!remove || !state.ticket) return;
+      state.ticket.items.splice(Number(remove.dataset.itemRemove), 1);
+      renderTicketLines();
+    });
+
+    document.getElementById("d-ticket-cancel").addEventListener("click", function () {
+      state.ticket = null;
+      renderTicket();
+    });
+    document.getElementById("d-ticket-save").addEventListener("click", function () {
+      saveTicket(data.job.id);
+    });
+  }
+
+  function ticketError(message) {
+    var box = document.getElementById("d-ticket-error");
+    if (!box) {
+      toast(message);
+      return;
+    }
+    box.textContent = message;
+    box.hidden = false;
+  }
+
+  function saveTicket(jobId) {
+    if (!state.ticket) return;
+    var items = state.ticket.items;
+    if (!items.length) {
+      ticketError("A ticket needs at least one line.");
+      return;
+    }
+    var button = document.getElementById("d-ticket-save");
+    var note = val("d-ticket-note");
+    var channels = chosenChannels("d-ticket");
+    var box = document.getElementById("d-ticket-error");
+    if (box) box.hidden = true;
+    button.disabled = true;
+    button.textContent = "Saving…";
+
+    api("jobs/" + jobId + "/items", {
+      method: "PUT",
+      body: {
+        items: items.map(function (i) {
+          return {
+            kind: i.kind,
+            label: i.label,
+            detail: i.detail,
+            quantity: i.quantity,
+            unitPriceCents: i.unitPriceCents
+          };
+        }),
+        note: note,
+        sendUpdate: channels
+      }
+    })
+      .then(function (res) {
+        state.ticket = null;
+        var moved = res.previousCents !== res.job.priceCents;
+        renderDrawer(res);
+        // The jobs list quotes this price too, but only refresh it if it is the
+        // tab behind the drawer — there is no point spending a crew member's
+        // signal on a screen they are not looking at.
+        var active = document.querySelector(".tab.active");
+        if (active && active.dataset.view === "jobs") renderJobs();
+        var failed = describeSends(res.sent);
+        toast(
+          (moved
+            ? "Total is now " + fmtMoney(res.job.priceCents) + " (was " + fmtMoney(res.previousCents) + ")."
+            : "Ticket saved at " + fmtMoney(res.job.priceCents) + ".") +
+            (channels.length ? (failed ? " " + failed : " The customer has the new total.") : "")
+        );
+      })
+      .catch(function (e) {
+        ticketError(e.message || "Could not save the new price");
+        if (button) {
+          button.disabled = false;
+          button.textContent = "Save new price";
+        }
+      });
   }
 
   // ---------- money collected on a job ----------
@@ -1690,6 +2195,7 @@
         ? ""
         : '<button type="button" class="btn btn-primary btn-sm" id="d-collect">Collect payment</button>') +
       '<button type="button" class="btn btn-ghost btn-sm" id="d-confirm">Send confirmation</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="d-quote">Send total</button>' +
       ((data.payments || []).length
         ? '<button type="button" class="btn btn-ghost btn-sm" id="d-receipt">Send receipt</button>'
         : "") +
@@ -1793,6 +2299,10 @@
     if (confirm) {
       confirm.addEventListener("click", function () { openSendModal(j.id, "booking_confirmation"); });
     }
+    var quote = document.getElementById("d-quote");
+    if (quote) {
+      quote.addEventListener("click", function () { openSendModal(j.id, "quote_update"); });
+    }
     var receipt = document.getElementById("d-receipt");
     if (receipt) {
       receipt.addEventListener("click", function () { openSendModal(j.id, "payment_receipt"); });
@@ -1832,11 +2342,7 @@
         if (!document.getElementById("pay-card-number") || !state.pay) return;
         var clover = new window.Clover(card.publicKey, { merchantId: card.merchantId });
         var elements = clover.elements();
-        var styles = {
-          body: { fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif", fontSize: "16px" },
-          input: { color: "#e7ecf3", fontSize: "16px" },
-          "input::placeholder": { color: "#5f6c7f" }
-        };
+        var styles = cardFieldStyles();
         elements.create("CARD_NUMBER", styles).mount("#pay-card-number");
         elements.create("CARD_DATE", styles).mount("#pay-card-date");
         elements.create("CARD_CVV", styles).mount("#pay-card-cvv");
@@ -1946,12 +2452,15 @@
       })
       .then(function (preview) {
         var isReceipt = kind === "payment_receipt";
+        var isQuote = kind === "quote_update";
         var nothingReady = !preview.email.available && !preview.sms.available;
         var body =
           '<p class="muted send-intro">' +
           (isReceipt
             ? "Send the customer a receipt for the payment just taken."
-            : "Send the customer written confirmation of the appointment.") +
+            : isQuote
+              ? "Send the customer the ticket as it stands, line by line, with the balance due."
+              : "Send the customer written confirmation of the appointment.") +
           "</p>" +
           channelChoices("send", {
             email: preview.email.recipient,
@@ -1968,21 +2477,26 @@
           '<div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" id="send-copy-email">Copy email</button>' +
           '<button type="button" class="btn btn-ghost btn-sm" id="send-copy-sms">Copy text message</button></div>';
 
-        openModal(isReceipt ? "Send a receipt" : "Send the booking confirmation", body, function () {
-          var channels = chosenChannels("send");
-          if (!channels.length) {
-            throw new Error("Pick email or text — or copy the wording and send it yourself");
+        openModal(
+          isReceipt ? "Send a receipt" : isQuote ? "Send the current total" : "Send the booking confirmation",
+          body,
+          function () {
+            var channels = chosenChannels("send");
+            if (!channels.length) {
+              throw new Error("Pick email or text — or copy the wording and send it yourself");
+            }
+            return api("jobs/" + jobId + "/confirmation", {
+              method: "POST",
+              body: { channels: channels, kind: kind }
+            }).then(function (data) {
+              renderDrawer(data);
+              var failed = describeSends(data.sent);
+              if (failed) throw new Error(failed);
+              return (isReceipt ? "Receipt" : isQuote ? "Total" : "Confirmation") +
+                " sent to " + data.job.customerName + ".";
+            });
           }
-          return api("jobs/" + jobId + "/confirmation", {
-            method: "POST",
-            body: { channels: channels, kind: kind }
-          }).then(function (data) {
-            renderDrawer(data);
-            var failed = describeSends(data.sent);
-            if (failed) throw new Error(failed);
-            return (isReceipt ? "Receipt" : "Confirmation") + " sent to " + data.job.customerName + ".";
-          });
-        });
+        );
 
         var submit = document.getElementById("modal-submit");
         if (submit) submit.textContent = "Send";
@@ -2042,6 +2556,7 @@
 
   function closeDrawer() {
     document.getElementById("drawer").hidden = true;
+    state.ticket = null;
   }
 
   // ---------- boot ----------
@@ -2117,6 +2632,9 @@
       if (roleFor) changeRole(Number(roleFor), e.target.value);
     });
     document.body.addEventListener("click", function (e) {
+      // A Call, Text or Email link hands off to the handset. It is checked first
+      // because these links sit inside rows that would otherwise open a job.
+      if (e.target.closest('a[href^="tel:"], a[href^="sms:"], a[href^="mailto:"]')) return;
       if (e.target.closest("[data-modal-close]")) { closeModal(); return; }
       var goTo = e.target.closest("[data-goto]");
       if (goTo) { switchView(goTo.dataset.goto); return; }
@@ -2126,6 +2644,14 @@
       if (newCode) { promptNewCode(Number(newCode.dataset.newCode)); return; }
       var toggle = e.target.closest("[data-toggle-active]");
       if (toggle) { toggleAccess(Number(toggle.dataset.toggleActive)); return; }
+      var editCustomer = e.target.closest("[data-edit-customer]");
+      if (editCustomer) {
+        openCustomerEditor(
+          Number(editCustomer.dataset.editCustomer),
+          editCustomer.dataset.fromJob ? Number(editCustomer.dataset.fromJob) : null
+        );
+        return;
+      }
       var row = e.target.closest("[data-job]");
       if (row) { openJob(Number(row.dataset.job)); return; }
       if (e.target.matches("[data-close]")) { closeDrawer(); return; }
