@@ -118,6 +118,9 @@ a { color: inherit; }
 .btn-ghost { background: transparent; border-color: var(--border); color: var(--muted); }
 .btn-ghost:hover { color: var(--text); border-color: var(--faint); }
 .btn-sm { padding: 7px 11px; font-size: 0.8rem; }
+/* Call / Text / Email are links, not buttons, so they hand off to the handset.
+   They still have to look and size like the buttons beside them. */
+a.btn { display: inline-block; text-decoration: none; }
 
 /* ---------- App shell ---------- */
 .app { min-height: 100vh; display: flex; flex-direction: column; }
@@ -263,6 +266,8 @@ tbody tr.clickable:hover { background: var(--surface-2); }
 .feed-item .dot.schedule { background: var(--sky); }
 .feed-item .dot.payment { background: var(--green); }
 .feed-item .dot.notify { background: var(--brand); }
+.feed-item .dot.price { background: var(--amber); }
+.feed-item .dot.customer { background: var(--violet); }
 .feed-item time { color: var(--faint); font-size: 0.76rem; }
 
 /* ---------- Drawer ---------- */
@@ -290,6 +295,36 @@ tbody tr.clickable:hover { background: var(--surface-2); }
 }
 .li small { color: var(--muted); }
 .total-row { display: flex; justify-content: space-between; font-weight: 700; padding-top: 12px; }
+.section-head { margin-top: 20px; }
+.section-head .section-title { margin: 0; }
+
+/* Call / Text / Email / Edit. Deliberately full-width and thumb-sized: this is
+   the row a crew member uses standing on a doorstep, one-handed. */
+.contact-bar { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 12px; }
+.contact-bar .btn { flex: 1 1 auto; min-width: 88px; text-align: center; text-decoration: none; }
+.contact-link { color: var(--text); text-decoration: none; border-bottom: 1px dotted var(--faint); }
+.contact-link:hover { color: var(--brand); border-bottom-color: var(--brand); }
+.btn-xs {
+  padding: 4px 8px; font-size: 0.72rem; border-radius: 7px;
+  text-decoration: none; white-space: nowrap;
+}
+.cell-contact { font-size: 0.84rem; line-height: 1.7; }
+
+/* Reworking the ticket in the drawer: same row controls as the booking screen,
+   because it is the same job being priced. */
+.ticket-editor {
+  margin-top: 18px; display: grid; gap: 12px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 13px;
+  padding: 15px;
+}
+.ticket-editor .section-head { margin-top: 0; }
+.ticket-editor .booking-item { background: var(--surface); }
+.ticket-editor .booking-item .money-input { background: var(--surface-2); }
+.ticket-add { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
+.ticket-add .hint { margin: 0; align-self: center; }
+
+.customer-search { display: grid; gap: 8px; margin-bottom: 14px; }
+.customer-search .hint { margin: 0; }
 .control-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0; }
 .control-row label { font-size: 0.76rem; color: var(--muted); font-weight: 600; display: grid; gap: 5px; }
 .control-row select {
@@ -390,8 +425,22 @@ tbody tr.clickable:hover { background: var(--surface-2); }
 .money-input input { border: 0; box-shadow: none !important; padding-left: 5px; }
 .card-fields { display: grid; grid-template-columns: 1.5fr 0.8fr 0.7fr 0.7fr; gap: 10px; }
 .card-fields label { display: grid; gap: 6px; color: var(--muted); font-size: 0.78rem; font-weight: 600; }
-.clover-field { min-height: 44px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 11px 10px; }
-.clover-field:focus-within { border-color: var(--brand); box-shadow: 0 0 0 3px var(--brand-soft); }
+/* Card entry runs against the dark theme on purpose. Clover draws the digits
+   inside its own iframe in black (see cardFieldStyles in manager.js), so the
+   field itself is white — card number, expiration, security code and ZIP all
+   read like a paper form, which is what a crew member needs when they are
+   reading a card back to a customer on a bright doorstep. */
+.clover-field {
+  min-height: 48px;
+  background: #ffffff;
+  border: 1px solid #c3ccd8;
+  border-radius: 10px;
+  padding: 12px 11px;
+}
+.clover-field:focus-within {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-soft);
+}
 .charge-submit { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding-top: 3px; }
 .charge-submit p { color: var(--muted); font-size: 0.76rem; max-width: 330px; }
 .charge-submit .btn { min-width: 165px; }
@@ -561,6 +610,10 @@ tbody tr.clickable:hover { background: var(--surface-2); }
   .booking-item [data-item-remove] { grid-area: remove; }
   .schedule-row { grid-template-columns: 1fr; }
   .booked-note { display: grid; }
+  /* On a phone the ticket editor's add row stacks, so the price list select
+     keeps a full-width tap target. */
+  .ticket-add { grid-template-columns: 1fr; }
+  .ticket-add .btn { justify-self: stretch; }
 }
 
 /* ---------- Toast ---------- */
@@ -625,7 +678,8 @@ tbody tr.clickable:hover { background: var(--surface-2); }
   background: var(--surface-2); border: 1px solid var(--border); border-radius: 13px;
   padding: 15px;
 }
-.pay-panel .field input, .pay-panel .field select, .pay-panel .money-input, .pay-panel .clover-field {
+/* The card fields keep their white background inside the payment panel too. */
+.pay-panel .field input, .pay-panel .field select, .pay-panel .money-input {
   background: var(--surface);
 }
 .pay-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 11px; }

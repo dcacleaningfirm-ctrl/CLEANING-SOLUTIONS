@@ -480,6 +480,71 @@ export function paymentReceipt(
   };
 }
 
+// What the customer is told when the ticket changes while the crew is at the
+// door: a room added, an extra treatment agreed, a quote corrected. It spells
+// out every line so the figure the customer is asked to pay is never a surprise.
+export function quoteUpdate(
+  appointment: AppointmentSummary,
+  change: { previousCents: number; note?: string | null }
+) {
+  const balance = Math.max(0, appointment.priceCents - (appointment.paidCents || 0));
+  const previous = Number(change.previousCents) || 0;
+  const moved = previous !== appointment.priceCents;
+  const direction = appointment.priceCents > previous ? "increased" : "come down";
+
+  const rows: [string, string][] = [["Service", appointment.serviceType]];
+  if (appointment.scheduledFor) rows.push(["Appointment", spellOutTime(appointment.scheduledFor)]);
+  for (const item of appointment.items || []) {
+    rows.push([
+      item.quantity > 1 ? `${item.label} ×${item.quantity}` : item.label,
+      money(item.amountCents)
+    ]);
+  }
+  if (moved) rows.push(["Previous total", money(previous)]);
+  rows.push([moved ? "New total" : "Total", money(appointment.priceCents)]);
+  if (appointment.paidCents) rows.push(["Paid so far", money(appointment.paidCents)]);
+  rows.push(["Balance due", money(balance)]);
+  if (change.note) rows.push(["Note", change.note]);
+  rows.push(["Reference", `Job #${appointment.jobId}`]);
+
+  const headline = moved
+    ? `Your total for job #${appointment.jobId} has ${direction} to ${money(appointment.priceCents)}.`
+    : `Here is the current total for job #${appointment.jobId}: ${money(appointment.priceCents)}.`;
+
+  const lines = [`Hi ${appointment.customerName},`, "", headline, ""];
+  for (const [label, value] of rows) lines.push(`${label}: ${value}`);
+  lines.push(
+    "",
+    `If anything here does not match what was agreed, call or text ${BUSINESS.phone} straight away.`,
+    "",
+    BUSINESS.name
+  );
+
+  const sms =
+    `${BUSINESS.name}: ${moved ? `job #${appointment.jobId} total is now ${money(appointment.priceCents)} (was ${money(previous)})` : `job #${appointment.jobId} total is ${money(appointment.priceCents)}`}.` +
+    (balance > 0 ? ` Balance due ${money(balance)}.` : " Paid in full — thank you!") +
+    ` Questions? ${BUSINESS.phone}.`;
+
+  return {
+    subject: `Updated total for your ${appointment.serviceType.toLowerCase()} — ${money(
+      appointment.priceCents
+    )}`,
+    text: lines.join("\n"),
+    html: wrapHtml(
+      moved ? "Your updated total" : "Your current total",
+      [
+        `Hi ${appointment.customerName}, ${headline.charAt(0).toLowerCase()}${headline.slice(1)}`,
+        change.note ? String(change.note) : "",
+        balance > 0
+          ? `A balance of ${money(balance)} is due on this job.`
+          : "Nothing further is due on this job."
+      ].filter(Boolean),
+      rows
+    ),
+    sms
+  };
+}
+
 function shortTime(value: Date | string | null): string {
   if (!value) return "your scheduled time";
   const at = value instanceof Date ? value : new Date(value);
