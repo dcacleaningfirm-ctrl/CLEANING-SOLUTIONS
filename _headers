@@ -27,9 +27,17 @@
 /thank-you
   Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
 
+# The manager app loads two third parties: Clover's card SDK, and the Google
+# Maps JavaScript API for the dashboard job map. Maps needs more than a script
+# origin — it fetches tiles and marker sprites as images from maps.gstatic.com
+# and the *.googleapis.com/*.ggpht.com tile hosts, calls the geocoding and
+# places endpoints over XHR, pulls its own font and stylesheet from Google
+# Fonts, and starts blob-backed workers for the vector renderer. Each of those
+# is a separate directive; miss one and the map draws blank instead of failing
+# loudly.
 /manager/*
   X-Robots-Tag: noindex, nofollow
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data:; script-src 'self' https://checkout.clover.com https://checkout.sandbox.dev.clover.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://checkout.clover.com https://checkout.sandbox.dev.clover.com; frame-src https://checkout.clover.com https://checkout.sandbox.dev.clover.com
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://maps.googleapis.com https://maps.gstatic.com https://*.googleapis.com https://*.gstatic.com https://*.ggpht.com; script-src 'self' https://checkout.clover.com https://checkout.sandbox.dev.clover.com https://maps.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; worker-src 'self' blob:; connect-src 'self' https://checkout.clover.com https://checkout.sandbox.dev.clover.com https://maps.googleapis.com; frame-src https://checkout.clover.com https://checkout.sandbox.dev.clover.com
 
 # The worker must be revalidated every load, otherwise a cached copy keeps
 # serving an old app shell to phones that already installed it.

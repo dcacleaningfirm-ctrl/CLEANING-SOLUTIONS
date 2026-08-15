@@ -37,7 +37,22 @@
     ticket: null,
     // Customers tab: the search term in force and its debounce timer.
     customerSearch: "",
-    customerTimer: null
+    customerTimer: null,
+    // The dashboard job map: the loaded Google Maps namespace, the live map and
+    // its markers, and an address waiting to be centred on the next time the
+    // dashboard is on screen.
+    maps: {
+      loader: null,
+      map: null,
+      info: null,
+      geocoder: null,
+      markers: [],
+      target: null,
+      jobs: [],
+      geo: null,
+      pending: null,
+      token: 0
+    }
   };
 
   var CREW_ROLES = ["owner", "manager", "admin", "technician"];
@@ -471,7 +486,9 @@
         (statuses.length ? statuses.join(" ") : '<span class="muted">No jobs yet</span>') +
         "</div><h3 class=\"section-title\" style=\"margin-top:20px\">Recent activity</h3>" +
         activityFeed(d.recentEvents) +
-        "</div></div>";
+        "</div></div>" +
+        mapCardHtml();
+      initJobMap(d.mapJobs || []);
     });
   }
 
@@ -500,6 +517,394 @@
       }).join("") +
       "</div>"
     );
+  }
+
+  // ---------- the dashboard job map ----------
+  // The lists above say when the work is. This says where it is. Every job still
+  // on the books is geocoded from the address the crew was given and dropped on
+  // the map, so a manager can see a technician sent across the metro and back
+  // before it happens, and can hand a driver turn-by-turn directions without
+  // anyone retyping a street name into a phone.
+  //
+  // The map needs GOOGLE_MAPS_BROWSER_KEY, with the Maps JavaScript API and the
+  // Geocoding API both switched on for it. Without the key the card explains
+  // itself rather than sitting there blank.
+
+  var MAP_HOME = { lat: 33.749, lng: -84.388 }; // Downtown Atlanta
+  // The marker colours are the status pill colours, so a glance at the map and a
+  // glance at the pipeline chips mean the same thing.
+  var MAP_STATUS_COLOR = {
+    scheduled: "#38bdf8",
+    en_route: "#a78bfa",
+    in_progress: "#fbbf24",
+    completed: "#34d399",
+    cancelled: "#f87171"
+  };
+  var GEO_CACHE_KEY = "dca-geocode-v1";
+
+  function mapCardHtml() {
+    var legend = STATUS_ORDER.slice(0, 3)
+      .map(function (k) {
+        return '<span class="map-key"><i style="background:' + MAP_STATUS_COLOR[k] + '"></i>' +
+          esc(STATUS_LABEL[k]) + "</span>";
+      })
+      .join("");
+    return (
+      '<div class="card map-card" id="job-map-card">' +
+      '<div class="row-between"><h3 class="section-title">Job map</h3>' +
+      '<div class="map-legend">' + legend + "</div></div>" +
+      '<form class="map-search" id="map-search-form" autocomplete="off">' +
+      '<input id="map-search-input" type="search" maxlength="200" ' +
+      'placeholder="Type a service address to centre the map…" />' +
+      '<button type="submit" class="btn btn-primary btn-sm">Find address</button>' +
+      '<a class="btn btn-ghost btn-sm" id="map-directions" target="_blank" rel="noopener" hidden>Get directions</a>' +
+      "</form>" +
+      '<div class="map-canvas" id="job-map"></div>' +
+      '<p class="hint map-status" id="map-status">Loading the map…</p>' +
+      "</div>"
+    );
+  }
+
+  function setMapStatus(message, warn) {
+    var node = document.getElementById("map-status");
+    if (!node) return;
+    node.textContent = message;
+    node.classList.toggle("warn", !!warn);
+  }
+
+  // Turn-by-turn in whatever map app the phone prefers. Google's universal
+  // directions link opens the native app on a phone and the web map elsewhere.
+  function directionsUrl(address) {
+    return "https://www.google.com/maps/dir/?api=1&destination=" + encodeURIComponent(address);
+  }
+
+  function addressKey(address) {
+    return String(address == null ? "" : address).toLowerCase().replace(/\s+/g, " ").trim();
+  }
+
+  // Geocoding is billed per lookup and an address does not move, so every answer
+  // is kept on the device. A dashboard reopened all day costs one lookup per new
+  // address, not one per glance.
+  function geoCache() {
+    if (!state.maps.geo) {
+      try {
+        state.maps.geo = JSON.parse(localStorage.getItem(GEO_CACHE_KEY) || "{}") || {};
+      } catch (e) {
+        state.maps.geo = {};
+      }
+    }
+    return state.maps.geo;
+  }
+
+  function rememberPoint(address, point) {
+    var cache = geoCache();
+    cache[addressKey(address)] = point;
+    try {
+      localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(cache));
+    } catch (e) {
+      /* a full or blocked store only costs us the saving, not the map */
+    }
+  }
+
+  // Loads the Maps script once per session, using the browser key the server
+  // hands out with the rest of the site's settings.
+  function loadMaps() {
+    if (state.maps.loader) return state.maps.loader;
+    var loading = loadSettings().then(function (settings) {
+      var maps = (settings && settings.maps) || {};
+      if (!maps.enabled || !maps.browserKey) {
+        var missing = new Error(
+          "No Google Maps key is set for this site (" +
+            ((maps.missing && maps.missing.join(", ")) || "GOOGLE_MAPS_BROWSER_KEY") +
+            "), so the map cannot load."
+        );
+        missing.configured = false;
+        throw missing;
+      }
+      if (window.google && window.google.maps && window.google.maps.Geocoder) {
+        return window.google.maps;
+      }
+      return new Promise(function (resolve, reject) {
+        window.__dcaMapsReady = function () {
+          resolve(window.google.maps);
+        };
+        var script = document.createElement("script");
+        script.async = true;
+        script.src =
+          "https://maps.googleapis.com/maps/api/js?key=" +
+          encodeURIComponent(maps.browserKey) +
+          "&v=weekly&loading=async&callback=__dcaMapsReady";
+        script.onerror = function () {
+          reject(new Error("The Google Maps script could not be loaded."));
+        };
+        document.head.appendChild(script);
+      });
+    });
+    state.maps.loader = loading;
+    // A failed load must not be remembered as the answer forever — the key may
+    // be added, or the signal may come back, before the next dashboard render.
+    loading.catch(function () {
+      if (state.maps.loader === loading) state.maps.loader = null;
+    });
+    return loading;
+  }
+
+  function geocode(address) {
+    var key = addressKey(address);
+    if (!key) return Promise.reject(new Error("There is no address to look up."));
+    var hit = geoCache()[key];
+    if (hit && typeof hit.lat === "number") return Promise.resolve(hit);
+    return loadMaps().then(function (gm) {
+      if (!state.maps.geocoder) state.maps.geocoder = new gm.Geocoder();
+      return new Promise(function (resolve, reject) {
+        state.maps.geocoder.geocode(
+          { address: address, componentRestrictions: { country: "us" } },
+          function (results, status) {
+            if (status === "OK" && results && results.length) {
+              var at = results[0].geometry.location;
+              var point = {
+                lat: at.lat(),
+                lng: at.lng(),
+                label: results[0].formatted_address || address
+              };
+              rememberPoint(address, point);
+              resolve(point);
+              return;
+            }
+            reject(
+              new Error(
+                status === "ZERO_RESULTS"
+                  ? "Google could not find “" + address + "”."
+                  : "That address could not be looked up (" + status + ")."
+              )
+            );
+          }
+        );
+      });
+    });
+  }
+
+  function markerIcon(gm, status) {
+    return {
+      path: "M0,0 C-3,-16 -11,-19 -11,-27 A11,11 0 1,1 11,-27 C11,-19 3,-16 0,0 z",
+      fillColor: MAP_STATUS_COLOR[status] || "#38bdf8",
+      fillOpacity: 1,
+      strokeColor: "#0e1116",
+      strokeWeight: 2,
+      scale: 1,
+      anchor: new gm.Point(0, 0)
+    };
+  }
+
+  // What a crew member needs while standing on the pavement: who, where, when,
+  // what state the job is in, who is assigned, and a way to start driving.
+  function jobInfoHtml(job) {
+    return (
+      '<div class="map-info">' +
+      "<strong>" + esc(job.customerName) + "</strong>" +
+      '<div class="map-info-line">' + esc(job.serviceType) + " · " + statusPill(job.status) + "</div>" +
+      '<div class="map-info-line">' + esc(job.serviceAddress) + "</div>" +
+      '<div class="map-info-line">' + esc(fmtDate(job.scheduledFor)) + "</div>" +
+      '<div class="map-info-line">Crew: ' + esc(job.assignedName || "Unassigned") + "</div>" +
+      '<div class="map-info-actions">' +
+      '<a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="' +
+      esc(directionsUrl(job.serviceAddress)) + '">Get directions</a>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-job="' + job.id + '">Open job</button>' +
+      "</div></div>"
+    );
+  }
+
+  function clearMapMarkers() {
+    state.maps.markers.forEach(function (m) {
+      m.setMap(null);
+    });
+    state.maps.markers = [];
+  }
+
+  function initJobMap(jobList) {
+    var card = document.getElementById("job-map-card");
+    if (!card) return;
+    state.maps.jobs = jobList || [];
+    state.maps.map = null;
+    state.maps.markers = [];
+    state.maps.target = null;
+    // Switching tabs and back rebuilds the dashboard, so a slow first load can
+    // still be in flight when a second one starts. Only the newest build is
+    // allowed to touch the map.
+    state.maps.token = (state.maps.token || 0) + 1;
+    var token = state.maps.token;
+
+    document.getElementById("map-search-form").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var typed = document.getElementById("map-search-input").value.trim();
+      if (typed) focusMapOn(typed);
+    });
+
+    loadMaps()
+      .then(function (gm) {
+        var canvas = document.getElementById("job-map");
+        if (!canvas || token !== state.maps.token) return;
+        state.maps.map = new gm.Map(canvas, {
+          center: MAP_HOME,
+          zoom: 10,
+          mapTypeControl: false,
+          streetViewControl: false,
+          clickableIcons: false,
+          gestureHandling: "greedy"
+        });
+        state.maps.info = new gm.InfoWindow();
+        plotJobs(gm, token);
+      })
+      .catch(function (e) {
+        if (token !== state.maps.token) return;
+        var canvas = document.getElementById("job-map");
+        if (canvas) canvas.classList.add("map-canvas-empty");
+        setMapStatus(
+          e.configured === false
+            ? e.message + " Add it in Netlify under Site configuration → Environment variables, then redeploy."
+            : e.message || "The map could not be loaded.",
+          true
+        );
+      });
+  }
+
+  // Drops a pin for every job that has an address, one lookup at a time so a
+  // full schedule does not trip Google's rate limit, and then frames them all.
+  function plotJobs(gm, token) {
+    var jobsToPlot = state.maps.jobs.filter(function (j) {
+      return j && j.serviceAddress;
+    });
+    if (!jobsToPlot.length) {
+      setMapStatus("No scheduled job has a service address on file yet, so there is nothing to plot.");
+      applyPendingFocus();
+      return;
+    }
+
+    clearMapMarkers();
+    var bounds = new gm.LatLngBounds();
+    var plotted = 0;
+    var skipped = 0;
+    setMapStatus("Placing " + jobsToPlot.length + " scheduled job" + (jobsToPlot.length === 1 ? "" : "s") + " on the map…");
+
+    var index = 0;
+    function step() {
+      if (token !== state.maps.token) return;
+      if (index >= jobsToPlot.length) {
+        if (plotted && !state.maps.pending) {
+          if (plotted === 1) {
+            state.maps.map.setCenter(bounds.getCenter());
+            state.maps.map.setZoom(15);
+          } else {
+            state.maps.map.fitBounds(bounds, 48);
+          }
+        }
+        setMapStatus(
+          plotted
+            ? plotted + " job" + (plotted === 1 ? "" : "s") + " on the map" +
+              (skipped ? " · " + skipped + " address" + (skipped === 1 ? "" : "es") + " could not be found" : "") +
+              " · tap a pin for the appointment and directions"
+            : "None of these addresses could be found on the map.",
+          !plotted
+        );
+        applyPendingFocus();
+        return;
+      }
+
+      var job = jobsToPlot[index++];
+      var wasCached = !!geoCache()[addressKey(job.serviceAddress)];
+      geocode(job.serviceAddress)
+        .then(function (point) {
+          if (!state.maps.map || token !== state.maps.token) return;
+          var marker = new gm.Marker({
+            map: state.maps.map,
+            position: { lat: point.lat, lng: point.lng },
+            title: job.customerName + " · " + job.serviceAddress,
+            icon: markerIcon(gm, job.status)
+          });
+          marker.addListener("click", function () {
+            state.maps.info.setContent(jobInfoHtml(job));
+            state.maps.info.open({ map: state.maps.map, anchor: marker });
+          });
+          state.maps.markers.push(marker);
+          bounds.extend(marker.getPosition());
+          plotted++;
+        })
+        .catch(function () {
+          // One unfindable address must not stop the rest of the day appearing.
+          skipped++;
+        })
+        .then(function () {
+          // Pause only when Google was actually asked something.
+          if (wasCached) {
+            step();
+            return;
+          }
+          setTimeout(step, 140);
+        });
+    }
+    step();
+  }
+
+  // Centre and zoom the map on one exact address — used by the map's own search
+  // box, by the booking screen when an address is typed or a customer picked,
+  // and by a job's drawer.
+  function focusMapOn(address) {
+    var wanted = String(address == null ? "" : address).trim();
+    if (!wanted) return;
+    state.maps.pending = wanted;
+
+    var input = document.getElementById("map-search-input");
+    if (input) input.value = wanted;
+    // No map on screen yet: remembered, and applied the moment one appears.
+    if (!state.maps.map) return;
+
+    setMapStatus("Looking up " + wanted + "…");
+    geocode(wanted)
+      .then(function (point) {
+        if (state.maps.pending !== wanted || !state.maps.map) return;
+        state.maps.pending = null;
+        var at = { lat: point.lat, lng: point.lng };
+        state.maps.map.setCenter(at);
+        state.maps.map.setZoom(17);
+
+        if (state.maps.target) state.maps.target.setMap(null);
+        state.maps.target = new window.google.maps.Marker({
+          map: state.maps.map,
+          position: at,
+          title: point.label,
+          zIndex: 999,
+          icon: {
+            path: window.google.maps.SymbolPath.CIRCLE,
+            scale: 10,
+            fillColor: "#2f6df6",
+            fillOpacity: 1,
+            strokeColor: "#ffffff",
+            strokeWeight: 3
+          }
+        });
+
+        var link = document.getElementById("map-directions");
+        if (link) {
+          link.href = directionsUrl(point.label);
+          link.hidden = false;
+        }
+        setMapStatus("Centred on " + point.label);
+      })
+      .catch(function (e) {
+        if (state.maps.pending === wanted) state.maps.pending = null;
+        setMapStatus(e.message || "That address could not be found.", true);
+      });
+  }
+
+  function applyPendingFocus() {
+    if (state.maps.pending && state.maps.map) focusMapOn(state.maps.pending);
+  }
+
+  // Remembers an address for the map without disturbing the screen the user is
+  // on. The dashboard picks it up the next time it is shown.
+  function queueMapFocus(address) {
+    var wanted = String(address == null ? "" : address).trim();
+    if (wanted) state.maps.pending = wanted;
   }
 
   function renderJobs() {
@@ -1328,6 +1733,27 @@
     document.getElementById("bk-search").addEventListener("blur", function () {
       setTimeout(hideLookup, 150);
     });
+
+    // An address typed into the booking form is where the crew is being sent, so
+    // the dashboard map is asked to centre on it. Nothing is looked up until the
+    // field is left alone, and nothing moves on screen until the dashboard is
+    // opened — the person taking the call is not interrupted.
+    ["bk-address", "bk-city", "bk-state", "bk-zip"].forEach(function (id) {
+      var field = document.getElementById(id);
+      if (field) field.addEventListener("change", queueBookingAddress);
+    });
+  }
+
+  // The address as currently filled in on the booking form, or nothing if there
+  // is no street to go on.
+  function bookingAddress() {
+    var street = val("bk-address");
+    if (!street) return "";
+    return [street, val("bk-city"), val("bk-state"), val("bk-zip")].filter(Boolean).join(", ");
+  }
+
+  function queueBookingAddress() {
+    queueMapFocus(bookingAddress());
   }
 
   function hideLookup() {
@@ -1372,6 +1798,9 @@
     setValue("bk-state", customer.state);
     setValue("bk-zip", customer.zip);
     renderBookingCustomer();
+    // Picking an existing customer is the same as typing their address: the map
+    // is pointed at the house the crew will be driving to.
+    queueBookingAddress();
   }
 
   function setValue(id, value) {
@@ -1755,6 +2184,11 @@
     var durationOptions = VISIT_LENGTHS.map(function (v) {
       return '<option value="' + v.minutes + '"' + (v.minutes === j.durationMinutes ? " selected" : "") + ">" + esc(v.label) + "</option>";
     }).join("");
+    // Where this job actually is: whatever address the job carries, otherwise
+    // the one on file for the customer.
+    var place = [j.address || j.customerAddress, j.customerCity, j.customerState, j.customerZip]
+      .filter(Boolean)
+      .join(", ");
 
     panel.innerHTML =
       '<button class="drawer-close" data-close>×</button>' +
@@ -1778,11 +2212,19 @@
       "<dt>Customer</dt><dd>" + esc(j.customerName) + "</dd>" +
       "<dt>Phone</dt><dd>" + phoneText(j.customerPhone) + "</dd>" +
       "<dt>Email</dt><dd>" + emailText(j.customerEmail) + "</dd>" +
-      "<dt>Address</dt><dd>" + esc([j.address || j.customerAddress, j.customerCity, j.customerState, j.customerZip].filter(Boolean).join(", ") || "—") + "</dd>" +
+      "<dt>Address</dt><dd>" + esc(place || "—") + "</dd>" +
       "<dt>Scheduled</dt><dd>" + fmtDate(j.scheduledFor) +
       (j.scheduledFor ? " · " + esc(fmtLength(j.durationMinutes)) : "") + "</dd>" +
       "<dt>Booked by</dt><dd>" + esc(j.bookedByName || "—") + "</dd>" +
       "</dl>" +
+      // Driving there, and seeing it in context on the dashboard map.
+      (place
+        ? '<div class="btn-row map-actions">' +
+          '<a class="btn btn-primary btn-sm" target="_blank" rel="noopener" href="' +
+          esc(directionsUrl(place)) + '">Get directions</a>' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-map-focus="' + esc(place) + '">Show on map</button>' +
+          "</div>"
+        : "") +
       contactActions(
         { id: j.customerId, phone: j.customerPhone, email: j.customerEmail },
         j.id
@@ -2650,6 +3092,15 @@
           Number(editCustomer.dataset.editCustomer),
           editCustomer.dataset.fromJob ? Number(editCustomer.dataset.fromJob) : null
         );
+        return;
+      }
+      // "Show on map" from a job drawer: remember the address, close the job and
+      // hand the person back to the dashboard, where the map centres on it.
+      var showOnMap = e.target.closest("[data-map-focus]");
+      if (showOnMap) {
+        queueMapFocus(showOnMap.dataset.mapFocus);
+        closeDrawer();
+        switchView("dashboard");
         return;
       }
       var row = e.target.closest("[data-job]");
