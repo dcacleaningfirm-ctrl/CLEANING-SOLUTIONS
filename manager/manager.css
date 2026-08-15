@@ -712,3 +712,160 @@ tbody tr.clickable:hover { background: var(--surface-2); }
 @media (max-width: 680px) {
   .pay-summary, .pay-grid, .channel-row { grid-template-columns: 1fr; }
 }
+
+/* ---------- Maps and routing ----------
+   The dashboard map, the Map & route screen and the address checker. Sized for
+   a phone held in one hand first: a map that is too short to read is worse than
+   no map, and every control the crew taps while standing at a truck is given a
+   full-width, thumb-sized target below 680px. */
+.map-card { margin-top: 18px; }
+.map-canvas {
+  height: 340px;
+  margin-top: 14px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.route-canvas { height: min(70vh, 620px); margin-top: 0; }
+
+/* Google draws the info window on its own white card, so everything inside it
+   is coloured for a light background rather than inheriting the app's. */
+.map-pop { color: #1b2430; font-family: var(--font); min-width: 190px; max-width: 260px; display: grid; gap: 3px; }
+.map-pop strong { font-size: 0.95rem; }
+.map-pop-num {
+  display: inline-grid; place-items: center; width: 20px; height: 20px;
+  border-radius: 50%; background: #2f6df6; color: #fff; font-size: 0.72rem; font-weight: 800;
+}
+.map-pop-line { font-size: 0.82rem; color: #3c4a5d; }
+.map-pop-line.muted { color: #6b7a8f; }
+.map-pop-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.map-pop-actions .btn { text-decoration: none; }
+.map-pop-actions .btn-ghost { color: #33445c; border-color: #ccd6e4; }
+.map-pop-actions .btn-ghost:hover { color: #101720; border-color: #8fa3bd; }
+
+.map-stop-strip { display: flex; gap: 8px; overflow-x: auto; padding: 12px 2px 2px; scrollbar-width: thin; }
+.map-chip {
+  display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 999px;
+  color: var(--text); font: inherit; font-size: 0.82rem; padding: 7px 13px 7px 7px; cursor: pointer;
+  white-space: nowrap;
+}
+.map-chip:hover { border-color: var(--faint); }
+.map-chip.unmapped { opacity: 0.72; }
+.map-chip-num {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; flex: 0 0 auto;
+  border-radius: 50%; background: var(--brand); color: #fff; font-size: 0.74rem; font-weight: 800;
+}
+
+.map-stop-list { display: grid; gap: 10px; margin-top: 14px; }
+.map-stop {
+  display: flex; gap: 11px; align-items: flex-start;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 11px 12px;
+  font-size: 0.86rem;
+}
+.map-stop > div:nth-child(2) { flex: 1 1 auto; min-width: 0; }
+.map-stop-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.map-stop-actions .btn { text-decoration: none; }
+
+/* Nothing is hidden when a key is missing: the screen says which variable to
+   add, in the same way the custom charge screen names what Clover needs. */
+.map-notice {
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px 16px; margin-top: 14px; font-size: 0.86rem; display: grid; gap: 6px;
+}
+.map-notice code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem;
+  background: var(--surface-3); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px;
+}
+
+/* Map & route */
+.route-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 18px; align-items: start; }
+.route-panel { display: grid; gap: 15px; }
+.route-map-card { padding: 12px; }
+.route-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.route-toggle { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 0.82rem; cursor: pointer; }
+.route-toggle input { accent-color: var(--brand); }
+.route-list-head { margin-bottom: 10px; }
+.route-stops { display: grid; gap: 9px; }
+.route-stop {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center; gap: 10px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px;
+}
+.route-stop input[type="checkbox"] { width: 20px; height: 20px; accent-color: var(--brand); }
+.route-stop-body { display: flex; align-items: center; gap: 10px; min-width: 0; cursor: pointer; }
+.route-stop-body > span { display: grid; gap: 2px; min-width: 0; }
+.route-stop-body strong { font-size: 0.87rem; font-weight: 600; }
+.route-stop-body .muted { font-size: 0.78rem; overflow-wrap: anywhere; }
+.route-stop-num {
+  display: inline-grid; place-items: center; width: 24px; height: 24px; flex: 0 0 auto;
+  border-radius: 50%; background: var(--surface-3); color: var(--text); font-size: 0.76rem; font-weight: 700;
+}
+.route-stop.unmapped { border-style: dashed; }
+.route-stop.unmapped .route-stop-num { background: transparent; border: 1px dashed var(--faint); color: var(--faint); }
+.route-stop-actions { display: flex; gap: 6px; }
+.route-stop-actions .btn { text-decoration: none; }
+.warn-line { grid-column: 1 / -1; color: var(--amber); font-size: 0.76rem; }
+.link-btn {
+  background: none; border: 0; padding: 0; font: inherit; color: inherit;
+  text-decoration: underline; cursor: pointer;
+}
+
+.route-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.route-nav { text-decoration: none; flex: 1 1 240px; text-align: center; }
+.route-summary {
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.route-summary span { display: block; color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; }
+.route-summary strong { font-size: 1.05rem; }
+.route-order { display: grid; gap: 6px; margin: 0 0 10px 18px; font-size: 0.85rem; }
+.route-order li strong { font-weight: 600; }
+.route-order li span { display: block; font-size: 0.78rem; }
+.route-order .route-origin { list-style: none; margin-left: -18px; color: var(--muted); font-size: 0.8rem; }
+
+/* Address checking, wherever an address is typed */
+.addr-verify { display: grid; gap: 8px; position: relative; margin-top: 4px; }
+.addr-suggest {
+  display: grid; gap: 2px;
+  background: var(--surface-3); border: 1px solid var(--border); border-radius: 12px;
+  padding: 6px; box-shadow: var(--shadow); max-height: 260px; overflow-y: auto;
+}
+.addr-option {
+  display: grid; gap: 2px; width: 100%; text-align: left;
+  background: transparent; border: 0; border-radius: 9px; padding: 9px 10px;
+  color: var(--text); font: inherit; font-size: 0.86rem; cursor: pointer;
+}
+.addr-option:hover { background: var(--surface-2); }
+.addr-option span { color: var(--muted); font-size: 0.78rem; }
+.addr-status { font-size: 0.78rem; color: var(--faint); }
+.addr-status.ok { color: var(--green); }
+.addr-status.pending { color: var(--amber); }
+.addr-status code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--surface-3); border-radius: 6px; padding: 1px 5px;
+}
+.addr-map { height: 190px; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+
+@media (max-width: 1040px) {
+  .route-layout { grid-template-columns: 1fr; }
+  .route-canvas { height: 46vh; min-height: 300px; }
+}
+@media (max-width: 680px) {
+  .map-canvas { height: 260px; }
+  .route-controls { grid-template-columns: 1fr; }
+  .route-summary { grid-template-columns: 1fr 1fr; }
+  /* On a phone the stop rows stack, so the checkbox and the buttons each get a
+     full-width row instead of being squeezed into a strip too narrow to hit. */
+  .route-stop { grid-template-columns: auto minmax(0, 1fr); }
+  .route-stop-actions { grid-column: 1 / -1; }
+  .route-stop-actions .btn { flex: 1 1 auto; text-align: center; }
+  .route-nav { flex: 1 1 100%; }
+  .route-actions .btn { flex: 1 1 100%; }
+  .map-stop { flex-wrap: wrap; }
+  .map-stop-actions { width: 100%; }
+  .map-stop-actions .btn { flex: 1 1 auto; text-align: center; }
+}

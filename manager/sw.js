@@ -7,11 +7,15 @@
  *
  * Bump VERSION to push a new shell to every installed phone.
  */
-var VERSION = "dca-manager-v7";
+var VERSION = "dca-manager-v8";
 var SHELL = [
   "/manager/",
   "/manager/manager.css",
   "/manager/manager.js",
+  // Maps, routing and address checking. Google's own library is left to the
+  // network: it is versioned and keyed on their side, and a cached copy of it
+  // would be the one thing here that could go stale badly.
+  "/manager/maps.js",
   "/manager/offline.html",
   "/manager/manifest.webmanifest",
   "/manager/icon-192.png",

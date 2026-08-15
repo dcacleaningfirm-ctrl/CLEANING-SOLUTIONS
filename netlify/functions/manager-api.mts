@@ -13,6 +13,16 @@ import {
 } from "../../db/schema.js";
 import { newPinRecord, validatePin, verifyPin } from "../../lib/manager-pin.js";
 import {
+  computeRoute,
+  geocodeAddress,
+  joinAddress,
+  mapsSettings,
+  placeDetails,
+  readCoordinate,
+  suggestAddresses,
+  validLocation
+} from "../../lib/maps.js";
+import {
   CREW_ROLES,
   canManageCrew,
   clearedCookie,
@@ -156,6 +166,37 @@ function readDuration(value: unknown): { minutes?: number; error?: string } {
 // people standing in the office, so times written into it are spelled out in the
 // service area's own clock rather than in UTC.
 const BUSINESS_TIME_ZONE = "America/New_York";
+
+// The verified spot on the map that came back with a saved address. The browser
+// only ever sends this after the office picked a suggestion Google confirmed, so
+// what is stored is what Google itself pinned — and every map and route from
+// then on reuses it instead of looking the street up again.
+//
+// Returns undefined when the request said nothing about a location (leave what
+// is on file alone), and null when it asked for it to be cleared.
+interface StoredLocation {
+  latitude: number | null;
+  longitude: number | null;
+  placeId: string | null;
+  formattedAddress: string | null;
+}
+
+function readLocationInput(raw: unknown): StoredLocation | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) {
+    return { latitude: null, longitude: null, placeId: null, formattedAddress: null };
+  }
+  const value = raw as Record<string, unknown>;
+  if (!validLocation(value.latitude, value.longitude)) {
+    return { latitude: null, longitude: null, placeId: null, formattedAddress: null };
+  }
+  return {
+    latitude: readCoordinate(value.latitude),
+    longitude: readCoordinate(value.longitude),
+    placeId: String(value.placeId || "").trim().slice(0, 255) || null,
+    formattedAddress: String(value.formattedAddress || "").trim().slice(0, 300) || null
+  };
+}
 
 function spellOutAppointment(at: Date): string {
   return at.toLocaleString("en-US", {
@@ -496,7 +537,377 @@ export default async (req: Request, context: Context) => {
             from: notify.email.from
           },
           sms: { configured: notify.sms.configured, missing: notify.sms.missing }
+        },
+        // Mapping is the one part of the app that needs a credential inside the
+        // page: a Google map cannot be drawn without a browser key. Every
+        // address lookup and every route still runs on the server, and this key
+        // only ever reaches a signed-in crew member.
+        maps: mapsSettings()
+      });
+    }
+
+    // --- Address lookup ---------------------------------------------------
+    // Suggestions as the office types an address. The search runs on the server
+    // with the site's own key, so the searching credential is never in the page
+    // and what is typed can be tidied up first — commas, lower case, "st" for
+    // "street", a missing city — before Google ever sees it.
+    if (path === "places/suggest" && method === "GET") {
+      const maps = mapsSettings();
+      if (!maps.enabled) {
+        return json({ suggestions: [], missing: maps.missing, enabled: false });
+      }
+      const query = (url.searchParams.get("q") || "").trim().slice(0, 200);
+      if (query.length < 3) return json({ suggestions: [], enabled: true });
+
+      const session = (url.searchParams.get("session") || "").trim().slice(0, 64) || undefined;
+      const result = await suggestAddresses(query, session);
+      if (result.error && !result.suggestions.length) {
+        return json({ error: result.error, suggestions: [], enabled: true }, { status: 502 });
+      }
+      return json({ suggestions: result.suggestions, enabled: true });
+    }
+
+    // One address, resolved to the exact spot Google holds for it. Answers with
+    // how sure Google is: the app puts a marker down for a property and asks for
+    // more detail for anything vaguer, rather than dropping a pin on a street
+    // and letting a crew member find out at the door.
+    if (path === "places/resolve" && method === "GET") {
+      const maps = mapsSettings();
+      if (!maps.enabled) {
+        return json({ error: "Google Maps is not set up on this site yet", missing: maps.missing }, { status: 503 });
+      }
+
+      const placeId = (url.searchParams.get("placeId") || "").trim();
+      if (placeId) {
+        const found = await placeDetails(placeId);
+        if (!found.place) {
+          return json({ error: found.error || "That address could not be found" }, { status: 404 });
         }
+        return json({ place: found.place });
+      }
+
+      const query = (url.searchParams.get("q") || "").trim().slice(0, 250);
+      if (!query) return json({ error: "Type an address to look up" }, { status: 400 });
+      const geocoded = await geocodeAddress(query);
+      if (!geocoded.places.length) {
+        return json(
+          {
+            error:
+              geocoded.error ||
+              "Google could not find that address. Check the house number, street and ZIP."
+          },
+          { status: 404 }
+        );
+      }
+      return json({ place: geocoded.places[0], alternatives: geocoded.places.slice(1) });
+    }
+
+    // --- Stops on the map -------------------------------------------------
+    // Everything scheduled between two instants, with the coordinates each stop
+    // is drawn at. A job whose address has never been verified comes back with
+    // no coordinates and is listed separately rather than guessed at.
+    if (path === "map/jobs" && method === "GET") {
+      const from = new Date(url.searchParams.get("from") || "");
+      const to = new Date(url.searchParams.get("to") || "");
+      if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) {
+        return json({ error: "Pick a valid date" }, { status: 400 });
+      }
+      if (to.getTime() - from.getTime() > 15 * 86400000) {
+        return json({ error: "Ask for a shorter date range" }, { status: 400 });
+      }
+
+      const assignee = employees;
+      const rows = await db
+        .select({
+          id: jobs.id,
+          serviceType: jobs.serviceType,
+          status: jobs.status,
+          scheduledFor: jobs.scheduledFor,
+          durationMinutes: jobs.durationMinutes,
+          priceCents: jobs.priceCents,
+          notes: jobs.notes,
+          address: jobs.address,
+          latitude: jobs.latitude,
+          longitude: jobs.longitude,
+          placeId: jobs.placeId,
+          formattedAddress: jobs.formattedAddress,
+          customerId: customers.id,
+          customerName: customers.name,
+          customerPhone: customers.phone,
+          customerAddress: customers.address,
+          customerCity: customers.city,
+          customerState: customers.state,
+          customerZip: customers.zip,
+          customerLatitude: customers.latitude,
+          customerLongitude: customers.longitude,
+          customerFormattedAddress: customers.formattedAddress,
+          assignedName: assignee.name
+        })
+        .from(jobs)
+        .innerJoin(customers, eq(jobs.customerId, customers.id))
+        .leftJoin(assignee, eq(jobs.assignedTo, assignee.id))
+        .where(
+          and(
+            gte(jobs.scheduledFor, from),
+            lt(jobs.scheduledFor, to),
+            ne(jobs.status, "cancelled")
+          )
+        )
+        .orderBy(asc(jobs.scheduledFor));
+
+      // A job is drawn at its own verified spot when it has one, and otherwise
+      // at the customer's — the same house, saved from the account.
+      const stops = rows.map((row) => {
+        const onJob = validLocation(row.latitude, row.longitude);
+        const onCustomer = validLocation(row.customerLatitude, row.customerLongitude);
+        const address =
+          row.address ||
+          joinAddress({
+            address: row.customerAddress || "",
+            city: row.customerCity || "",
+            state: row.customerState || "",
+            zip: row.customerZip || ""
+          });
+        return {
+          id: row.id,
+          serviceType: row.serviceType,
+          status: row.status,
+          scheduledFor: row.scheduledFor,
+          durationMinutes: row.durationMinutes,
+          priceCents: row.priceCents,
+          notes: row.notes,
+          address,
+          formattedAddress: row.formattedAddress || row.customerFormattedAddress || null,
+          latitude: onJob ? row.latitude : onCustomer ? row.customerLatitude : null,
+          longitude: onJob ? row.longitude : onCustomer ? row.customerLongitude : null,
+          locationFrom: onJob ? "job" : onCustomer ? "customer" : null,
+          customerId: row.customerId,
+          customerName: row.customerName,
+          customerPhone: row.customerPhone,
+          assignedName: row.assignedName
+        };
+      });
+
+      return json({
+        jobs: stops,
+        mapped: stops.filter((s) => s.latitude !== null).length,
+        maps: mapsSettings()
+      });
+    }
+
+    // Putting a job that was booked before addresses were verified onto the map.
+    // Its stored address is geocoded once and kept, so it never has to be looked
+    // up again — and a result Google is unsure about is handed back for someone
+    // to confirm instead of being saved as fact.
+    const locateMatch = path.match(/^jobs\/(\d+)\/locate$/);
+    if (locateMatch && method === "POST") {
+      const maps = mapsSettings();
+      if (!maps.enabled) {
+        return json(
+          { error: "Google Maps is not set up on this site yet", missing: maps.missing },
+          { status: 503 }
+        );
+      }
+
+      const id = Number(locateMatch[1]);
+      const [existing] = await db
+        .select({
+          id: jobs.id,
+          address: jobs.address,
+          customerId: jobs.customerId
+        })
+        .from(jobs)
+        .where(eq(jobs.id, id));
+      if (!existing) return json({ error: "Job not found" }, { status: 404 });
+
+      const [customer] = await db.select().from(customers).where(eq(customers.id, existing.customerId));
+      const lookup =
+        existing.address ||
+        joinAddress({
+          address: customer?.address || "",
+          city: customer?.city || "",
+          state: customer?.state || "",
+          zip: customer?.zip || ""
+        });
+      if (!lookup) {
+        return json({ error: "This job has no address to look up yet" }, { status: 400 });
+      }
+
+      const geocoded = await geocodeAddress(lookup);
+      const place = geocoded.places[0];
+      if (!place) {
+        return json(
+          { error: geocoded.error || `Google could not find “${lookup}”` },
+          { status: 404 }
+        );
+      }
+      if (place.precision !== "exact") {
+        // Deliberately not saved: a pin in the middle of a street looks exactly
+        // like a verified address once it is on the map.
+        return json({ place, saved: false, needsReview: true });
+      }
+
+      await db
+        .update(jobs)
+        .set({
+          latitude: place.latitude,
+          longitude: place.longitude,
+          placeId: place.placeId,
+          formattedAddress: place.formattedAddress
+        })
+        .where(eq(jobs.id, id));
+
+      return json({ place, saved: true, needsReview: false });
+    }
+
+    // --- Build a driving route -------------------------------------------
+    // The selected stops, in the order they should be driven. Google is asked
+    // for the quickest order when the office wants it; otherwise the order it is
+    // handed — appointment time — is kept and only the drawn line comes back.
+    if (path === "route" && method === "POST") {
+      const maps = mapsSettings();
+      if (!maps.enabled) {
+        return json(
+          { error: "Google Maps is not set up on this site yet", missing: maps.missing },
+          { status: 503 }
+        );
+      }
+
+      const body = (await req.json().catch(() => ({}))) as {
+        jobIds?: unknown;
+        origin?: { latitude?: unknown; longitude?: unknown } | null;
+        originAddress?: string;
+        optimize?: boolean;
+      };
+
+      const ids = Array.isArray(body.jobIds)
+        ? body.jobIds.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0)
+        : [];
+      if (!ids.length) return json({ error: "Pick the stops to route" }, { status: 400 });
+      if (ids.length > 20) {
+        return json({ error: "Route up to 20 stops at a time" }, { status: 400 });
+      }
+
+      const rows = await db
+        .select({
+          id: jobs.id,
+          scheduledFor: jobs.scheduledFor,
+          address: jobs.address,
+          latitude: jobs.latitude,
+          longitude: jobs.longitude,
+          customerName: customers.name,
+          customerAddress: customers.address,
+          customerCity: customers.city,
+          customerState: customers.state,
+          customerZip: customers.zip,
+          customerLatitude: customers.latitude,
+          customerLongitude: customers.longitude
+        })
+        .from(jobs)
+        .innerJoin(customers, eq(jobs.customerId, customers.id))
+        .where(inArray(jobs.id, ids));
+
+      // Kept in the order the app asked for, which is the order shown on screen.
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      const chosen = ids.map((id) => byId.get(id)).filter(Boolean) as typeof rows;
+      const stops = chosen.map((row) => {
+        const onJob = validLocation(row.latitude, row.longitude);
+        const onCustomer = validLocation(row.customerLatitude, row.customerLongitude);
+        return {
+          jobId: row.id,
+          customerName: row.customerName,
+          address:
+            row.address ||
+            joinAddress({
+              address: row.customerAddress || "",
+              city: row.customerCity || "",
+              state: row.customerState || "",
+              zip: row.customerZip || ""
+            }),
+          latitude: onJob ? Number(row.latitude) : onCustomer ? Number(row.customerLatitude) : null,
+          longitude: onJob ? Number(row.longitude) : onCustomer ? Number(row.customerLongitude) : null
+        };
+      });
+
+      const unmapped = stops.filter((s) => s.latitude === null);
+      if (unmapped.length) {
+        return json(
+          {
+            error:
+              "These stops have no verified address yet: " +
+              unmapped.map((s) => s.customerName).join(", "),
+            unmapped: unmapped.map((s) => s.jobId)
+          },
+          { status: 409 }
+        );
+      }
+
+      // Where the drive starts: the crew member's own position, an address they
+      // typed, or — failing both — the first stop.
+      let origin: { latitude: number; longitude: number } | null = null;
+      let originLabel: string | null = null;
+      let originPrecision: string | null = null;
+
+      if (body.origin && validLocation(body.origin.latitude, body.origin.longitude)) {
+        origin = {
+          latitude: Number(body.origin.latitude),
+          longitude: Number(body.origin.longitude)
+        };
+        originLabel = "My location";
+        originPrecision = "device";
+      } else if (String(body.originAddress || "").trim()) {
+        const geocoded = await geocodeAddress(String(body.originAddress).trim());
+        const place = geocoded.places[0];
+        if (!place) {
+          return json(
+            {
+              error:
+                geocoded.error ||
+                "That starting address could not be found — check the street and ZIP"
+            },
+            { status: 400 }
+          );
+        }
+        origin = { latitude: place.latitude, longitude: place.longitude };
+        originLabel = place.formattedAddress;
+        originPrecision = place.precision;
+      }
+
+      const routeStops = origin ? stops : stops.slice(1);
+      if (!routeStops.length) {
+        return json(
+          { error: "Pick two or more stops, or set where the drive starts from" },
+          { status: 400 }
+        );
+      }
+      const routeOrigin = origin || {
+        latitude: stops[0].latitude as number,
+        longitude: stops[0].longitude as number
+      };
+
+      const built = await computeRoute(
+        routeOrigin,
+        routeStops.map((s) => ({ latitude: s.latitude as number, longitude: s.longitude as number })),
+        body.optimize === true
+      );
+      if (!built.route) {
+        return json({ error: built.error || "Google could not build that route" }, { status: 502 });
+      }
+
+      const ordered = built.route.order.map((index) => routeStops[index]).filter(Boolean);
+      const finalStops = origin ? ordered : [stops[0], ...ordered];
+
+      return json({
+        route: {
+          optimize: body.optimize === true,
+          optimized: built.route.optimized,
+          polyline: built.route.polyline,
+          distanceMeters: built.route.distanceMeters,
+          durationSeconds: built.route.durationSeconds,
+          legs: built.route.legs
+        },
+        origin: origin ? { ...origin, label: originLabel, precision: originPrecision } : null,
+        stops: finalStops.map((s, i) => ({ ...s, position: i + 1 }))
       });
     }
 
@@ -1030,7 +1441,7 @@ export default async (req: Request, context: Context) => {
       const [existing] = await db.select().from(customers).where(eq(customers.id, id));
       if (!existing) return json({ error: "That customer no longer exists" }, { status: 404 });
 
-      const updates: Record<string, string | null> = {};
+      const updates: Record<string, string | number | null> = {};
       const changed: string[] = [];
       for (const field of CUSTOMER_FIELDS) {
         const raw = body[field.key];
@@ -1057,6 +1468,34 @@ export default async (req: Request, context: Context) => {
       }
       if (nextEmail && !looksLikeEmail(nextEmail)) {
         return json({ error: "Check the email address" }, { status: 400 });
+      }
+
+      // Where the property is. When the address was picked off Google's own
+      // suggestions the coordinates come with it and are saved here, so every
+      // map and every route afterwards reuses what Google already confirmed.
+      const location = readLocationInput(body.location);
+      const addressTouched = ["address", "city", "state", "zip"].some(
+        (key) => updates[key] !== undefined
+      );
+      if (location) {
+        if (
+          Number(existing.latitude) !== Number(location.latitude) ||
+          Number(existing.longitude) !== Number(location.longitude)
+        ) {
+          changed.push("map location");
+        }
+        Object.assign(updates, location);
+      } else if (addressTouched && (existing.latitude !== null || existing.longitude !== null)) {
+        // The street was retyped without a verified pick. The old coordinates
+        // point at the old house, and a stale pin is worse than no pin: it sends
+        // a crew somewhere with the same confidence as a checked address.
+        Object.assign(updates, {
+          latitude: null,
+          longitude: null,
+          placeId: null,
+          formattedAddress: null
+        });
+        changed.push("map location");
       }
 
       if (!changed.length) {
@@ -1149,6 +1588,7 @@ export default async (req: Request, context: Context) => {
         durationMinutes?: number;
         assignedTo?: number | null;
         address?: string;
+        location?: unknown;
         notes?: string;
         items?: unknown;
         priceCents?: number;
@@ -1202,6 +1642,13 @@ export default async (req: Request, context: Context) => {
         zip: (supplied.zip || "").trim().slice(0, 20) || null
       };
 
+      // The verified spot behind the address that was typed on the booking
+      // screen — present only when the taker picked one of Google's suggestions.
+      // Saved with the appointment so the stop can be mapped and routed later
+      // without looking the street up a second time.
+      const bookedLocation = readLocationInput(body.location);
+      const hasBookedLocation = !!bookedLocation && bookedLocation.latitude !== null;
+
       let customer: typeof customers.$inferSelect | null = null;
       if (body.customerId) {
         const [found] = await db
@@ -1213,13 +1660,19 @@ export default async (req: Request, context: Context) => {
 
         // Fill in details the account was missing — a first address, a mobile
         // number — but never overwrite something already on file from a call.
-        const backfill: Record<string, string> = {};
+        const backfill: Record<string, string | number | null> = {};
         for (const field of ["phone", "email", "address", "city", "state", "zip"] as const) {
           if (contact[field] && !customer[field]) backfill[field] = contact[field] as string;
         }
+        // The account gets the verified coordinates too, but only when this
+        // booking is also what filled in its address. An existing customer sent
+        // to a different property this once keeps the address on file.
+        if (hasBookedLocation && backfill.address && !validLocation(customer.latitude, customer.longitude)) {
+          Object.assign(backfill, bookedLocation);
+        }
         if (Object.keys(backfill).length) {
           await db.update(customers).set(backfill).where(eq(customers.id, customer.id));
-          customer = { ...customer, ...backfill };
+          customer = { ...customer, ...backfill } as typeof customers.$inferSelect;
         }
       } else {
         if (!contact.name) {
@@ -1241,6 +1694,10 @@ export default async (req: Request, context: Context) => {
             city: contact.city,
             state: contact.state,
             zip: contact.zip,
+            latitude: hasBookedLocation ? bookedLocation!.latitude : null,
+            longitude: hasBookedLocation ? bookedLocation!.longitude : null,
+            placeId: hasBookedLocation ? bookedLocation!.placeId : null,
+            formattedAddress: hasBookedLocation ? bookedLocation!.formattedAddress : null,
             notes: `Added by ${account.name} while booking by phone`
           })
           .returning();
@@ -1282,6 +1739,10 @@ export default async (req: Request, context: Context) => {
           source: "phone",
           bookedBy: account.id,
           address,
+          latitude: hasBookedLocation ? bookedLocation!.latitude : null,
+          longitude: hasBookedLocation ? bookedLocation!.longitude : null,
+          placeId: hasBookedLocation ? bookedLocation!.placeId : null,
+          formattedAddress: hasBookedLocation ? bookedLocation!.formattedAddress : null,
           notes: (body.notes || "").trim().slice(0, 2000) || null
         })
         .returning({ id: jobs.id });
@@ -1376,6 +1837,8 @@ export default async (req: Request, context: Context) => {
         notes?: string;
         scheduledFor?: string;
         durationMinutes?: number;
+        address?: string;
+        location?: unknown;
         force?: boolean;
       };
 
@@ -1427,6 +1890,33 @@ export default async (req: Request, context: Context) => {
       if (typeof body.notes === "string" && body.notes !== (existing.notes || "")) {
         updates.notes = body.notes;
       }
+
+      // Correcting where the crew is being sent. A verified pick off Google's
+      // suggestions brings its coordinates with it; a hand-typed correction
+      // clears the old ones instead, because the pin that is already saved
+      // belongs to the address being replaced.
+      const stopLocation = readLocationInput(body.location);
+      if (typeof body.address === "string") {
+        const nextAddress = body.address.trim().slice(0, 300) || null;
+        if (nextAddress !== (existing.address || null)) {
+          updates.address = nextAddress;
+          events.push({
+            kind: "customer",
+            message: nextAddress
+              ? `Service address changed to ${nextAddress} by ${session.name}`
+              : `Service address cleared by ${session.name}`
+          });
+          if (!stopLocation) {
+            Object.assign(updates, {
+              latitude: null,
+              longitude: null,
+              placeId: null,
+              formattedAddress: null
+            });
+          }
+        }
+      }
+      if (stopLocation) Object.assign(updates, stopLocation);
 
       // Moving an appointment. The crew member it lands on is whoever it is
       // being assigned to in this same request, falling back to whoever holds
@@ -1631,6 +2121,10 @@ async function loadJob(id: number) {
       durationMinutes: jobs.durationMinutes,
       source: jobs.source,
       address: jobs.address,
+      latitude: jobs.latitude,
+      longitude: jobs.longitude,
+      placeId: jobs.placeId,
+      formattedAddress: jobs.formattedAddress,
       notes: jobs.notes,
       completedAt: jobs.completedAt,
       createdAt: jobs.createdAt,
@@ -1642,6 +2136,8 @@ async function loadJob(id: number) {
       customerCity: customers.city,
       customerState: customers.state,
       customerZip: customers.zip,
+      customerLatitude: customers.latitude,
+      customerLongitude: customers.longitude,
       assignedTo: assignee.id,
       assignedName: assignee.name,
       bookedByName: bookedBy.name

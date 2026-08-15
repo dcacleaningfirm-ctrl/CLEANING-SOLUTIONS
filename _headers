@@ -27,9 +27,17 @@
 /thank-you
   Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
 
+# The manager app draws Google Maps, so its policy has to let Google's map
+# library load and fetch tiles: maps.googleapis.com for the script and its data,
+# gstatic/ggpht for tile and marker imagery, and Google's font host for the
+# labels the library injects. Clover's entries are untouched — the card form and
+# the map coexist on the same origin. Geolocation is re-enabled here, and only
+# here, so "start from my location" can work on a crew member's phone; the
+# public site stays locked out of it.
 /manager/*
   X-Robots-Tag: noindex, nofollow
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data:; script-src 'self' https://checkout.clover.com https://checkout.sandbox.dev.clover.com; style-src 'self' 'unsafe-inline'; connect-src 'self' https://checkout.clover.com https://checkout.sandbox.dev.clover.com; frame-src https://checkout.clover.com https://checkout.sandbox.dev.clover.com
+  Permissions-Policy: camera=(), microphone=(), geolocation=(self)
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://maps.gstatic.com https://*.googleapis.com https://*.ggpht.com; script-src 'self' https://maps.googleapis.com https://checkout.clover.com https://checkout.sandbox.dev.clover.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; worker-src 'self' blob:; connect-src 'self' https://maps.googleapis.com https://checkout.clover.com https://checkout.sandbox.dev.clover.com; frame-src https://checkout.clover.com https://checkout.sandbox.dev.clover.com
 
 # The worker must be revalidated every load, otherwise a cached copy keeps
 # serving an old app shell to phones that already installed it.

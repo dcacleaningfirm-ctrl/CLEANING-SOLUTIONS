@@ -439,9 +439,20 @@
     if (name === "dashboard") renderDashboard();
     if (name === "book") renderBook();
     if (name === "jobs") renderJobs();
+    if (name === "maps") renderMaps();
     if (name === "customers") renderCustomers();
     if (name === "charges") renderCharges();
     if (name === "crew") renderCrew();
+  }
+
+  // The full routing screen lives in maps.js, which owns everything Google.
+  function renderMaps() {
+    var host = document.getElementById("view-maps");
+    if (!window.DCAMaps) {
+      host.innerHTML = '<p class="empty">The map module did not load. Reload the page to try again.</p>';
+      return;
+    }
+    window.DCAMaps.renderRouteView(host);
   }
 
   function renderDashboard() {
@@ -462,6 +473,10 @@
         stat("Customers", s.customers) +
         stat("Active crew", s.activeCrew) +
         "</div>" +
+        // Where today's work is, before anything else on the screen. Signing in
+        // at seven in the morning should answer "where am I going" without a
+        // single click.
+        '<div id="dash-map"></div>' +
         '<div class="grid-2">' +
         '<div class="card"><div class="row-between"><h3 class="section-title">Upcoming jobs</h3>' +
         '<button class="btn btn-primary btn-sm" data-goto="book">Book appointment</button></div>' +
@@ -472,6 +487,8 @@
         "</div><h3 class=\"section-title\" style=\"margin-top:20px\">Recent activity</h3>" +
         activityFeed(d.recentEvents) +
         "</div></div>";
+
+      if (window.DCAMaps) window.DCAMaps.mountDashboard(document.getElementById("dash-map"));
     });
   }
 
@@ -585,6 +602,7 @@
   function openCustomerEditor(customerId, jobId) {
     api("customers/" + customerId).then(function (d) {
       var c = d.customer;
+      var addressField = null;
       openModal(
         "Edit " + c.name,
         '<div class="booking-fields">' +
@@ -596,6 +614,10 @@
           '<label class="field bk-narrow"><span>State</span><input id="cf-state" maxlength="20" value="' + esc(c.state || "") + '" /></label>' +
           '<label class="field bk-narrow"><span>ZIP</span><input id="cf-zip" maxlength="12" inputmode="numeric" value="' + esc(c.zip || "") + '" /></label>' +
           "</div>" +
+          // Correcting a misheard street name is the commonest edit there is, so
+          // the corrected address is checked against Google here and the map
+          // moves to the property before it is saved.
+          '<div id="cf-address-verify"></div>' +
           '<label class="field"><span>Notes the office keeps</span><textarea id="cf-notes" maxlength="2000" rows="3">' +
           esc(c.notes || "") + "</textarea></label>" +
           '<p class="hint">' + c.jobCount + (c.jobCount === 1 ? " job" : " jobs") +
@@ -612,11 +634,17 @@
             notes: val("cf-notes")
           };
           if (!body.name) throw new Error("Enter the customer's name");
+          // Sent as null when nothing was verified this time, which tells the
+          // server to drop coordinates that belong to the old address rather
+          // than leave the account pinned to a house it has moved away from.
+          if (addressField) body.location = addressField.location();
           if (jobId) body.jobId = jobId;
           return api("customers/" + customerId, { method: "PATCH", body: body }).then(function (res) {
             // Anything on screen showing this customer needs the new details.
             var active = document.querySelector(".tab.active");
             if (active && active.dataset.view === "customers") renderCustomers();
+            if (active && active.dataset.view === "dashboard") renderDashboard();
+            if (active && active.dataset.view === "maps") renderMaps();
             if (jobId && state.job && state.job.job.id === jobId) openJob(jobId);
             return res.changed && res.changed.length
               ? "Updated " + res.changed.join(", ") + "."
@@ -624,7 +652,59 @@
           });
         }
       );
+
+      if (window.DCAMaps) {
+        addressField = window.DCAMaps.attachAddressField({
+          input: "cf-address",
+          mount: document.getElementById("cf-address-verify"),
+          fields: { city: "cf-city", state: "cf-state", zip: "cf-zip" }
+        });
+        if (addressField && c.latitude !== null && c.latitude !== undefined) addressField.preset(c);
+      }
     });
+  }
+
+  // The address for one visit. Kept apart from the account on purpose: a job at
+  // a rental, a second property or a corrected unit number moves this job only,
+  // and the customer record is left exactly as it was.
+  function openJobAddressEditor(j) {
+    var addressField = null;
+    var current =
+      j.address ||
+      [j.customerAddress, j.customerCity, j.customerState, j.customerZip].filter(Boolean).join(", ");
+    openModal(
+      "Service address",
+      '<div class="booking-fields">' +
+        '<label class="field"><span>Where this visit happens</span>' +
+        '<input id="ja-address" maxlength="200" value="' + esc(current) + '" /></label>' +
+        "</div>" +
+        '<div id="ja-address-verify"></div>' +
+        '<p class="hint">Pick Google\'s suggestion to put this stop on the map. Saving a typed address ' +
+        "without picking one keeps the words and drops the pin, so nobody is sent to the wrong door.</p>",
+      function () {
+        var body = { address: val("ja-address") };
+        // Null when nothing was verified in this sitting: the server then clears
+        // any coordinates left over from the address that was there before.
+        body.location = addressField ? addressField.location() : null;
+        return api("jobs/" + j.id, { method: "PATCH", body: body }).then(function (data) {
+          renderDrawer(data);
+          var active = document.querySelector(".tab.active");
+          if (active) switchView(active.dataset.view);
+          return "Service address updated.";
+        });
+      }
+    );
+
+    if (window.DCAMaps) {
+      addressField = window.DCAMaps.attachAddressField({
+        input: "ja-address",
+        mount: document.getElementById("ja-address-verify"),
+        oneLine: true
+      });
+      if (addressField && j.latitude !== null && j.latitude !== undefined) {
+        addressField.preset(j);
+      }
+    }
   }
 
   function renderCharges() {
@@ -1138,7 +1218,11 @@
       date: dateValue(new Date()),
       searchTimer: null,
       crew: [],
-      booked: null
+      booked: null,
+      // The address field's Google helper, and the property it verified. Null
+      // until someone picks an address off Google's suggestions.
+      address: null,
+      location: null
     };
   }
 
@@ -1194,7 +1278,12 @@
       '<label class="field"><span>City</span><input id="bk-city" maxlength="80" /></label>' +
       '<label class="field bk-narrow"><span>State</span><input id="bk-state" maxlength="20" placeholder="GA" /></label>' +
       '<label class="field bk-narrow"><span>ZIP</span><input id="bk-zip" maxlength="12" inputmode="numeric" /></label>' +
-      "</div></section>" +
+      "</div>" +
+      // Google's own suggestions for the address, and the property on a map once
+      // one is picked, so the booking is filed against a checked location rather
+      // than whatever was heard down the phone.
+      '<div id="bk-address-verify"></div>' +
+      "</section>" +
 
       '<section class="booking-step"><h3 class="step-title"><span>2</span>What they are booking</h3>' +
       '<div class="booking-fields">' +
@@ -1299,6 +1388,20 @@
     });
     document.getElementById("bk-date").addEventListener("change", loadSchedule);
     document.getElementById("bk-refresh").addEventListener("click", loadSchedule);
+
+    // The address on the booking gets checked against Google as it is typed. The
+    // verified spot is kept on the booking state and saved with the appointment,
+    // so the stop can be mapped and routed without looking it up again.
+    if (window.DCAMaps) {
+      state.booking.address = window.DCAMaps.attachAddressField({
+        input: "bk-address",
+        mount: document.getElementById("bk-address-verify"),
+        fields: { city: "bk-city", state: "bk-state", zip: "bk-zip" },
+        onChange: function (location) {
+          state.booking.location = location;
+        }
+      });
+    }
     document.getElementById("bk-items").addEventListener("input", function (ev) {
       var row = ev.target.closest("[data-item-index]");
       if (!row) return;
@@ -1371,6 +1474,22 @@
     setValue("bk-city", customer.city);
     setValue("bk-state", customer.state);
     setValue("bk-zip", customer.zip);
+    // An account whose address was checked once keeps its spot: the map shows
+    // the property straight away and the booking carries the same coordinates
+    // through, with no second lookup.
+    state.booking.location = null;
+    if (state.booking.address) {
+      state.booking.address.reset();
+      if (customer.latitude !== null && customer.latitude !== undefined) {
+        state.booking.address.preset(customer);
+        state.booking.location = {
+          latitude: Number(customer.latitude),
+          longitude: Number(customer.longitude),
+          placeId: customer.placeId || null,
+          formattedAddress: customer.formattedAddress || null
+        };
+      }
+    }
     renderBookingCustomer();
   }
 
@@ -1394,6 +1513,8 @@
       '<button type="button" class="btn btn-ghost btn-sm" data-clear-customer>Not them</button></div>';
     host.querySelector("[data-clear-customer]").addEventListener("click", function () {
       state.booking.customer = null;
+      state.booking.location = null;
+      if (state.booking.address) state.booking.address.reset();
       ["bk-name", "bk-phone", "bk-email", "bk-address", "bk-city", "bk-state", "bk-zip"].forEach(function (id) {
         setValue(id, "");
       });
@@ -1622,6 +1743,10 @@
       durationMinutes: Number(val("bk-duration")) || 120,
       assignedTo: val("bk-crew") ? Number(val("bk-crew")) : null,
       address: [contact.address, contact.city, contact.state, contact.zip].filter(Boolean).join(", "),
+      // Only ever a spot Google confirmed. An address that was typed but never
+      // picked is saved as text alone, and the map says so plainly rather than
+      // guessing where it is.
+      location: b.location || null,
       notes: val("bk-notes"),
       items: b.items.map(function (i) {
         return {
@@ -1712,6 +1837,8 @@
   function resetBookingForm() {
     state.booking.customer = null;
     state.booking.items = [];
+    state.booking.location = null;
+    if (state.booking.address) state.booking.address.reset();
     ["bk-name", "bk-phone", "bk-email", "bk-address", "bk-city", "bk-state", "bk-zip", "bk-notes", "bk-search"].forEach(
       function (id) { setValue(id, ""); }
     );
@@ -1737,6 +1864,54 @@
       state.crew = results[1].crew;
       renderDrawer(results[0]);
     });
+  }
+
+  // The stop as the map module wants it: the job's own verified spot when it has
+  // one, the customer's when it does not, and the address as text either way so
+  // a navigation link still works with no coordinates at all.
+  function jobStop(j) {
+    var lat = j.latitude === null || j.latitude === undefined ? j.customerLatitude : j.latitude;
+    var lng = j.longitude === null || j.longitude === undefined ? j.customerLongitude : j.longitude;
+    return {
+      latitude: lat === undefined ? null : lat,
+      longitude: lng === undefined ? null : lng,
+      formattedAddress: j.formattedAddress || null,
+      address: [j.address || j.customerAddress, j.customerCity, j.customerState, j.customerZip]
+        .filter(Boolean)
+        .join(", ")
+    };
+  }
+
+  // Navigation for the one job in front of the crew member, and a way to get it
+  // onto the map when nobody has ever checked its address.
+  function directionsRow(j) {
+    var stop = jobStop(j);
+    var url = window.DCAMaps ? window.DCAMaps.directionsUrl(stop) : null;
+    var mapped = stop.latitude !== null && stop.latitude !== undefined;
+    var buttons = [];
+    if (url) {
+      buttons.push(
+        '<a class="btn btn-primary btn-sm" href="' + esc(url) + '" target="_blank" rel="noopener">Directions</a>'
+      );
+    }
+    if (!mapped && (stop.address || stop.formattedAddress)) {
+      buttons.push(
+        '<button type="button" class="btn btn-ghost btn-sm" data-locate-job="' + j.id + '">Put this stop on the map</button>'
+      );
+    }
+    // Correcting where this one visit happens, without touching the account's
+    // own address — a tenant, a second property, a unit number that was missed.
+    buttons.push(
+      '<button type="button" class="btn btn-ghost btn-sm" data-edit-address="' + j.id + '">Change address</button>'
+    );
+    var note = "";
+    if (!stop.address && !stop.formattedAddress) {
+      note = '<p class="hint">No address on file for this job yet.</p>';
+    } else if (!mapped) {
+      note =
+        '<p class="hint">This address has not been checked with Google, so the stop is missing from the map and from routes.</p>';
+    }
+    return '<div class="contact-bar">' + buttons.join("") + "</div>" + note;
   }
 
   function renderDrawer(data) {
@@ -1779,6 +1954,7 @@
       "<dt>Phone</dt><dd>" + phoneText(j.customerPhone) + "</dd>" +
       "<dt>Email</dt><dd>" + emailText(j.customerEmail) + "</dd>" +
       "<dt>Address</dt><dd>" + esc([j.address || j.customerAddress, j.customerCity, j.customerState, j.customerZip].filter(Boolean).join(", ") || "—") + "</dd>" +
+      "<dt>Getting there</dt><dd>" + directionsRow(j) + "</dd>" +
       "<dt>Scheduled</dt><dd>" + fmtDate(j.scheduledFor) +
       (j.scheduledFor ? " · " + esc(fmtLength(j.durationMinutes)) : "") + "</dd>" +
       "<dt>Booked by</dt><dd>" + esc(j.bookedByName || "—") + "</dd>" +
@@ -2567,7 +2743,7 @@
 
   // Home-screen shortcuts in the manifest open the app straight on a tab.
   function initialView() {
-    var allowed = ["dashboard", "book", "jobs", "customers", "crew"];
+    var allowed = ["dashboard", "book", "jobs", "maps", "customers", "crew"];
     if (state.me && state.me.canManageCrew) allowed.push("charges");
     var want = new URLSearchParams(location.search).get("view");
     return allowed.indexOf(want) === -1 ? "dashboard" : want;
@@ -2587,6 +2763,20 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
+    // Mapping is a separate file so this one stays about running the business.
+    // It is handed the helpers it needs rather than reaching into this scope.
+    if (window.DCAMaps) {
+      window.DCAMaps.init({
+        api: api,
+        esc: esc,
+        toast: toast,
+        fmtTime: fmtTime,
+        fmtMoney: fmtMoney,
+        telDigits: telDigits,
+        openJob: openJob,
+        loadSettings: loadSettings
+      });
+    }
     document.getElementById("login-form").addEventListener("submit", handleLogin);
     document.getElementById("logout").addEventListener("click", function () {
       api("logout", { method: "POST" }).finally(showLogin);
@@ -2650,6 +2840,40 @@
           Number(editCustomer.dataset.editCustomer),
           editCustomer.dataset.fromJob ? Number(editCustomer.dataset.fromJob) : null
         );
+        return;
+      }
+      var editAddress = e.target.closest("[data-edit-address]");
+      if (editAddress) {
+        var jobForAddress = Number(editAddress.dataset.editAddress);
+        if (state.job && state.job.job.id === jobForAddress) openJobAddressEditor(state.job.job);
+        else api("jobs/" + jobForAddress).then(function (d) { openJobAddressEditor(d.job); });
+        return;
+      }
+      var locate = e.target.closest("[data-locate-job]");
+      if (locate && window.DCAMaps) {
+        var jobToLocate = Number(locate.dataset.locateJob);
+        locate.disabled = true;
+        locate.textContent = "Looking it up…";
+        window.DCAMaps.locateJob(jobToLocate)
+          .then(function (result) {
+            if (result.saved) {
+              toast("Found " + result.place.formattedAddress);
+              openJob(jobToLocate);
+              return;
+            }
+            // Google found something, but not the property itself. Saying so is
+            // the whole point: a pin in the middle of a street is worse than an
+            // honest gap.
+            toast(result.place.precisionNote || "Google could not pin that address to a property");
+            locate.disabled = false;
+            locate.textContent = "Put this stop on the map";
+          })
+          .catch(function (err) {
+            if (err.message === "unauthorized") return;
+            toast(err.message || "That address could not be found");
+            locate.disabled = false;
+            locate.textContent = "Put this stop on the map";
+          });
         return;
       }
       var row = e.target.closest("[data-job]");

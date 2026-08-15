@@ -6,6 +6,7 @@
 // migration is generated for existing tables.
 import {
   boolean,
+  doublePrecision,
   index,
   integer,
   pgTable,
@@ -26,6 +27,16 @@ export const customers = pgTable(
     state: text(),
     zip: text(),
     notes: text(),
+    // Where the property actually is. Filled in when the office picks a verified
+    // address off Google's own suggestions, so every map and every route reuses
+    // the coordinates Google already confirmed instead of looking the street up
+    // again — and a job can be put on a map without a second lookup.
+    latitude: doublePrecision(),
+    longitude: doublePrecision(),
+    // Google's own id for the property, and the address exactly as Google spells
+    // it. Kept so a saved location can be recognised again later.
+    placeId: text("place_id"),
+    formattedAddress: text("formatted_address"),
     cloverCustomerId: text("clover_customer_id"),
     createdAt: timestamp("created_at").defaultNow()
   },
@@ -66,6 +77,14 @@ export const jobs = pgTable(
     // technician who does the work).
     bookedBy: integer("booked_by").references(() => employees.id),
     address: text(),
+    // The stop as it goes on the map: the coordinates Google verified when the
+    // address was picked. A job keeps its own copy because the crew is sent to
+    // the address on the appointment, which is not always the address on the
+    // account.
+    latitude: doublePrecision(),
+    longitude: doublePrecision(),
+    placeId: text("place_id"),
+    formattedAddress: text("formatted_address"),
     notes: text(),
     completedAt: timestamp("completed_at"),
     createdAt: timestamp("created_at").defaultNow()
