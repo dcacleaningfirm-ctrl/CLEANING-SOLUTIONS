@@ -270,6 +270,56 @@ tbody tr.clickable:hover { background: var(--surface-2); }
 .feed-item .dot.customer { background: var(--violet); }
 .feed-item time { color: var(--faint); font-size: 0.76rem; }
 
+/* ---------- Dashboard job map ----------
+   Google draws the map itself, inside .map-canvas, in its own light styling —
+   so anything of ours that sits on top of it (the info bubble) is written for a
+   white background rather than the dark app around it. */
+.map-card { margin-top: 18px; }
+.map-legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 0.76rem; color: var(--muted); }
+.map-key { display: inline-flex; align-items: center; gap: 6px; }
+.map-key i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+
+.map-search { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.map-search input {
+  flex: 1 1 260px;
+  min-width: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 0.9rem;
+}
+.map-search input:focus { outline: none; border-color: var(--brand); }
+
+.map-canvas {
+  height: 440px;
+  width: 100%;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+/* Nothing to draw: keep the block from reading as a broken image. */
+.map-canvas-empty { display: flex; align-items: center; justify-content: center; }
+@media (max-width: 700px) { .map-canvas { height: 320px; } }
+
+.map-status { margin-top: 10px; }
+.map-actions { margin: -4px 0 16px; }
+
+.map-info { color: #101828; font-size: 0.85rem; max-width: 260px; line-height: 1.45; }
+.map-info strong { display: block; font-size: 0.95rem; margin-bottom: 4px; }
+.map-info-line { margin-top: 2px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.map-info-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.map-info-actions .btn-ghost { color: #344054; border-color: #d0d5dd; background: #ffffff; }
+/* The status pill is tinted for the dark app; on white it needs its own ink. */
+.map-info .pill.scheduled { color: #0369a1; background: rgba(3, 105, 161, 0.12); }
+.map-info .pill.en_route { color: #6d28d9; background: rgba(109, 40, 217, 0.12); }
+.map-info .pill.in_progress { color: #b45309; background: rgba(180, 83, 9, 0.12); }
+.map-info .pill.completed { color: #047857; background: rgba(4, 120, 87, 0.12); }
+.map-info .pill.cancelled { color: #b42318; background: rgba(180, 35, 24, 0.12); }
+
 /* ---------- Drawer ---------- */
 .drawer { position: fixed; inset: 0; z-index: 40; }
 .drawer-backdrop { position: absolute; inset: 0; background: rgba(0, 0, 0, 0.55); }

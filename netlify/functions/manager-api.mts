@@ -469,13 +469,17 @@ export default async (req: Request, context: Context) => {
       return json({ ok: true, chargeId: chargeData.id });
     }
 
-    // --- What this app can collect and send ------------------------------
-    // The browser is told which payment methods are available and whether card
-    // charging and customer messaging are set up. Only variable names ever
-    // travel with the answer — never their values.
+    // --- What this app can collect, send and show -------------------------
+    // The browser is told which payment methods are available, whether card
+    // charging and customer messaging are set up, and whether the map has a key.
+    // Secrets stay behind: only variable names travel with the answer. The two
+    // exceptions are the keys that are published by design and useless without
+    // their own referrer restrictions — Clover's public key and the Maps browser
+    // key — because the scripts that use them run in the browser.
     if (path === "settings" && method === "GET") {
       const clover = cloverSettings();
       const notify = notifySettings();
+      const maps = mapsSettings();
       return json({
         payments: {
           methods: PAYMENT_METHODS,
@@ -496,6 +500,11 @@ export default async (req: Request, context: Context) => {
             from: notify.email.from
           },
           sms: { configured: notify.sms.configured, missing: notify.sms.missing }
+        },
+        maps: {
+          enabled: maps.missing.length === 0,
+          missing: maps.missing,
+          browserKey: maps.browserKey || null
         }
       });
     }
@@ -1930,6 +1939,36 @@ function cloverSettings() {
   };
 }
 
+// The browser map. Unlike the Clover secret key, a Maps JavaScript API key is
+// meant to travel to the browser — the Maps script cannot load without it — so
+// this is the one key the app hands out, and only to a signed-in crew member.
+// Lock it down in Google Cloud with an HTTP referrer restriction for this site's
+// domains; that, not secrecy, is what stops it being used elsewhere.
+function mapsSettings() {
+  const browserKey = (Netlify.env.get("GOOGLE_MAPS_BROWSER_KEY") || "").trim();
+  const missing: string[] = [];
+  if (!browserKey) missing.push("GOOGLE_MAPS_BROWSER_KEY");
+  return { browserKey, missing };
+}
+
+// One line the map can look up and a driver can read. A job carries its own
+// address when the crew is going somewhere other than the customer's home;
+// otherwise the address on file for the customer is the place.
+function serviceAddress(row: {
+  address?: string | null;
+  customerAddress?: string | null;
+  customerCity?: string | null;
+  customerState?: string | null;
+  customerZip?: string | null;
+}) {
+  const street = (row.address || row.customerAddress || "").trim();
+  if (!street) return null;
+  return [street, row.customerCity, row.customerState, row.customerZip]
+    .map((part) => (part || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
 async function buildDashboard() {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
@@ -1979,7 +2018,7 @@ async function buildDashboard() {
     .from(employees)
     .where(eq(employees.active, true));
 
-  const upcoming = await db
+  const upcomingRows = await db
     .select({
       id: jobs.id,
       serviceType: jobs.serviceType,
@@ -1987,7 +2026,12 @@ async function buildDashboard() {
       scheduledFor: jobs.scheduledFor,
       priceCents: jobs.priceCents,
       customerName: customers.name,
-      assignedName: employees.name
+      assignedName: employees.name,
+      address: jobs.address,
+      customerAddress: customers.address,
+      customerCity: customers.city,
+      customerState: customers.state,
+      customerZip: customers.zip
     })
     .from(jobs)
     .innerJoin(customers, eq(jobs.customerId, customers.id))
@@ -1995,6 +2039,57 @@ async function buildDashboard() {
     .where(sql`${jobs.status} not in ('completed','cancelled')`)
     .orderBy(jobs.scheduledFor)
     .limit(8);
+
+  const upcoming = upcomingRows.map((row) => ({
+    id: row.id,
+    serviceType: row.serviceType,
+    status: row.status,
+    scheduledFor: row.scheduledFor,
+    priceCents: row.priceCents,
+    customerName: row.customerName,
+    assignedName: row.assignedName,
+    serviceAddress: serviceAddress(row)
+  }));
+
+  // Everything still on the books that has somewhere to go, for the map. A
+  // wider net than the eight rows above: the map is how a manager sees the day
+  // spread across the metro, so it wants the whole active list, not a preview.
+  const mapRows = await db
+    .select({
+      id: jobs.id,
+      serviceType: jobs.serviceType,
+      status: jobs.status,
+      scheduledFor: jobs.scheduledFor,
+      priceCents: jobs.priceCents,
+      customerName: customers.name,
+      customerPhone: customers.phone,
+      assignedName: employees.name,
+      address: jobs.address,
+      customerAddress: customers.address,
+      customerCity: customers.city,
+      customerState: customers.state,
+      customerZip: customers.zip
+    })
+    .from(jobs)
+    .innerJoin(customers, eq(jobs.customerId, customers.id))
+    .leftJoin(employees, eq(jobs.assignedTo, employees.id))
+    .where(sql`${jobs.status} not in ('completed','cancelled')`)
+    .orderBy(jobs.scheduledFor)
+    .limit(60);
+
+  const mapJobs = mapRows
+    .map((row) => ({
+      id: row.id,
+      serviceType: row.serviceType,
+      status: row.status,
+      scheduledFor: row.scheduledFor,
+      priceCents: row.priceCents,
+      customerName: row.customerName,
+      customerPhone: row.customerPhone,
+      assignedName: row.assignedName,
+      serviceAddress: serviceAddress(row)
+    }))
+    .filter((row) => row.serviceAddress);
 
   const recentEvents = await db
     .select({
@@ -2044,6 +2139,7 @@ async function buildDashboard() {
     },
     byStatus,
     upcoming,
+    mapJobs,
     recentEvents
   };
 }
