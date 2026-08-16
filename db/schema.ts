@@ -26,7 +26,24 @@ export const customers = pgTable(
     state: text(),
     zip: text(),
     notes: text(),
+    // A second number to try when the main one does not answer. Common on
+    // imported lists, where a household gives both a mobile and a landline.
+    altPhone: text("alt_phone"),
+    // Where the account came from — "Google", "Referral", a campaign name. Kept
+    // as free text because every list the office buys spells it differently.
+    leadSource: text("lead_source"),
+    // The work this account was originally interested in, as the source list
+    // recorded it. Purely descriptive; booked work still lives on jobs.
+    service: text(),
     cloverCustomerId: text("clover_customer_id"),
+    // How the account stands with the Clover customer directory: "synced" once
+    // Clover holds a matching record, "pending" while a sync is owed, "error"
+    // when the last attempt failed. The reason for a failure is kept next to it
+    // so the office can read it rather than guess, and so a retry has something
+    // to show for itself.
+    cloverSyncStatus: text("clover_sync_status"),
+    cloverSyncedAt: timestamp("clover_synced_at"),
+    cloverSyncError: text("clover_sync_error"),
     createdAt: timestamp("created_at").defaultNow()
   },
   (table) => [index("customers_name_idx").on(table.name)]

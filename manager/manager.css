@@ -373,8 +373,12 @@ tbody tr.clickable:hover { background: var(--surface-2); }
 .ticket-add { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; }
 .ticket-add .hint { margin: 0; align-self: center; }
 
-.customer-search { display: grid; gap: 8px; margin-bottom: 14px; }
-.customer-search .hint { margin: 0; }
+.customer-search { display: grid; gap: 8px; margin-bottom: 14px; grid-template-columns: 1fr auto; align-items: end; }
+.customer-search .field { grid-column: 1; }
+.customer-search .btn { grid-column: 2; grid-row: 1; }
+.customer-search .hint { margin: 0; grid-column: 1 / -1; }
+.customer-origin span { color: var(--muted); }
+.clover-retry { margin-left: 6px; }
 .control-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0; }
 .control-row label { font-size: 0.76rem; color: var(--muted); font-weight: 600; display: grid; gap: 5px; }
 .control-row select {
@@ -448,6 +452,85 @@ tbody tr.clickable:hover { background: var(--surface-2); }
 .modal-error { margin: 0; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
 .pin-input { letter-spacing: 0.3em; }
+
+/* ---------- Bringing in a customer list ---------- */
+/* Wider than the login dialog because a preview has to show real rows: a table
+   squeezed into 380px tells nobody whether the right columns were found. */
+.import-card { max-width: 720px; }
+.import-file { color: var(--muted); font-size: 0.82rem; margin-top: -6px; }
+
+.import-drop {
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  text-align: center;
+  padding: 34px 20px;
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.import-drop.over { border-color: var(--brand); background: var(--brand-soft); }
+.import-drop strong { font-size: 1rem; letter-spacing: -0.02em; }
+.import-drop span { color: var(--muted); font-size: 0.8rem; }
+
+.import-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.import-stat {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  display: grid;
+  gap: 4px;
+}
+.import-stat span { color: var(--muted); font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+.import-stat strong { font-size: 1.5rem; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.import-stat.good strong { color: var(--green); }
+.import-stat.warn strong { color: var(--amber); }
+.import-stat.bad strong { color: var(--red); }
+
+.import-columns { display: grid; gap: 7px; }
+.import-columns .hint { margin: 0; }
+.import-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.import-tag {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.74rem;
+  font-weight: 600;
+}
+.import-tag em { color: var(--muted); font-style: normal; font-weight: 500; }
+
+.import-preview, .import-report { margin: 0; padding: 0; overflow-x: auto; }
+.import-preview table, .import-report table { font-size: 0.82rem; }
+.import-detail { color: var(--muted); font-size: 0.74rem; margin-top: 3px; }
+.import-report td:first-child { color: var(--muted); }
+
+.import-progress-line { font-size: 0.92rem; font-variant-numeric: tabular-nums; }
+.import-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  overflow: hidden;
+}
+.import-bar span {
+  display: block;
+  height: 100%;
+  background: var(--brand);
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+
+@media (max-width: 620px) {
+  .import-stats { grid-template-columns: repeat(2, 1fr); }
+  .import-drop { padding: 26px 14px; }
+  .customer-search { grid-template-columns: 1fr; }
+  .customer-search .btn { grid-column: 1; grid-row: auto; }
+}
 
 /* ---------- Crew row controls ---------- */
 .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
