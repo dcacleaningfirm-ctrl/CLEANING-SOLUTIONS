@@ -19,6 +19,7 @@ import {
   readSessionCookie
 } from "../../lib/manager-session.js";
 import {
+  addressKey,
   backfill,
   cleanRow,
   emailKey,
@@ -230,10 +231,11 @@ const IMPORT_LOOKUP_COLUMNS = {
 type ExistingCustomer = Awaited<ReturnType<typeof findCustomersByKeys>>[number];
 
 // One query for the whole slice rather than two per row. Phones are compared on
-// their last ten digits and emails in lower case, which is the same test the
-// importer applies to the incoming file.
-async function findCustomersByKeys(phones: string[], emails: string[]) {
-  if (!phones.length && !emails.length) return [];
+// their last ten digits, emails in lower case and addresses on their letters
+// with the spacing evened out, which is the same test the importer applies to
+// the incoming file.
+async function findCustomersByKeys(phones: string[], emails: string[], addresses: string[]) {
+  if (!phones.length && !emails.length && !addresses.length) return [];
   const tests = [];
   if (phones.length) {
     tests.push(
@@ -244,6 +246,14 @@ async function findCustomersByKeys(phones: string[], emails: string[]) {
     );
   }
   if (emails.length) tests.push(inArray(sql`lower(${customers.email})`, emails));
+  if (addresses.length) {
+    tests.push(
+      inArray(
+        sql`lower(regexp_replace(btrim(coalesce(${customers.address}, '')), '[[:space:]]+', ' ', 'g'))`,
+        addresses
+      )
+    );
+  }
   return db.select(IMPORT_LOOKUP_COLUMNS).from(customers).where(or(...tests));
 }
 
@@ -282,6 +292,7 @@ interface ImportRequest {
   firstLine: number;
   seenPhones: Set<string>;
   seenEmails: Set<string>;
+  seenAddresses: Set<string>;
   syncClover: boolean;
   actorName: string;
 }
@@ -290,7 +301,7 @@ interface ImportRequest {
 // writing at the end is different, so what the office approves on screen is
 // what the file will do.
 async function runCustomerImport(request: ImportRequest) {
-  const { mode, map, rows, firstLine, seenPhones, seenEmails } = request;
+  const { mode, map, rows, firstLine, seenPhones, seenEmails, seenAddresses } = request;
 
   const counts = {
     rows: 0,
@@ -311,6 +322,7 @@ async function runCustomerImport(request: ImportRequest) {
   const problems: ImportProblem[] = [];
   const newPhoneKeys: string[] = [];
   const newEmailKeys: string[] = [];
+  const newAddressKeys: string[] = [];
 
   function note(problem: ImportProblem) {
     if (problems.length < IMPORT_ERROR_LIMIT) problems.push(problem);
@@ -323,20 +335,25 @@ async function runCustomerImport(request: ImportRequest) {
 
   const phones = new Set<string>();
   const emails = new Set<string>();
+  const addresses = new Set<string>();
   for (const { verdict } of verdicts) {
     if (verdict.kind !== "ok") continue;
     if (verdict.phoneKey) phones.add(verdict.phoneKey);
     if (verdict.emailKey) emails.add(verdict.emailKey);
+    if (verdict.addressKey) addresses.add(verdict.addressKey);
   }
-  const onFile = await findCustomersByKeys([...phones], [...emails]);
+  const onFile = await findCustomersByKeys([...phones], [...emails], [...addresses]);
   const byPhone = new Map<string, ExistingCustomer>();
   const byEmail = new Map<string, ExistingCustomer>();
+  const byAddress = new Map<string, ExistingCustomer>();
   for (const row of onFile) {
     for (const key of [storedPhoneKey(row.phone), phoneKey(row.phone)]) {
       if (key && !byPhone.has(key)) byPhone.set(key, row);
     }
     const ek = emailKey(row.email);
     if (ek && !byEmail.has(ek)) byEmail.set(ek, row);
+    const ak = addressKey(row.address);
+    if (ak && !byAddress.has(ak)) byAddress.set(ak, row);
   }
 
   interface PendingInsert {
@@ -372,8 +389,15 @@ async function runCustomerImport(request: ImportRequest) {
     const customer = verdict.customer;
     const pk = verdict.phoneKey;
     const ek = verdict.emailKey;
-    const repeated = Boolean((pk && seenPhones.has(pk)) || (ek && seenEmails.has(ek)));
-    const match = (pk ? byPhone.get(pk) : undefined) || (ek ? byEmail.get(ek) : undefined) || null;
+    const ak = verdict.addressKey;
+    const repeated = Boolean(
+      (pk && seenPhones.has(pk)) || (ek && seenEmails.has(ek)) || (ak && seenAddresses.has(ak))
+    );
+    const match =
+      (pk ? byPhone.get(pk) : undefined) ||
+      (ek ? byEmail.get(ek) : undefined) ||
+      (ak ? byAddress.get(ak) : undefined) ||
+      null;
 
     if (match || repeated) {
       counts.duplicate++;
@@ -403,6 +427,15 @@ async function runCustomerImport(request: ImportRequest) {
       seenEmails.add(ek);
       newEmailKeys.push(ek);
     }
+    if (ak) {
+      seenAddresses.add(ak);
+      newAddressKeys.push(ak);
+    }
+    // A row that arrived without a name was filed under its phone number, email
+    // or address. Say so on the preview so nobody wonders where the name in the
+    // customer list came from.
+    const madeUpName =
+      verdict.nameSource === "file" ? "" : `Name made from the ${verdict.nameSource}`;
     show({
       line,
       status: "new",
@@ -410,9 +443,12 @@ async function runCustomerImport(request: ImportRequest) {
       phone: customer.phone || "",
       email: customer.email || "",
       city: customer.city || "",
-      detail: [customer.service, customer.leadSource].filter(Boolean).join(" · ")
+      detail: [customer.service, customer.leadSource, madeUpName].filter(Boolean).join(" · ")
     });
-    if (mode === "commit") inserts.push({ line, key: pk || ek || `line-${line}`, customer });
+    // The line a row came from is looked up again after the insert by whatever
+    // the account can be recognised by, so a row with no phone or email is keyed
+    // on the name it was given.
+    if (mode === "commit") inserts.push({ line, key: pk || ek || customer.name, customer });
   }
 
   const syncTargets: { line: number; row: SyncableCustomer }[] = [];
@@ -461,7 +497,7 @@ async function runCustomerImport(request: ImportRequest) {
       counts.created = created.length;
       const lineByKey = new Map(inserts.map((pending) => [pending.key, pending.line]));
       for (const row of created) {
-        const key = storedPhoneKey(row.phone) || emailKey(row.email) || "";
+        const key = storedPhoneKey(row.phone) || emailKey(row.email) || row.name || "";
         syncTargets.push({ line: lineByKey.get(key) ?? firstLine, row });
       }
     }
@@ -586,7 +622,7 @@ async function runCustomerImport(request: ImportRequest) {
     counts,
     samples,
     problems,
-    newKeys: { phones: newPhoneKeys, emails: newEmailKeys },
+    newKeys: { phones: newPhoneKeys, emails: newEmailKeys, addresses: newAddressKeys },
     clover
   };
 }
@@ -1669,6 +1705,7 @@ export default async (req: Request, context: Context) => {
         firstLine?: number;
         seenPhones?: unknown;
         seenEmails?: unknown;
+        seenAddresses?: unknown;
         syncClover?: boolean;
       };
 
@@ -1688,8 +1725,9 @@ export default async (req: Request, context: Context) => {
         return json(
           {
             error:
-              "This file needs a name column and either a phone or an email column. " +
-              "“First Name”, “last_name”, “phone_number”, “email_address” and similar spellings are all understood."
+              "This file needs a phone, an email or a street address column. " +
+              "“phone_number”, “Mobile”, “email_address”, “Street Address” and similar spellings are all understood. " +
+              "A name column is welcome but not required."
           },
           { status: 400 }
         );
@@ -1719,6 +1757,7 @@ export default async (req: Request, context: Context) => {
         firstLine,
         seenPhones: readKeySet(body.seenPhones),
         seenEmails: readKeySet(body.seenEmails),
+        seenAddresses: readKeySet(body.seenAddresses),
         syncClover: body.syncClover !== false,
         actorName: account.name
       });
