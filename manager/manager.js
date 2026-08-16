@@ -3609,9 +3609,23 @@
   // Home-screen shortcuts in the manifest open the app straight on a tab.
   function initialView() {
     var allowed = ["dashboard", "book", "jobs", "customers", "crew"];
-    if (state.me && state.me.canManageCrew) allowed.push("charges");
+    if (state.canManage) allowed.push("charges");
     var want = new URLSearchParams(location.search).get("view");
     return allowed.indexOf(want) === -1 ? "dashboard" : want;
+  }
+
+  // Whether an account may administer the office: bring a customer file in,
+  // change the crew list, take a custom charge. The server decides this and
+  // says so on the session, and the server is what actually enforces it — this
+  // reads the same answer back so the screens can show the right buttons. The
+  // role name is a second way of reading it, in case an older copy of the API
+  // answers a session without the flag; the list matches ADMIN_ROLES on the
+  // server in lib/manager-session.ts.
+  var ADMIN_ROLES = ["owner", "admin", "manager"];
+  function accountCanManage(employee) {
+    if (!employee) return false;
+    if (employee.canManageCrew) return true;
+    return ADMIN_ROLES.indexOf(String(employee.role || "").trim().toLowerCase()) !== -1;
   }
 
   function boot() {
@@ -3621,12 +3635,16 @@
         // The same answer the server checks its own routes against, settled at
         // sign-in. Waiting for the crew tab to fill this in left every other
         // screen believing an office account could not manage anything.
-        state.canManage = Boolean(d.employee.canManageCrew);
+        state.canManage = accountCanManage(d.employee);
         document.getElementById("who").textContent = d.employee.name + " · " + d.employee.role;
         var chargeTab = document.querySelector('[data-view="charges"]');
-        if (chargeTab) chargeTab.hidden = !d.employee.canManageCrew;
+        if (chargeTab) chargeTab.hidden = !state.canManage;
         showApp();
         switchView(initialView());
+        // If the customers tab was already on screen from an earlier session,
+        // its search card is still in the page and would keep whatever button
+        // the last account was entitled to. Settle it against this one.
+        syncImportButton();
       })
       .catch(function () { showLogin(); });
   }
@@ -3731,10 +3749,26 @@
     });
     boot();
 
-    // Registers the worker that makes the app installable on a phone.
+    // Registers the worker that makes the app installable on a phone, and keeps
+    // it honest: a console that is already installed must not go on running an
+    // old build after a deploy. Ask for a fresh worker on every load, and when a
+    // new one takes charge, reload once so the screens on the glass are the ones
+    // that were just shipped. The guards below make that a single reload rather
+    // than a loop: nothing happens on a first-ever install (there was no worker
+    // in charge to replace), and the reload is only ever done once per page.
     if ("serviceWorker" in navigator) {
+      var hadController = Boolean(navigator.serviceWorker.controller);
+      var reloading = false;
+      navigator.serviceWorker.addEventListener("controllerchange", function () {
+        if (!hadController || reloading) return;
+        reloading = true;
+        location.reload();
+      });
       navigator.serviceWorker
         .register("/manager/sw.js", { scope: "/manager/" })
+        .then(function (reg) {
+          if (reg && typeof reg.update === "function") reg.update();
+        })
         .catch(function () { /* install support is optional; app still works */ });
     }
   });
