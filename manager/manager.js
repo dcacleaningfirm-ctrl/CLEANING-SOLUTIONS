@@ -38,6 +38,9 @@
     // Customers tab: the search term in force and its debounce timer.
     customerSearch: "",
     customerTimer: null,
+    // The customer file being brought in: what was parsed out of it, how far
+    // through it is, and what it has done so far.
+    importJob: null,
     // The dashboard job map: the loaded Google Maps namespace, the live map and
     // its markers, and an address waiting to be centred on the next time the
     // dashboard is on screen.
@@ -944,6 +947,9 @@
         '<div class="card customer-search"><label class="field"><span>Find a customer</span>' +
         '<input id="cu-search" type="search" maxlength="80" placeholder="Name, phone, email or street…" value="' +
         esc(term) + '" /></label>' +
+        (state.canManage
+          ? '<button type="button" class="btn btn-primary btn-sm" id="cu-import">Import CSV</button>'
+          : "") +
         '<p class="hint">Tap a number to call, or Text to open a message. Edit fixes what is on file.</p></div>' +
         '<div id="cu-list"><div class="loading">Loading…</div></div>';
 
@@ -956,6 +962,9 @@
           renderCustomers();
         }, 300);
       });
+
+      var importBtn = document.getElementById("cu-import");
+      if (importBtn) importBtn.addEventListener("click", openImport);
     }
 
     var list = document.getElementById("cu-list");
@@ -963,7 +972,7 @@
     api("customers" + (term ? "?q=" + encodeURIComponent(term) : "")).then(function (d) {
       list.innerHTML = d.customers.length
         ? '<div class="card"><table><thead><tr><th>Name</th><th>Contact</th><th>Location</th>' +
-          '<th class="right">Jobs</th><th class="right">Edit</th></tr></thead><tbody>' +
+          '<th>Clover</th><th class="right">Jobs</th><th class="right">Edit</th></tr></thead><tbody>' +
           d.customers.map(function (c) {
             var dial = telDigits(c.phone);
             var contact =
@@ -973,7 +982,7 @@
               "</div>";
             var loc = [c.city, c.state].filter(Boolean).map(esc).join(", ") || '<span class="muted">—</span>';
             return "<tr><td>" + esc(c.name) + "</td><td>" + contact + '</td><td class="muted">' +
-              loc + '</td><td class="right mono">' + c.jobCount + "</td>" +
+              loc + "</td><td>" + cloverCell(c) + '</td><td class="right mono">' + c.jobCount + "</td>" +
               '<td class="right"><button type="button" class="btn btn-ghost btn-sm" data-edit-customer="' +
               c.id + '">Edit</button></td></tr>';
           }).join("") +
@@ -981,6 +990,55 @@
         : '<div class="card"><p class="empty">' +
           (term ? "Nobody matches “" + esc(term) + "”." : "No customers yet.") + "</p></div>";
     });
+  }
+
+  // Where an account stands with the Clover customer directory. Deliberately
+  // quiet: a synced account is a small tick, and only a failure asks for
+  // anything, because most of the time nobody needs to think about Clover.
+  function cloverCell(c) {
+    var status = c.cloverSyncStatus;
+    if (status === "synced" && c.cloverCustomerId) {
+      return '<span class="pill completed">Synced</span>';
+    }
+    if (status === "error") {
+      return '<span class="pill cancelled">Sync error</span>' +
+        '<button type="button" class="btn btn-ghost btn-xs clover-retry" data-clover-retry="' +
+        c.id + '">Retry</button>';
+    }
+    if (status === "pending") {
+      return '<span class="pill in_progress">Pending</span>' +
+        '<button type="button" class="btn btn-ghost btn-xs clover-retry" data-clover-retry="' +
+        c.id + '">Sync</button>';
+    }
+    return '<span class="muted">—</span>';
+  }
+
+  // Try a failed customer again. The account itself is never at risk here — the
+  // record is already saved and this only ever changes what Clover knows.
+  function retryCloverSync(id, button) {
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Syncing…";
+    }
+    api("customers/" + id + "/clover-sync", { method: "POST" })
+      .then(function (res) {
+        var sync = res.sync || {};
+        toast(
+          sync.ok
+            ? sync.action === "created"
+              ? "Added to Clover."
+              : "Linked to the customer Clover already had."
+            : sync.error || "Clover would not accept that customer."
+        );
+        renderCustomers();
+      })
+      .catch(function (e) {
+        toast(e.message || "Could not reach Clover");
+        if (button) {
+          button.disabled = false;
+          button.textContent = "Retry";
+        }
+      });
   }
 
   // Correcting what is on file. Every field the office keeps is editable here,
@@ -995,6 +1053,7 @@
         '<div class="booking-fields">' +
           '<label class="field"><span>Name</span><input id="cf-name" maxlength="120" required value="' + esc(c.name || "") + '" /></label>' +
           '<label class="field"><span>Phone</span><input id="cf-phone" type="tel" maxlength="30" value="' + esc(c.phone || "") + '" placeholder="(404) 555-0134" /></label>' +
+          '<label class="field"><span>Alternate phone</span><input id="cf-alt-phone" type="tel" maxlength="30" value="' + esc(c.altPhone || "") + '" placeholder="Second number to try" /></label>' +
           '<label class="field"><span>Email</span><input id="cf-email" type="email" maxlength="160" value="' + esc(c.email || "") + '" /></label>' +
           '<label class="field"><span>Street address</span><input id="cf-address" maxlength="200" value="' + esc(c.address || "") + '" /></label>' +
           '<label class="field"><span>City</span><input id="cf-city" maxlength="80" value="' + esc(c.city || "") + '" /></label>' +
@@ -1003,12 +1062,14 @@
           "</div>" +
           '<label class="field"><span>Notes the office keeps</span><textarea id="cf-notes" maxlength="2000" rows="3">' +
           esc(c.notes || "") + "</textarea></label>" +
+          customerOriginHtml(c) +
           '<p class="hint">' + c.jobCount + (c.jobCount === 1 ? " job" : " jobs") +
           " on this account. Changes apply to every one of them.</p>",
         function () {
           var body = {
             name: val("cf-name"),
             phone: val("cf-phone"),
+            altPhone: val("cf-alt-phone"),
             email: val("cf-email"),
             address: val("cf-address"),
             city: val("cf-city"),
@@ -1030,6 +1091,521 @@
         }
       );
     });
+  }
+
+  // Where an imported account came from, shown read-only. These are the columns
+  // a bought list carries that the office does not edit but does want to see
+  // when it is looking at the account and wondering who this person is.
+  function customerOriginHtml(c) {
+    var lines = [];
+    if (c.leadSource) lines.push(["Lead source", c.leadSource]);
+    if (c.service) lines.push(["Service asked for", c.service]);
+    if (c.cloverSyncStatus === "synced" && c.cloverCustomerId) lines.push(["Clover", "Synced"]);
+    else if (c.cloverSyncStatus === "error") lines.push(["Clover", "Sync error — " + (c.cloverSyncError || "not synced")]);
+    else if (c.cloverSyncStatus === "pending") lines.push(["Clover", "Waiting to sync"]);
+    if (!lines.length) return "";
+    return '<div class="kv customer-origin">' +
+      lines.map(function (row) {
+        return "<span>" + esc(row[0]) + "</span><strong>" + esc(row[1]) + "</strong>";
+      }).join("") +
+      "</div>";
+  }
+
+  // ---------- bringing in a customer list ----------
+  // Every office arrives with a spreadsheet: an export from the scheduler they
+  // used before, a list bought from a lead service, a tab someone kept by hand.
+  // Nobody is going to retype three hundred rows, and nobody should have to
+  // check three hundred rows for people already on file either.
+  //
+  // The browser reads the file and does the splitting, so a large list does not
+  // have to travel in one piece and the count on screen is a real count rather
+  // than a spinner. Every decision about what a row means is made on the server,
+  // in both the check and the import, so the numbers shown before the office
+  // presses the button are the numbers it will get.
+
+  // Checking costs nothing but a read, so it goes up in big slices. Importing
+  // can cost a call to Clover per row, so it goes in small ones.
+  var IMPORT_CHECK_SLICE = 200;
+  var IMPORT_COMMIT_SLICE = 25;
+  var IMPORT_MAX_BYTES = 12 * 1024 * 1024;
+  var IMPORT_SEEN_LIMIT = 40000;
+
+  var IMPORT_FIELD_LABEL = {
+    firstName: "First name",
+    lastName: "Last name",
+    name: "Name",
+    phone: "Phone",
+    altPhone: "Alternate phone",
+    email: "Email",
+    address: "Street address",
+    address2: "Address line 2",
+    city: "City",
+    state: "State",
+    zip: "ZIP",
+    leadSource: "Lead source",
+    service: "Service",
+    notes: "Notes",
+    sourceRecordCount: "Source record count"
+  };
+
+  // A separated-values file read the way the standard says: quotes protect
+  // separators and line breaks, and two quotes inside a quoted field mean one
+  // literal quote. Anything less falls apart on the first address with a comma
+  // in it, which is every address.
+  function parseCsv(text, delimiter) {
+    // A byte-order mark from Excel would otherwise become part of the first
+    // heading and stop it matching anything at all.
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    var rows = [];
+    var row = [];
+    var field = "";
+    var quoted = false;
+    var i = 0;
+    while (i < text.length) {
+      var ch = text.charAt(i);
+      if (quoted) {
+        if (ch === '"') {
+          if (text.charAt(i + 1) === '"') { field += '"'; i += 2; continue; }
+          quoted = false; i++; continue;
+        }
+        field += ch; i++; continue;
+      }
+      if (ch === '"' && field === "") { quoted = true; i++; continue; }
+      if (ch === delimiter) { row.push(field); field = ""; i++; continue; }
+      if (ch === "\r") { i++; continue; }
+      if (ch === "\n") { row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
+      field += ch; i++;
+    }
+    if (field !== "" || row.length) { row.push(field); rows.push(row); }
+    return rows;
+  }
+
+  // Not every export is comma separated. European tools use semicolons and
+  // database exports are often tab separated, so whichever character appears
+  // most on the heading line is taken to be the separator.
+  function sniffDelimiter(text) {
+    var line = text.split(/\r\n|\r|\n/)[0] || "";
+    var best = ",";
+    var bestCount = 0;
+    [",", ";", "\t", "|"].forEach(function (candidate) {
+      var count = line.split(candidate).length - 1;
+      if (count > bestCount) { bestCount = count; best = candidate; }
+    });
+    return best;
+  }
+
+  function readTextFile(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || "")); };
+      reader.onerror = function () { reject(new Error("That file could not be read")); };
+      reader.readAsText(file);
+    });
+  }
+
+  function blankRow(cells) {
+    for (var i = 0; i < cells.length; i++) {
+      if (String(cells[i] == null ? "" : cells[i]).trim() !== "") return false;
+    }
+    return true;
+  }
+
+  function emptyImportTotals() {
+    return {
+      rows: 0, blank: 0, valid: 0, duplicate: 0, invalid: 0,
+      created: 0, existing: 0, updated: 0, failed: 0,
+      cloverCreated: 0, cloverLinked: 0, cloverUpdated: 0, cloverErrors: 0
+    };
+  }
+
+  function openImport() {
+    state.importJob = null;
+    document.getElementById("import").hidden = false;
+    renderImportChooser();
+    // Only used to tell the office whether Clover is switched on, so a slow
+    // answer must not hold up choosing a file.
+    loadSettings().catch(function () { /* the chooser works without it */ });
+  }
+
+  function closeImport() {
+    var job = state.importJob;
+    if (job) job.cancelled = true;
+    state.importJob = null;
+    document.getElementById("import").hidden = true;
+    document.getElementById("import-body").innerHTML = "";
+    var picker = document.getElementById("import-file");
+    if (picker) picker.value = "";
+    // Anything already written stays written, so the list behind the dialog has
+    // to catch up whether the import finished or was stopped half way.
+    if (job && job.mode === "commit") renderCustomers();
+  }
+
+  function renderImportChooser(message) {
+    var body = document.getElementById("import-body");
+    body.innerHTML =
+      '<div class="import-drop" id="import-drop">' +
+      "<strong>Drop a customer file here</strong>" +
+      "<span>A .csv saved from a spreadsheet — comma, semicolon or tab separated</span>" +
+      '<button type="button" class="btn btn-primary btn-sm" id="import-pick">Choose a file</button>' +
+      "</div>" +
+      (message ? '<p class="login-error modal-error">' + esc(message) + "</p>" : "") +
+      '<p class="hint">Headings are matched loosely: “First Name”, “first_name” and “FirstName” are all the same ' +
+      "column. Understood are first and last name, phone, alternate phone, email, street address, city, state, ZIP, " +
+      "lead source, service, notes and source record count. Nothing is written until you have seen what the file " +
+      "contains.</p>" +
+      '<div class="modal-actions"><button type="button" class="btn btn-ghost" data-import-close>Cancel</button></div>';
+
+    var drop = document.getElementById("import-drop");
+    document.getElementById("import-pick").addEventListener("click", function () {
+      // On a phone or tablet this opens the Files app, which is where a
+      // spreadsheet emailed to the office ends up.
+      document.getElementById("import-file").click();
+    });
+    ["dragenter", "dragover"].forEach(function (name) {
+      drop.addEventListener(name, function (ev) {
+        ev.preventDefault();
+        drop.classList.add("over");
+      });
+    });
+    ["dragleave", "dragend", "drop"].forEach(function (name) {
+      drop.addEventListener(name, function (ev) {
+        ev.preventDefault();
+        drop.classList.remove("over");
+      });
+    });
+    drop.addEventListener("drop", function (ev) {
+      var file = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+      if (file) beginImport(file);
+    });
+  }
+
+  function beginImport(file) {
+    if (!file) return;
+    if (file.size > IMPORT_MAX_BYTES) {
+      renderImportChooser("That file is bigger than 12 MB. Split it and bring the parts in one at a time.");
+      return;
+    }
+    var body = document.getElementById("import-body");
+    body.innerHTML = '<div class="loading">Reading ' + esc(file.name) + "…</div>";
+
+    readTextFile(file)
+      .then(function (text) {
+        var rows = parseCsv(text, sniffDelimiter(text));
+        // Spreadsheet exports almost always end with a blank line or three.
+        while (rows.length && blankRow(rows[rows.length - 1])) rows.pop();
+        if (rows.length < 2) {
+          throw new Error("There are no customer rows underneath the headings in that file");
+        }
+        var job = {
+          name: file.name,
+          headers: rows[0].map(function (h) { return String(h == null ? "" : h); }),
+          rows: rows.slice(1),
+          cancelled: false,
+          mode: "preview",
+          done: 0,
+          totals: emptyImportTotals(),
+          samples: [],
+          problems: [],
+          columns: null,
+          clover: null,
+          syncClover: true,
+          seenPhones: [],
+          seenEmails: [],
+          error: null
+        };
+        state.importJob = job;
+        return runImportSlices(job, IMPORT_CHECK_SLICE, "Checking").then(function () {
+          if (!job.cancelled) renderImportPreview(job);
+        });
+      })
+      .catch(function (e) {
+        if (state.importJob && state.importJob.cancelled) return;
+        state.importJob = null;
+        renderImportChooser(e.message || "That file could not be read");
+      });
+  }
+
+  // One slice at a time, in order, waiting for each answer before sending the
+  // next. Slower than firing them all at once and far kinder to both the
+  // database and Clover — and it means stopping half way leaves a state that can
+  // be described honestly.
+  function runImportSlices(job, size, verb) {
+    if (job.cancelled || job.done >= job.rows.length) return Promise.resolve();
+    var at = job.done;
+    var slice = job.rows.slice(at, at + size);
+    var payload = {
+      mode: job.mode,
+      headers: job.headers,
+      rows: slice,
+      firstLine: at + 2,
+      syncClover: job.syncClover !== false
+    };
+    // Only the check needs these: it writes nothing, so a household repeated on
+    // row 3 and row 900 would otherwise be counted twice. During the import the
+    // first copy is already in the database, which catches the second.
+    if (job.mode === "preview") {
+      payload.seenPhones = job.seenPhones;
+      payload.seenEmails = job.seenEmails;
+    }
+    return api("customers/import", { method: "POST", body: payload }).then(function (res) {
+      if (job.cancelled) return;
+      absorbImportResult(job, res);
+      job.done = at + slice.length;
+      renderImportProgress(job, verb);
+      return runImportSlices(job, size, verb);
+    });
+  }
+
+  function absorbImportResult(job, res) {
+    var counts = res.counts || {};
+    Object.keys(job.totals).forEach(function (key) {
+      job.totals[key] += Number(counts[key]) || 0;
+    });
+    if (!job.columns && res.columns) job.columns = res.columns;
+    if (job.samples.length < 10 && res.samples) {
+      job.samples = job.samples.concat(res.samples).slice(0, 10);
+    }
+    if (res.problems && res.problems.length) {
+      job.problems = job.problems.concat(res.problems).slice(0, 5000);
+    }
+    if (job.mode === "preview" && res.newKeys) {
+      job.seenPhones = job.seenPhones.concat(res.newKeys.phones || []).slice(0, IMPORT_SEEN_LIMIT);
+      job.seenEmails = job.seenEmails.concat(res.newKeys.emails || []).slice(0, IMPORT_SEEN_LIMIT);
+    }
+    if (res.clover) {
+      job.clover = res.clover;
+      // A permission problem will not have fixed itself two hundred rows later.
+      // Stop asking Clover and get the rest of the customers into DCA Pro
+      // Manager, where they can be synced once the account is sorted out.
+      if (!res.clover.ok) job.syncClover = false;
+    }
+  }
+
+  function renderImportProgress(job, verb) {
+    var total = job.rows.length;
+    var pct = total ? Math.round((job.done / total) * 100) : 0;
+    var clover = "";
+    if (job.mode === "commit") {
+      var synced = job.totals.cloverCreated + job.totals.cloverLinked +
+        job.totals.cloverUpdated + job.totals.cloverErrors;
+      clover = '<p class="import-progress-line">Syncing with Clover: ' + synced + " / " + total + "</p>";
+    }
+    document.getElementById("import-body").innerHTML =
+      '<p class="import-progress-line">' + esc(verb) + " customers: " + job.done + " / " + total + "</p>" +
+      clover +
+      '<div class="import-bar"><span style="width:' + pct + '%"></span></div>' +
+      '<p class="hint">' +
+      (job.mode === "commit"
+        ? "Everything already saved stays saved, even if you stop."
+        : "Nothing has been written yet.") +
+      "</p>" +
+      '<div class="modal-actions"><button type="button" class="btn btn-ghost" data-import-close>Stop</button></div>';
+  }
+
+  function importStat(label, value, tone) {
+    return '<div class="import-stat' + (tone ? " " + tone : "") + '"><span>' +
+      esc(label) + "</span><strong>" + value + "</strong></div>";
+  }
+
+  function importColumnsHtml(job) {
+    var matched = (job.columns && job.columns.matched) || {};
+    var ignored = (job.columns && job.columns.ignored) || [];
+    var keys = Object.keys(matched);
+    return '<div class="import-columns"><p class="hint">Columns being read</p><div class="import-tags">' +
+      (keys.length
+        ? keys.map(function (key) {
+            return '<span class="import-tag">' + esc(IMPORT_FIELD_LABEL[key] || key) +
+              "<em>" + esc(matched[key]) + "</em></span>";
+          }).join("")
+        : '<span class="muted">None</span>') +
+      "</div>" +
+      (ignored.length ? '<p class="hint">Left alone: ' + ignored.map(esc).join(", ") + "</p>" : "") +
+      "</div>";
+  }
+
+  function importSampleTable(samples) {
+    if (!samples.length) return "";
+    return '<div class="card import-preview"><table><thead><tr><th>Row</th><th>Customer</th>' +
+      "<th>Contact</th><th>What happens</th></tr></thead><tbody>" +
+      samples.map(function (s) {
+        var label = s.status === "new"
+          ? '<span class="pill scheduled">New</span>'
+          : s.status === "duplicate"
+            ? '<span class="pill completed">Already on file</span>'
+            : '<span class="pill cancelled">Cannot import</span>';
+        var contact = [s.phone, s.email].filter(Boolean).join(" · ");
+        return '<tr><td class="mono">' + s.line + "</td><td>" +
+          (s.name ? esc(s.name) : '<span class="muted">—</span>') +
+          '</td><td class="muted">' + (contact ? esc(contact) : "—") + "</td><td>" + label +
+          (s.detail ? '<div class="import-detail">' + esc(s.detail) + "</div>" : "") +
+          "</td></tr>";
+      }).join("") +
+      "</tbody></table></div>";
+  }
+
+  function importCloverNotice() {
+    var sync = (state.settings && state.settings.customerSync) || {};
+    if (sync.enabled) {
+      return '<p class="hint">Each customer is added to the Clover customer directory as well. Anyone Clover ' +
+        "already knows is linked to, never duplicated.</p>";
+    }
+    return '<p class="hint warn">Clover customer sync is not switched on' +
+      (sync.missing && sync.missing.length ? " (" + esc(sync.missing.join(", ")) + " not set)" : "") +
+      ". Customers will import into DCA Pro Manager and can be synced later.</p>";
+  }
+
+  function renderImportPreview(job) {
+    var t = job.totals;
+    var found = t.rows - t.blank;
+    var anything = t.valid + t.duplicate;
+    document.getElementById("import-body").innerHTML =
+      '<p class="import-file">' + esc(job.name) + "</p>" +
+      '<div class="import-stats">' +
+      importStat("Rows found", found) +
+      importStat("New customers", t.valid, "good") +
+      importStat("Already on file", t.duplicate, t.duplicate ? "warn" : "") +
+      importStat("Rows to fix", t.invalid, t.invalid ? "bad" : "") +
+      "</div>" +
+      importColumnsHtml(job) +
+      importSampleTable(job.samples) +
+      (job.samples.length && found > job.samples.length
+        ? '<p class="hint">The first ' + job.samples.length + " rows, of " + found + ".</p>"
+        : "") +
+      importCloverNotice() +
+      '<div class="modal-actions">' +
+      '<button type="button" class="btn btn-ghost" data-import-close>Cancel</button>' +
+      '<button type="button" class="btn btn-primary" id="import-go"' + (anything ? "" : " disabled") +
+      ">Import customers</button></div>";
+
+    var go = document.getElementById("import-go");
+    if (go) go.addEventListener("click", function () { commitImport(job); });
+  }
+
+  function commitImport(job) {
+    job.mode = "commit";
+    job.done = 0;
+    job.totals = emptyImportTotals();
+    job.problems = [];
+    job.syncClover = true;
+    job.error = null;
+    renderImportProgress(job, "Importing");
+
+    // Ask Clover once, before the run, whether this token may see customers at
+    // all. Finding out row by row would be several hundred identical failures
+    // and is exactly how a merchant account gets rate limited.
+    api("customers/import/clover-check")
+      .catch(function () {
+        return { ok: false, configured: true, permission: true, message: "Clover could not be reached" };
+      })
+      .then(function (access) {
+        if (job.cancelled) return;
+        job.clover = access;
+        if (!access.ok) job.syncClover = false;
+        return runImportSlices(job, IMPORT_COMMIT_SLICE, "Importing");
+      })
+      .then(function () {
+        if (job.cancelled) return;
+        renderImportReport(job);
+        renderCustomers();
+      })
+      .catch(function (e) {
+        if (job.cancelled) return;
+        // Whatever went through before this is already saved, so the report is
+        // still worth showing — with the reason it stopped at the top.
+        job.error = e.message || "The import stopped part way through";
+        renderImportReport(job);
+        renderCustomers();
+      });
+  }
+
+  function importCloverProblem(job) {
+    var clover = job.clover;
+    if (!clover || clover.ok) return "";
+    if (clover.configured && clover.permission === false) {
+      return '<p class="hint warn">Clover refused the customer request: ' +
+        esc(clover.message || "permission denied") +
+        ". The customers are safely in DCA Pro Manager. Ask whoever manages the Clover account to allow " +
+        "customers to be read and written by this app, then use Sync on the Customers screen.</p>";
+    }
+    if (!clover.configured) {
+      return '<p class="hint warn">Clover customer sync is not switched on' +
+        (clover.missing && clover.missing.length ? " (" + esc(clover.missing.join(", ")) + " not set)" : "") +
+        ". The customers are in DCA Pro Manager and can be synced once it is.</p>";
+    }
+    return '<p class="hint warn">' + esc(clover.message || "Clover could not be reached") +
+      ". The customers are in DCA Pro Manager; use Sync on the Customers screen to try again.</p>";
+  }
+
+  function renderImportReport(job) {
+    var t = job.totals;
+    var lines = [
+      ["Rows processed", t.rows - t.blank],
+      ["New DCA customers", t.created],
+      ["Existing DCA customers", t.existing],
+      ["DCA customers updated", t.updated],
+      ["Clover customers created", t.cloverCreated],
+      ["Existing Clover customers linked", t.cloverLinked],
+      ["Clover customers updated", t.cloverUpdated],
+      ["Clover sync errors", t.cloverErrors],
+      ["Invalid rows", t.invalid + t.failed]
+    ];
+    document.getElementById("import-body").innerHTML =
+      (job.error ? '<p class="login-error modal-error">' + esc(job.error) + "</p>" : "") +
+      importCloverProblem(job) +
+      '<div class="card import-report"><table><tbody>' +
+      lines.map(function (row) {
+        return "<tr><td>" + esc(row[0]) + '</td><td class="right mono">' + row[1] + "</td></tr>";
+      }).join("") +
+      "</tbody></table></div>" +
+      '<div class="modal-actions">' +
+      (job.problems.length
+        ? '<button type="button" class="btn btn-ghost" id="import-errors">Download the problem rows</button>'
+        : "") +
+      '<button type="button" class="btn btn-primary" data-import-close>Done</button></div>';
+
+    var download = document.getElementById("import-errors");
+    if (download) {
+      download.addEventListener("click", function () { downloadImportProblems(job); });
+    }
+  }
+
+  // The rows that did not make it, with the original line beside the reason so
+  // the office can fix them in the spreadsheet and bring just those back.
+  function downloadImportProblems(job) {
+    var head = ["Row", "Name", "Phone", "Email", "Reason", "Imported to DCA", "Synced to Clover"]
+      .concat(job.headers);
+    var lines = [head];
+    job.problems.forEach(function (p) {
+      lines.push([
+        p.line, p.name, p.phone, p.email, p.reason,
+        p.imported ? "yes" : "no",
+        p.cloverSynced ? "yes" : "no"
+      ].concat(job.rows[p.line - 2] || []));
+    });
+    downloadCsv(lines, job.name.replace(/\.[^.]+$/, "") + "-problem-rows.csv");
+  }
+
+  function csvCell(value) {
+    var text = value === null || value === undefined ? "" : String(value);
+    // A cell starting =, +, - or @ is run as a formula by every spreadsheet that
+    // opens this file. Nothing here is a formula.
+    if (/^[=+\-@]/.test(text)) text = "'" + text;
+    return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+  }
+
+  function downloadCsv(rows, filename) {
+    var text = rows.map(function (row) { return row.map(csvCell).join(","); }).join("\r\n");
+    // The mark tells Excel this is UTF-8, without which any accented name in the
+    // file comes back as nonsense.
+    var blob = new Blob(["﻿" + text], { type: "text/csv;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
   }
 
   function renderCharges() {
@@ -3067,7 +3643,15 @@
       }
     });
     document.addEventListener("keydown", function (e) {
-      if (e.key === "Escape" && !document.getElementById("modal").hidden) closeModal();
+      if (e.key !== "Escape") return;
+      if (!document.getElementById("modal").hidden) { closeModal(); return; }
+      if (!document.getElementById("import").hidden) closeImport();
+    });
+    // Choosing a file from the picker. On a phone this is the Files app, so a
+    // spreadsheet emailed to the office can be imported from the handset.
+    document.getElementById("import-file").addEventListener("change", function () {
+      var file = this.files && this.files[0];
+      if (file) beginImport(file);
     });
     document.body.addEventListener("change", function (e) {
       var roleFor = e.target.dataset ? e.target.dataset.roleFor : null;
@@ -3078,6 +3662,12 @@
       // because these links sit inside rows that would otherwise open a job.
       if (e.target.closest('a[href^="tel:"], a[href^="sms:"], a[href^="mailto:"]')) return;
       if (e.target.closest("[data-modal-close]")) { closeModal(); return; }
+      if (e.target.closest("[data-import-close]")) { closeImport(); return; }
+      var retrySync = e.target.closest("[data-clover-retry]");
+      if (retrySync) {
+        retryCloverSync(Number(retrySync.dataset.cloverRetry), retrySync);
+        return;
+      }
       var goTo = e.target.closest("[data-goto]");
       if (goTo) { switchView(goTo.dataset.goto); return; }
       if (e.target.closest("[data-my-code]")) { promptOwnCode(); return; }

@@ -93,6 +93,19 @@
     </div>
   </div>
 
+  <!-- Bulk customer import. It gets its own overlay rather than the shared
+       dialog because a file goes through several stages — choose, check,
+       import, report — and each one needs its own buttons. -->
+  <div id="import" class="modal" hidden>
+    <div class="modal-backdrop" data-import-close></div>
+    <div class="modal-card import-card" role="dialog" aria-modal="true" aria-labelledby="import-title">
+      <button class="drawer-close" data-import-close aria-label="Close">×</button>
+      <h2 id="import-title">Import customers</h2>
+      <div id="import-body"></div>
+      <input id="import-file" type="file" accept=".csv,text/csv,text/plain" hidden />
+    </div>
+  </div>
+
   <!-- The published price catalog, so a quote given over the phone matches the
        figures on the public site exactly. -->
   <script src="/data/pricing.js" defer></script>

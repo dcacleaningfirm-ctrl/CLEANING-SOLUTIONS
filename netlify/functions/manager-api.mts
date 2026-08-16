@@ -19,6 +19,23 @@ import {
   readSessionCookie
 } from "../../lib/manager-session.js";
 import {
+  backfill,
+  cleanRow,
+  emailKey,
+  mapHeaders,
+  phoneKey,
+  usableHeaders,
+  type CleanCustomer,
+  type HeaderMap
+} from "../../lib/customer-import.js";
+import {
+  checkCloverCustomerAccess,
+  cloverCustomerSettings,
+  mapWithConcurrency,
+  syncCustomerToClover,
+  type CloverSyncResult
+} from "../../lib/clover-customers.js";
+import {
   PAYMENT_METHODS,
   bookingConfirmation,
   looksLikeEmail,
@@ -61,6 +78,519 @@ const MAX_LINE_ITEMS = 40;
 const MAX_UNIT_PRICE_CENTS = 1000000;
 const MAX_JOB_TOTAL_CENTS = 5000000;
 
+// Bulk import guard rails. A browser sends the file up in slices so no single
+// request has to hold a whole spreadsheet, and so the progress bar on screen is
+// telling the truth rather than guessing. The commit slice is smaller than the
+// preview slice because each committed row can also cost a call to Clover.
+const MAX_IMPORT_COLUMNS = 80;
+const MAX_IMPORT_ROWS_PER_REQUEST = 250;
+const MAX_IMPORT_CELL = 600;
+// How many keys the browser may carry forward between preview slices, so a
+// household repeated on line 3 and line 900 is still counted once.
+const MAX_IMPORT_SEEN_KEYS = 40000;
+// Clover is a shared service. A handful of its calls at a time keeps an import
+// well inside the merchant's rate limit.
+const CLOVER_SYNC_CONCURRENCY = 4;
+// A booking must never wait on Clover. If the directory has not answered by
+// then the customer is filed as pending and the office can retry.
+const CLOVER_INLINE_TIMEOUT_MS = 4500;
+
+interface SyncableCustomer {
+  id: number;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  cloverCustomerId: string | null;
+}
+
+// Sync one customer to Clover and write down how it went. Clover never gets a
+// say in whether the DCA record survives: a failure here is recorded against
+// the account and can be retried, and the caller carries on regardless.
+async function syncCustomerAndRecord(
+  customer: SyncableCustomer,
+  options: { timeoutMs?: number } = {}
+): Promise<CloverSyncResult> {
+  const settings = cloverCustomerSettings();
+  const run = syncCustomerToClover(
+    {
+      name: customer.name,
+      phone: customer.phone,
+      email: customer.email,
+      address: customer.address,
+      city: customer.city,
+      state: customer.state,
+      zip: customer.zip
+    },
+    customer.cloverCustomerId,
+    { settings }
+  );
+
+  let result: CloverSyncResult;
+  if (options.timeoutMs) {
+    const timedOut: CloverSyncResult = {
+      ok: false,
+      cloverCustomerId: customer.cloverCustomerId || null,
+      action: "skipped",
+      error: "Clover did not answer in time — queued for retry",
+      permission: false
+    };
+    result = await Promise.race([
+      run.catch((err) => ({
+        ok: false,
+        cloverCustomerId: customer.cloverCustomerId || null,
+        action: "skipped" as const,
+        error: String((err as Error)?.message || "Clover sync failed").slice(0, 300),
+        permission: false
+      })),
+      new Promise<CloverSyncResult>((resolve) =>
+        setTimeout(() => resolve(timedOut), options.timeoutMs)
+      )
+    ]);
+  } else {
+    result = await run.catch((err) => ({
+      ok: false,
+      cloverCustomerId: customer.cloverCustomerId || null,
+      action: "skipped" as const,
+      error: String((err as Error)?.message || "Clover sync failed").slice(0, 300),
+      permission: false
+    }));
+  }
+
+  await db
+    .update(customers)
+    .set(cloverSyncColumns(result, settings.enabled, customer.cloverCustomerId))
+    .where(eq(customers.id, customer.id))
+    .catch((err) => {
+      console.error("could not record clover sync status", err);
+    });
+
+  return result;
+}
+
+// What the customers table should say after a sync attempt. An account with no
+// Clover configuration sits at "pending" rather than "error": nothing is broken,
+// the office simply has not switched the connection on yet.
+function cloverSyncColumns(
+  result: CloverSyncResult,
+  configured: boolean,
+  previousId: string | null | undefined
+) {
+  return {
+    cloverCustomerId: result.cloverCustomerId || previousId || null,
+    cloverSyncStatus: result.ok ? "synced" : configured ? "error" : "pending",
+    cloverSyncError: result.ok ? null : (result.error || "").slice(0, 300) || null,
+    cloverSyncedAt: result.ok ? new Date() : undefined
+  };
+}
+
+// Keys the browser carries from one slice to the next so a household written
+// twice in the same file is counted once even when the two rows land in
+// different requests.
+function readKeySet(raw: unknown): Set<string> {
+  const list = Array.isArray(raw) ? raw : [];
+  const keys = new Set<string>();
+  for (const value of list.slice(0, MAX_IMPORT_SEEN_KEYS)) {
+    const key = String(value ?? "").slice(0, 200);
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
+// The last ten digits of whatever is written in the phone column, which is how
+// the lookup below compares numbers in SQL. Kept separate from phoneKey() so a
+// stored number this app cannot parse still matches the row SQL found.
+function storedPhoneKey(raw: string | null | undefined): string | null {
+  const digits = String(raw || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : null;
+}
+
+// Everything the importer needs to decide whether an account is already on file
+// and what is missing from it.
+const IMPORT_LOOKUP_COLUMNS = {
+  id: customers.id,
+  name: customers.name,
+  phone: customers.phone,
+  altPhone: customers.altPhone,
+  email: customers.email,
+  address: customers.address,
+  city: customers.city,
+  state: customers.state,
+  zip: customers.zip,
+  leadSource: customers.leadSource,
+  service: customers.service,
+  notes: customers.notes,
+  cloverCustomerId: customers.cloverCustomerId,
+  cloverSyncStatus: customers.cloverSyncStatus
+};
+
+type ExistingCustomer = Awaited<ReturnType<typeof findCustomersByKeys>>[number];
+
+// One query for the whole slice rather than two per row. Phones are compared on
+// their last ten digits and emails in lower case, which is the same test the
+// importer applies to the incoming file.
+async function findCustomersByKeys(phones: string[], emails: string[]) {
+  if (!phones.length && !emails.length) return [];
+  const tests = [];
+  if (phones.length) {
+    tests.push(
+      inArray(
+        sql`right(regexp_replace(coalesce(${customers.phone}, ''), '[^0-9]', '', 'g'), 10)`,
+        phones
+      )
+    );
+  }
+  if (emails.length) tests.push(inArray(sql`lower(${customers.email})`, emails));
+  return db.select(IMPORT_LOOKUP_COLUMNS).from(customers).where(or(...tests));
+}
+
+const IMPORT_SAMPLE_LIMIT = 10;
+// A slice can only report so many problems before the list stops being useful.
+const IMPORT_ERROR_LIMIT = 400;
+
+interface ImportSample {
+  line: number;
+  status: "new" | "duplicate" | "invalid";
+  name: string;
+  phone: string;
+  email: string;
+  city: string;
+  detail: string;
+}
+
+// One line of the downloadable error report. The original cells are not sent
+// back — the browser still holds the file it parsed and joins on the line
+// number, so nothing has to make a second trip across the wire.
+interface ImportProblem {
+  line: number;
+  name: string;
+  phone: string;
+  email: string;
+  reason: string;
+  imported: boolean;
+  cloverSynced: boolean;
+}
+
+interface ImportRequest {
+  mode: "preview" | "commit";
+  headers: string[];
+  map: HeaderMap;
+  rows: string[][];
+  firstLine: number;
+  seenPhones: Set<string>;
+  seenEmails: Set<string>;
+  syncClover: boolean;
+  actorName: string;
+}
+
+// The importer proper. Preview and commit walk the identical path; only the
+// writing at the end is different, so what the office approves on screen is
+// what the file will do.
+async function runCustomerImport(request: ImportRequest) {
+  const { mode, map, rows, firstLine, seenPhones, seenEmails } = request;
+
+  const counts = {
+    rows: 0,
+    blank: 0,
+    valid: 0,
+    duplicate: 0,
+    invalid: 0,
+    created: 0,
+    existing: 0,
+    updated: 0,
+    failed: 0,
+    cloverCreated: 0,
+    cloverLinked: 0,
+    cloverUpdated: 0,
+    cloverErrors: 0
+  };
+  const samples: ImportSample[] = [];
+  const problems: ImportProblem[] = [];
+  const newPhoneKeys: string[] = [];
+  const newEmailKeys: string[] = [];
+
+  function note(problem: ImportProblem) {
+    if (problems.length < IMPORT_ERROR_LIMIT) problems.push(problem);
+  }
+  function show(sample: ImportSample) {
+    if (samples.length < IMPORT_SAMPLE_LIMIT) samples.push(sample);
+  }
+
+  const verdicts = rows.map((cells, i) => ({ line: firstLine + i, verdict: cleanRow(cells, map) }));
+
+  const phones = new Set<string>();
+  const emails = new Set<string>();
+  for (const { verdict } of verdicts) {
+    if (verdict.kind !== "ok") continue;
+    if (verdict.phoneKey) phones.add(verdict.phoneKey);
+    if (verdict.emailKey) emails.add(verdict.emailKey);
+  }
+  const onFile = await findCustomersByKeys([...phones], [...emails]);
+  const byPhone = new Map<string, ExistingCustomer>();
+  const byEmail = new Map<string, ExistingCustomer>();
+  for (const row of onFile) {
+    for (const key of [storedPhoneKey(row.phone), phoneKey(row.phone)]) {
+      if (key && !byPhone.has(key)) byPhone.set(key, row);
+    }
+    const ek = emailKey(row.email);
+    if (ek && !byEmail.has(ek)) byEmail.set(ek, row);
+  }
+
+  interface PendingInsert {
+    line: number;
+    key: string;
+    customer: CleanCustomer;
+  }
+  const inserts: PendingInsert[] = [];
+  const updates: { line: number; row: ExistingCustomer; changes: Partial<CleanCustomer> }[] = [];
+  const alreadyOnFile: { line: number; row: ExistingCustomer }[] = [];
+
+  for (const { line, verdict } of verdicts) {
+    counts.rows++;
+    if (verdict.kind === "blank") {
+      counts.blank++;
+      continue;
+    }
+    if (verdict.kind === "invalid") {
+      counts.invalid++;
+      show({ line, status: "invalid", name: "", phone: "", email: "", city: "", detail: verdict.reason });
+      note({
+        line,
+        name: "",
+        phone: "",
+        email: "",
+        reason: verdict.reason,
+        imported: false,
+        cloverSynced: false
+      });
+      continue;
+    }
+
+    const customer = verdict.customer;
+    const pk = verdict.phoneKey;
+    const ek = verdict.emailKey;
+    const repeated = Boolean((pk && seenPhones.has(pk)) || (ek && seenEmails.has(ek)));
+    const match = (pk ? byPhone.get(pk) : undefined) || (ek ? byEmail.get(ek) : undefined) || null;
+
+    if (match || repeated) {
+      counts.duplicate++;
+      show({
+        line,
+        status: "duplicate",
+        name: customer.name,
+        phone: customer.phone || "",
+        email: customer.email || "",
+        city: customer.city || "",
+        detail: match ? `Already on file as customer #${match.id}` : "Repeated earlier in this file"
+      });
+      if (mode === "commit" && match) {
+        const changes = backfill(match as unknown as Record<string, unknown>, customer);
+        if (Object.keys(changes).length) updates.push({ line, row: match, changes });
+        else alreadyOnFile.push({ line, row: match });
+      }
+      continue;
+    }
+
+    counts.valid++;
+    if (pk) {
+      seenPhones.add(pk);
+      newPhoneKeys.push(pk);
+    }
+    if (ek) {
+      seenEmails.add(ek);
+      newEmailKeys.push(ek);
+    }
+    show({
+      line,
+      status: "new",
+      name: customer.name,
+      phone: customer.phone || "",
+      email: customer.email || "",
+      city: customer.city || "",
+      detail: [customer.service, customer.leadSource].filter(Boolean).join(" · ")
+    });
+    if (mode === "commit") inserts.push({ line, key: pk || ek || `line-${line}`, customer });
+  }
+
+  const syncTargets: { line: number; row: SyncableCustomer }[] = [];
+
+  if (mode === "commit") {
+    const stamp = `Imported from a customer file by ${request.actorName}`;
+    const toRow = (pending: PendingInsert) => ({
+      ...pending.customer,
+      notes: [pending.customer.notes, stamp].filter(Boolean).join("\n\n").slice(0, 2000),
+      // Every imported account starts owing Clover a sync, so one that never
+      // gets there is visible on screen instead of quietly missing.
+      cloverSyncStatus: "pending"
+    });
+
+    if (inserts.length) {
+      let created: SyncableCustomer[] = [];
+      try {
+        created = await db
+          .insert(customers)
+          .values(inserts.map(toRow))
+          .returning(IMPORT_LOOKUP_COLUMNS);
+      } catch (err) {
+        // A batch insert is all-or-nothing, so one unusable row would cost the
+        // office the rest of the slice. Fall back to one at a time and let the
+        // single bad row be the only casualty.
+        console.error("batched customer insert failed, retrying row by row", err);
+        for (const pending of inserts) {
+          try {
+            const [row] = await db.insert(customers).values(toRow(pending)).returning(IMPORT_LOOKUP_COLUMNS);
+            if (row) created.push(row);
+          } catch (rowErr) {
+            counts.failed++;
+            const reason = String((rowErr as Error)?.message || "Could not be saved").slice(0, 200);
+            note({
+              line: pending.line,
+              name: pending.customer.name,
+              phone: pending.customer.phone || "",
+              email: pending.customer.email || "",
+              reason,
+              imported: false,
+              cloverSynced: false
+            });
+          }
+        }
+      }
+      counts.created = created.length;
+      const lineByKey = new Map(inserts.map((pending) => [pending.key, pending.line]));
+      for (const row of created) {
+        const key = storedPhoneKey(row.phone) || emailKey(row.email) || "";
+        syncTargets.push({ line: lineByKey.get(key) ?? firstLine, row });
+      }
+    }
+
+    for (const update of updates) {
+      try {
+        await db.update(customers).set(update.changes).where(eq(customers.id, update.row.id));
+        counts.updated++;
+        syncTargets.push({ line: update.line, row: { ...update.row, ...update.changes } });
+      } catch (err) {
+        counts.failed++;
+        note({
+          line: update.line,
+          name: update.row.name,
+          phone: update.row.phone || "",
+          email: update.row.email || "",
+          reason: String((err as Error)?.message || "Could not be updated").slice(0, 200),
+          imported: false,
+          cloverSynced: false
+        });
+      }
+    }
+
+    // An account already on file with nothing to add is only worth a Clover call
+    // if Clover has not seen it yet.
+    for (const seen of alreadyOnFile) {
+      if (!seen.row.cloverCustomerId || seen.row.cloverSyncStatus !== "synced") {
+        syncTargets.push({ line: seen.line, row: seen.row });
+      }
+    }
+    counts.existing = counts.duplicate;
+  }
+
+  let clover: {
+    ok: boolean;
+    configured: boolean;
+    permission: boolean;
+    missing: string[];
+    message: string | null;
+  } | null = null;
+
+  if (mode === "commit" && request.syncClover && syncTargets.length) {
+    const access = await checkCloverCustomerAccess();
+    clover = {
+      ok: access.ok,
+      configured: access.configured,
+      permission: access.permission,
+      missing: access.missing,
+      message: access.error
+    };
+
+    if (!access.ok) {
+      // The connection is off or the token cannot see customers. Say so once and
+      // stop — several hundred rows each failing the same way helps nobody, and
+      // hammering a permission error is how a merchant gets rate limited.
+      const reason = (access.error || "Clover customer sync unavailable").slice(0, 300);
+      await Promise.all(
+        syncTargets.map((target) =>
+          db
+            .update(customers)
+            .set({
+              cloverSyncStatus: access.configured ? "error" : "pending",
+              cloverSyncError: reason
+            })
+            .where(eq(customers.id, target.row.id))
+            .catch(() => undefined)
+        )
+      );
+      if (access.configured) {
+        counts.cloverErrors += syncTargets.length;
+        for (const target of syncTargets) {
+          note({
+            line: target.line,
+            name: target.row.name,
+            phone: target.row.phone || "",
+            email: target.row.email || "",
+            reason,
+            imported: true,
+            cloverSynced: false
+          });
+        }
+      }
+    } else {
+      const results = await mapWithConcurrency(syncTargets, CLOVER_SYNC_CONCURRENCY, (target) =>
+        syncCustomerAndRecord(target.row)
+      );
+      results.forEach((result, i) => {
+        const target = syncTargets[i];
+        if (result.ok) {
+          if (result.action === "created") counts.cloverCreated++;
+          else if (result.action === "updated") counts.cloverUpdated++;
+          else counts.cloverLinked++;
+          return;
+        }
+        counts.cloverErrors++;
+        if (result.permission && clover) {
+          clover.ok = false;
+          clover.permission = false;
+          clover.message = result.error;
+        }
+        note({
+          line: target.line,
+          name: target.row.name,
+          phone: target.row.phone || "",
+          email: target.row.email || "",
+          reason: (result.error || "Clover sync failed").slice(0, 300),
+          imported: true,
+          cloverSynced: false
+        });
+      });
+    }
+  }
+
+  const matched: Record<string, string> = {};
+  for (const [field, at] of Object.entries(map.columns)) {
+    if (typeof at === "number") matched[field] = String(request.headers[at] || "").trim();
+  }
+
+  return {
+    mode,
+    columns: { matched, ignored: map.ignored },
+    counts,
+    samples,
+    problems,
+    newKeys: { phones: newPhoneKeys, emails: newEmailKeys },
+    clover
+  };
+}
+
 interface BookingItem {
   kind: string;
   label: string;
@@ -75,6 +605,9 @@ interface BookingItem {
 const CUSTOMER_FIELDS = [
   { key: "name", label: "name", max: 120 },
   { key: "phone", label: "phone number", max: 40 },
+  // Imported lists routinely carry a second number. It is editable for the same
+  // reason the first one is: it is usually wrong before it is right.
+  { key: "altPhone", label: "alternate phone", max: 40 },
   { key: "email", label: "email", max: 160 },
   { key: "address", label: "street address", max: 200 },
   { key: "city", label: "city", max: 80 },
@@ -424,10 +957,15 @@ export default async (req: Request, context: Context) => {
             name: customerName,
             email: customerEmail,
             phone: customerPhone,
-            notes: "Added through a custom charge"
+            notes: "Added through a custom charge",
+            cloverSyncStatus: "pending"
           })
           .returning();
         customer = inserted[0];
+        // Clover is told about the new account, but it is never allowed to hold
+        // up taking the money: the sync is raced against a short timeout and a
+        // miss leaves the account pending for the office to retry.
+        await syncCustomerAndRecord(customer, { timeoutMs: CLOVER_INLINE_TIMEOUT_MS });
       }
 
       const insertedJobs = await db
@@ -480,6 +1018,7 @@ export default async (req: Request, context: Context) => {
       const clover = cloverSettings();
       const notify = notifySettings();
       const maps = mapsSettings();
+      const cloverCustomers = cloverCustomerSettings();
       return json({
         payments: {
           methods: PAYMENT_METHODS,
@@ -492,6 +1031,15 @@ export default async (req: Request, context: Context) => {
             merchantId: clover.merchantId || null,
             sdkUrl: clover.sdkUrl
           }
+        },
+        // Whether the customer directory is wired up, and which variables are
+        // still unset. Names only — no token, key or secret is ever sent to a
+        // browser.
+        customerSync: {
+          enabled: cloverCustomers.enabled,
+          missing: cloverCustomers.missing,
+          environment: cloverCustomers.environment,
+          tokenSource: cloverCustomers.tokenSource
         },
         notifications: {
           email: {
@@ -1073,7 +1621,16 @@ export default async (req: Request, context: Context) => {
       }
 
       await db.update(customers).set(updates).where(eq(customers.id, id));
-      const [updated] = await db.select().from(customers).where(eq(customers.id, id));
+      let [updated] = await db.select().from(customers).where(eq(customers.id, id));
+
+      // Pass the correction on to Clover when it touched something Clover keeps.
+      // Only gaps in Clover's own record are filled, so an address corrected
+      // there is never flattened by one edited here.
+      const CLOVER_FIELDS = ["name", "phone", "email", "address", "city", "state", "zip"];
+      if (updated && CLOVER_FIELDS.some((field) => updates[field] !== undefined)) {
+        await syncCustomerAndRecord(updated, { timeoutMs: CLOVER_INLINE_TIMEOUT_MS });
+        [updated] = await db.select().from(customers).where(eq(customers.id, id));
+      }
 
       // Edited from a job? Say so on that job's trail, so a changed address or
       // number is traceable to the visit it came from.
@@ -1094,6 +1651,116 @@ export default async (req: Request, context: Context) => {
 
       console.log(`customer ${id} updated by employee ${account.id}`);
       return json({ customer: updated, changed });
+    }
+
+    // --- Bulk import from a spreadsheet ----------------------------------
+    // The browser reads the file, splits it into slices and sends the raw cells
+    // up. Every rule about what a row means — which heading is which, what a
+    // usable phone number looks like, who is already on file — is applied here,
+    // on the server, in both preview and commit. The preview the office approves
+    // is therefore produced by exactly the code that does the writing.
+    if (path === "customers/import" && method === "POST") {
+      if (!canManageCrew(account.role)) return forbidden;
+
+      const body = (await req.json().catch(() => ({}))) as {
+        mode?: string;
+        headers?: unknown;
+        rows?: unknown;
+        firstLine?: number;
+        seenPhones?: unknown;
+        seenEmails?: unknown;
+        syncClover?: boolean;
+      };
+
+      const rawHeaders = Array.isArray(body.headers) ? body.headers : [];
+      if (!rawHeaders.length) {
+        return json({ error: "That file has no column headings on its first line" }, { status: 400 });
+      }
+      if (rawHeaders.length > MAX_IMPORT_COLUMNS) {
+        return json(
+          { error: `A customer file can have at most ${MAX_IMPORT_COLUMNS} columns` },
+          { status: 400 }
+        );
+      }
+      const headers = rawHeaders.map((h) => String(h ?? "").slice(0, 120));
+      const map = mapHeaders(headers);
+      if (!usableHeaders(map)) {
+        return json(
+          {
+            error:
+              "This file needs a name column and either a phone or an email column. " +
+              "“First Name”, “last_name”, “phone_number”, “email_address” and similar spellings are all understood."
+          },
+          { status: 400 }
+        );
+      }
+
+      const rawRows = Array.isArray(body.rows) ? body.rows : [];
+      if (rawRows.length > MAX_IMPORT_ROWS_PER_REQUEST) {
+        return json(
+          { error: `Send at most ${MAX_IMPORT_ROWS_PER_REQUEST} rows at a time` },
+          { status: 400 }
+        );
+      }
+      const rows: string[][] = rawRows.map((row) =>
+        Array.isArray(row)
+          ? row.slice(0, MAX_IMPORT_COLUMNS).map((c) => String(c ?? "").slice(0, MAX_IMPORT_CELL))
+          : []
+      );
+
+      const line = Number(body.firstLine);
+      const firstLine = Number.isFinite(line) ? Math.max(2, Math.round(line)) : 2;
+
+      const result = await runCustomerImport({
+        mode: body.mode === "commit" ? "commit" : "preview",
+        headers,
+        map,
+        rows,
+        firstLine,
+        seenPhones: readKeySet(body.seenPhones),
+        seenEmails: readKeySet(body.seenEmails),
+        syncClover: body.syncClover !== false,
+        actorName: account.name
+      });
+
+      if (result.counts.created || result.counts.updated) {
+        console.log(
+          `csv import by employee ${account.id}: ${result.counts.created} created, ${result.counts.updated} updated`
+        );
+      }
+      return json(result);
+    }
+
+    // Asked once before a bulk run so a token without customer permissions is
+    // reported clearly instead of failing several hundred rows one at a time.
+    if (path === "customers/import/clover-check" && method === "GET") {
+      if (!canManageCrew(account.role)) return forbidden;
+      const access = await checkCloverCustomerAccess();
+      return json({
+        ok: access.ok,
+        configured: access.configured,
+        permission: access.permission,
+        // Variable names only — never their values.
+        missing: access.missing,
+        message: access.error
+      });
+    }
+
+    // Retry a customer whose Clover sync failed. Any signed-in crew member can
+    // press it: the failure is visible on the account, and retrying it cannot
+    // change anything in DCA Pro Manager.
+    const cloverSyncMatch = path.match(/^customers\/(\d+)\/clover-sync$/);
+    if (cloverSyncMatch && method === "POST") {
+      const id = Number(cloverSyncMatch[1]);
+      const [existing] = await db.select().from(customers).where(eq(customers.id, id));
+      if (!existing) return json({ error: "That customer no longer exists" }, { status: 404 });
+
+      const result = await syncCustomerAndRecord(existing);
+      const [updated] = await db.select().from(customers).where(eq(customers.id, id));
+      return json({
+        customer: updated,
+        sync: { ok: result.ok, action: result.action, error: result.error, permission: result.permission }
+      });
     }
 
     // --- Day schedule ----------------------------------------------------
@@ -1229,6 +1896,9 @@ export default async (req: Request, context: Context) => {
         if (Object.keys(backfill).length) {
           await db.update(customers).set(backfill).where(eq(customers.id, customer.id));
           customer = { ...customer, ...backfill };
+          // Anything new about the customer is worth passing on, but only where
+          // Clover's own record is blank.
+          await syncCustomerAndRecord(customer, { timeoutMs: CLOVER_INLINE_TIMEOUT_MS });
         }
       } else {
         if (!contact.name) {
@@ -1250,10 +1920,15 @@ export default async (req: Request, context: Context) => {
             city: contact.city,
             state: contact.state,
             zip: contact.zip,
-            notes: `Added by ${account.name} while booking by phone`
+            notes: `Added by ${account.name} while booking by phone`,
+            cloverSyncStatus: "pending"
           })
           .returning();
         customer = created;
+        // The booking is already safe in DCA Pro Manager by this point. Clover
+        // gets a few seconds to answer and, if it does not, the account is left
+        // pending rather than the call being held up.
+        await syncCustomerAndRecord(customer, { timeoutMs: CLOVER_INLINE_TIMEOUT_MS });
       }
 
       // Warn before double-booking a crew member. The office can still go ahead
