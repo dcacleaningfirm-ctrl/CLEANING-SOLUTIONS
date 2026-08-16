@@ -947,9 +947,6 @@
         '<div class="card customer-search"><label class="field"><span>Find a customer</span>' +
         '<input id="cu-search" type="search" maxlength="80" placeholder="Name, phone, email or street…" value="' +
         esc(term) + '" /></label>' +
-        (state.canManage
-          ? '<button type="button" class="btn btn-primary btn-sm" id="cu-import">Import CSV</button>'
-          : "") +
         '<p class="hint">Tap a number to call, or Text to open a message. Edit fixes what is on file.</p></div>' +
         '<div id="cu-list"><div class="loading">Loading…</div></div>';
 
@@ -962,10 +959,12 @@
           renderCustomers();
         }, 300);
       });
-
-      var importBtn = document.getElementById("cu-import");
-      if (importBtn) importBtn.addEventListener("click", openImport);
     }
+
+    // The search card above is built once and then left alone, so the import
+    // button cannot be baked into it: an account whose role arrived after this
+    // tab was first drawn would never see one. Settle it on every render.
+    syncImportButton();
 
     var list = document.getElementById("cu-list");
     list.innerHTML = '<div class="loading">Loading…</div>';
@@ -990,6 +989,30 @@
         : '<div class="card"><p class="empty">' +
           (term ? "Nobody matches “" + esc(term) + "”." : "No customers yet.") + "</p></div>";
     });
+  }
+
+  // Puts the Import CSV button next to the customer search, or takes it away
+  // again if the signed-in account is not allowed to bring a file in. Creating
+  // it here rather than in the search card's markup keeps one copy of the
+  // button and one click handler however many times the tab is drawn.
+  function syncImportButton() {
+    var card = document.querySelector("#view-customers .customer-search");
+    if (!card) return;
+    var btn = document.getElementById("cu-import");
+    if (!state.canManage) {
+      if (btn) btn.parentNode.removeChild(btn);
+      return;
+    }
+    if (btn) return;
+    btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-primary btn-sm";
+    btn.id = "cu-import";
+    btn.textContent = "Import CSV";
+    // Straight into the importer that already exists — same modal, same file
+    // picker, same checking and Clover sync behind it.
+    btn.addEventListener("click", openImport);
+    card.insertBefore(btn, card.querySelector(".hint"));
   }
 
   // Where an account stands with the Clover customer directory. Deliberately
@@ -3595,6 +3618,10 @@
     api("session")
       .then(function (d) {
         state.me = d.employee;
+        // The same answer the server checks its own routes against, settled at
+        // sign-in. Waiting for the crew tab to fill this in left every other
+        // screen believing an office account could not manage anything.
+        state.canManage = Boolean(d.employee.canManageCrew);
         document.getElementById("who").textContent = d.employee.name + " · " + d.employee.role;
         var chargeTab = document.querySelector('[data-view="charges"]');
         if (chargeTab) chargeTab.hidden = !d.employee.canManageCrew;
