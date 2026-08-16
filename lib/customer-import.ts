@@ -185,12 +185,12 @@ export function mapHeaders(headers: string[]): HeaderMap {
 
 // A file with no heading this importer recognises is almost certainly not a
 // customer list — better to say so than to import a column of postcodes as
-// names.
+// names. A name column is not part of the test: plenty of bought lists are a
+// column of phone numbers and nothing else, and a row can be filed under the
+// number it came with.
 export function usableHeaders(map: HeaderMap): boolean {
   const c = map.columns;
-  const hasName = c.name !== undefined || c.firstName !== undefined || c.lastName !== undefined;
-  const hasContact = c.phone !== undefined || c.email !== undefined;
-  return hasName && hasContact;
+  return c.phone !== undefined || c.email !== undefined || c.address !== undefined;
 }
 
 // The two things that make two rows the same person. Phone numbers are reduced
@@ -207,6 +207,34 @@ export function phoneKey(raw: string | null | undefined): string | null {
 export function emailKey(raw: string | null | undefined): string | null {
   const value = String(raw || "").trim().toLowerCase();
   return value && looksLikeEmail(value) ? value : null;
+}
+
+// Spreadsheets write "no address" where there is no address, and a column of
+// dashes where somebody gave up. A place a van could be sent to has letters in
+// it and is longer than a couple of characters; anything else is not an address
+// however it is spelled.
+const NOT_AN_ADDRESS = new Set([
+  "n/a",
+  "na",
+  "none",
+  "null",
+  "unknown",
+  "no address",
+  "not given",
+  "unavailable",
+  "tbd"
+]);
+
+// An address reduced to one comparable form — lower case, single spaces — so
+// "123 Main St " and "123  main st" are the same place. Used both to decide
+// whether a row has anywhere to be filed under and to spot the same household
+// arriving twice.
+export function addressKey(raw: string | null | undefined): string | null {
+  const value = String(raw || "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (value.length < 4) return null;
+  if (NOT_AN_ADDRESS.has(value)) return null;
+  if (!/[a-z]/.test(value)) return null;
+  return value;
 }
 
 // Stored the way the office writes numbers down, so an imported record looks
@@ -239,14 +267,20 @@ export interface CleanCustomer {
   notes: string | null;
 }
 
+// Where the name on the filed record came from: the file itself, or — when the
+// name column was empty or absent — the contact detail it was stood up from.
+export type NameSource = "file" | "phone" | "email" | "address";
+
 export type RowVerdict =
   | { kind: "blank" }
   | { kind: "invalid"; reason: string }
   | {
       kind: "ok";
       customer: CleanCustomer;
+      nameSource: NameSource;
       phoneKey: string | null;
       emailKey: string | null;
+      addressKey: string | null;
     };
 
 function cell(cells: string[], at: number | undefined, max: number): string {
@@ -260,10 +294,12 @@ function cell(cells: string[], at: number | undefined, max: number): string {
 }
 
 // One CSV row turned into either a customer this app can file, a reason it
-// cannot, or nothing at all when the row is empty. The rules are strict on
-// purpose: a row nobody can be reached on is not a customer, and a half-read row
-// is worse than one the office is told to fix and re-import. Nothing is ever
-// invented — a column the file does not have simply stays empty.
+// cannot, or nothing at all when the row is empty. What a row has to have is a
+// way of reaching or finding the person: a phone number, an email address or a
+// street address. A name is not one of those — bought lists routinely arrive
+// without one, and a row that can be dialled is worth keeping — so a row with no
+// name is filed under the detail it does have rather than turned away. Nothing
+// else is ever invented: a column the file does not have simply stays empty.
 export function cleanRow(cells: string[], map: HeaderMap): RowVerdict {
   if (!cells.some((c) => String(c || "").trim() !== "")) return { kind: "blank" };
 
@@ -271,13 +307,11 @@ export function cleanRow(cells: string[], map: HeaderMap): RowVerdict {
   const first = cell(cells, c.firstName, 80);
   const last = cell(cells, c.lastName, 80);
   const whole = cell(cells, c.name, 120);
-  const name = (whole || [first, last].filter(Boolean).join(" ")).trim().slice(0, 120);
+  const given = (whole || [first, last].filter(Boolean).join(" ")).trim().slice(0, 120);
 
   const phoneRaw = cell(cells, c.phone, 60);
   const altRaw = cell(cells, c.altPhone, 60);
   const emailRaw = cell(cells, c.email, 160);
-
-  if (!name) return { kind: "invalid", reason: "No customer name in this row" };
 
   const phone = phoneRaw ? normalizePhone(phoneRaw) : null;
   if (phoneRaw && !phone) {
@@ -290,14 +324,27 @@ export function cleanRow(cells: string[], map: HeaderMap): RowVerdict {
   if (emailRaw && !email) {
     return { kind: "invalid", reason: `Email “${emailRaw}” could not be read` };
   }
-  if (!phone && !email) {
-    return { kind: "invalid", reason: "No phone number or email — nobody could be reached" };
-  }
 
   const street = [cell(cells, c.address, 200), cell(cells, c.address2, 60)]
     .filter(Boolean)
     .join(", ")
     .slice(0, 200);
+  const place = addressKey(street);
+
+  if (!phone && !email && !place) {
+    return {
+      kind: "invalid",
+      reason: "No phone number, email or street address — there is nothing to file this row under"
+    };
+  }
+
+  // The name the office will see in the customer list. A row that came without
+  // one is stood up under whatever it can be recognised by, best first, so the
+  // list never shows a blank line and the record can still be found by eye.
+  const shownPhone = phone ? displayPhone(phone) : null;
+  const nameSource: NameSource = given ? "file" : shownPhone ? "phone" : email ? "email" : "address";
+  const name = given || `Customer - ${shownPhone || email || street}`.slice(0, 120);
+
   const stateRaw = cell(cells, c.state, 40);
   const state = /^[A-Za-z]{2}$/.test(stateRaw) ? stateRaw.toUpperCase() : stateRaw;
   // ZIPs arrive from spreadsheets with their leading zero eaten and sometimes as
@@ -321,7 +368,7 @@ export function cleanRow(cells: string[], map: HeaderMap): RowVerdict {
     kind: "ok",
     customer: {
       name,
-      phone: phone ? displayPhone(phone) : null,
+      phone: shownPhone,
       altPhone: altPhone ? displayPhone(altPhone) : null,
       email,
       address: street || null,
@@ -332,8 +379,13 @@ export function cleanRow(cells: string[], map: HeaderMap): RowVerdict {
       service: cell(cells, c.service, 160) || null,
       notes: notes || null
     },
+    nameSource,
     phoneKey: phoneKey(phone),
-    emailKey: email
+    emailKey: email,
+    // Two people at one address are still two customers when each came with a
+    // number of their own, so the address is only a way of recognising a row
+    // that has nothing else to be recognised by.
+    addressKey: !phone && !email ? place : null
   };
 }
 

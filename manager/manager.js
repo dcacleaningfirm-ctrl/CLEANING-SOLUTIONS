@@ -1274,8 +1274,9 @@
       (message ? '<p class="login-error modal-error">' + esc(message) + "</p>" : "") +
       '<p class="hint">Headings are matched loosely: “First Name”, “first_name” and “FirstName” are all the same ' +
       "column. Understood are first and last name, phone, alternate phone, email, street address, city, state, ZIP, " +
-      "lead source, service, notes and source record count. Nothing is written until you have seen what the file " +
-      "contains.</p>" +
+      "lead source, service, notes and source record count. A name is not required — a row with a phone number, an " +
+      "email or a street address is imported and filed under whichever of those it has. Nothing is written until you " +
+      "have seen what the file contains.</p>" +
       '<div class="modal-actions"><button type="button" class="btn btn-ghost" data-import-close>Cancel</button></div>';
 
     var drop = document.getElementById("import-drop");
@@ -1334,6 +1335,7 @@
           syncClover: true,
           seenPhones: [],
           seenEmails: [],
+          seenAddresses: [],
           error: null
         };
         state.importJob = job;
@@ -1369,6 +1371,7 @@
     if (job.mode === "preview") {
       payload.seenPhones = job.seenPhones;
       payload.seenEmails = job.seenEmails;
+      payload.seenAddresses = job.seenAddresses;
     }
     return api("customers/import", { method: "POST", body: payload }).then(function (res) {
       if (job.cancelled) return;
@@ -1394,6 +1397,9 @@
     if (job.mode === "preview" && res.newKeys) {
       job.seenPhones = job.seenPhones.concat(res.newKeys.phones || []).slice(0, IMPORT_SEEN_LIMIT);
       job.seenEmails = job.seenEmails.concat(res.newKeys.emails || []).slice(0, IMPORT_SEEN_LIMIT);
+      job.seenAddresses = job.seenAddresses
+        .concat(res.newKeys.addresses || [])
+        .slice(0, IMPORT_SEEN_LIMIT);
     }
     if (res.clover) {
       job.clover = res.clover;
@@ -1452,7 +1458,7 @@
       "<th>Contact</th><th>What happens</th></tr></thead><tbody>" +
       samples.map(function (s) {
         var label = s.status === "new"
-          ? '<span class="pill scheduled">New</span>'
+          ? '<span class="pill scheduled">New customer</span>'
           : s.status === "duplicate"
             ? '<span class="pill completed">Already on file</span>'
             : '<span class="pill cancelled">Cannot import</span>';
