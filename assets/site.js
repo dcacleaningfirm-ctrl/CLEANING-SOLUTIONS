@@ -668,12 +668,11 @@
    * The request form behind every "Book This Special" button. It is a second
    * entry point into the same `quick-estimate` Netlify form the booking flow
    * submits to, so a promotion request and a full booking request land in one
-   * submission list rather than two. Every field it sends is already declared
-   * on the booking review form, which is the page Netlify parses at deploy
-   * time to register the form and its fields — that is why the markup here
-   * deliberately carries no `data-netlify` attribute of its own. Registering a
-   * second, narrower copy of the same form name is how the review form's extra
-   * fields would start being dropped.
+   * submission list rather than two. Every field it sends is declared on the
+   * booking review form, which is the page Netlify parses at deploy time to
+   * register the form and its fields. The AJAX request posts to that registered
+   * page instead of the site root, while the ordinary form action remains the
+   * no-JavaScript fallback.
    *
    * Which special is being requested is carried by the promotion_code select,
    * a registered field in its own right. The code therefore travels with the
@@ -689,6 +688,7 @@
     var status = form.querySelector("[data-quote-status]");
     var button = form.querySelector("button[type='submit']");
     var codeField = form.elements.promotion_code;
+    var submitting = false;
 
     var dateInput = form.elements.preferred_date;
     if (dateInput) {
@@ -698,16 +698,19 @@
         + "-" + String(today.getDate()).padStart(2, "0");
     }
 
-    /* The options are written in the markup as bare codes, so no price is
-       typed into this page; the readable label is composed from the catalog
-       record each code names. */
+    /* Build the menu from the shared catalog. Existing markup remains a useful
+       no-JavaScript fallback, while new catalog promotions automatically join
+       the same booking and submission flow. */
     if (codeField && codeField.options) {
-      Array.prototype.forEach.call(codeField.options, function (option) {
-        var listed = special(option.value);
-        if (listed) {
-          option.textContent = listed.code + " — " + listed.name + " · " + formatPrice(listed.price);
-        }
+      var selectedCode = codeField.value;
+      codeField.innerHTML = "";
+      pricing.specials.forEach(function (listed) {
+        var option = document.createElement("option");
+        option.value = listed.code;
+        option.textContent = listed.code + " — " + listed.name + " · " + formatPrice(listed.price);
+        codeField.appendChild(option);
       });
+      if (hasOption(selectedCode)) codeField.value = selectedCode;
     }
 
     function hasOption(code) {
@@ -821,6 +824,10 @@
         return line.label + ": " + formatPrice(line.total);
       }).join("; ") || "No quantity entered");
       setHidden("pricing_version", pricing.version);
+      setHidden("promotion_name", offer.name);
+      setHidden("promotion_quantity", String(toCount(field ? field.value : 0)));
+      setHidden("promotion_quantity_label", quantity.label);
+      setHidden("notes", form.elements.job_description ? form.elements.job_description.value : "");
 
       return result;
     }
@@ -831,12 +838,18 @@
       sync();
     });
 
+    form.addEventListener("invalid", function () {
+      if (status) status.textContent = "Please complete the highlighted required fields before sending.";
+    }, true);
+
     form.addEventListener("submit", function (event) {
       /* Without JavaScript this listener never runs and the browser posts the
          form the ordinary way: Netlify still records the submission, the
          promotion_code select carries the offer, and the action attribute
          carries the visitor to the confirmation page. */
       event.preventDefault();
+      if (submitting) return;
+      submitting = true;
 
       /* Normalise the count once, at the point of sending, rather than on
          every keystroke — rewriting the field as it is typed makes it fiddly
@@ -853,7 +866,7 @@
       }
       if (status) status.textContent = "";
 
-      fetch("/", {
+      fetch(form.dataset.netlifySubmit || "/book/review.html", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams(new FormData(form)).toString()
@@ -871,6 +884,7 @@
           confirmation.scrollIntoView({ block: "start" });
         }
       }).catch(function () {
+        submitting = false;
         if (button) {
           button.disabled = false;
           button.textContent = original;
