@@ -23,12 +23,20 @@
 /move-in-cleaning             /move-in-move-out-cleaning           301
 /move-out-cleaning            /move-in-move-out-cleaning           301
 /move-cleaning                /move-in-move-out-cleaning           301
+# A spoken or printed promo code is a URL. Each one lands on the request form
+# with its own offer already selected.
+/carpet199                    /quote?code=CARPET199                301
+/carpet350                    /quote?code=CARPET350                301
+/carpet431                    /quote?code=CARPET431                301
+/duct299                      /quote?code=DUCT299                  301
+/vents199                     /quote?code=VENTS199                 301
 /areas                        /areas/atlanta-ga                    301
 
 # Pretty URLs for pages whose CSP is scoped to the path in _headers.
 /book            /book/index.html     200
 /book/           /book/index.html     200
 /promotions      /promotions.html     200
+/quote           /quote.html          200
 /service-terms   /service-terms.html  200
 /privacy         /privacy.html        200
 /thank-you       /thank-you.html      200

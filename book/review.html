@@ -54,6 +54,14 @@
           <input type="hidden" name="form-name" value="quick-estimate">
           <input type="hidden" name="carpet_rooms" value="0">
           <input type="hidden" name="air_vents" value="0">
+          <!--
+            Not collected by the booking steps, which count vents rather than
+            systems. It is declared here because this page is the one Netlify
+            parses to register the `quick-estimate` form and its fields, and
+            the DUCT299 request on /quote — which is priced per HVAC unit —
+            submits into this same form. A field absent here is dropped there.
+          -->
+          <input type="hidden" name="hvac_units" value="0">
           <input type="hidden" name="armchairs" value="0">
           <input type="hidden" name="sofas" value="0">
           <input type="hidden" name="sectionals" value="0">

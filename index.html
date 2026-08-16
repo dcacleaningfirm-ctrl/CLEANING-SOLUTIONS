@@ -246,7 +246,15 @@
         "name": "How much is carpet cleaning?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "$46.58 per room, which is the same figure the booking flow uses because both read the same price catalog. A room is a single enclosed carpeted area up to roughly 300 square feet; larger open-plan areas are measured on site and counted as more than one room, and we tell you that before we start."
+          "text": "$46.58 per carpeted area, which is the same figure the booking flow uses because both read the same price catalog. Whole-home specials cover up to 5 areas for $199.00, up to 10 for $350.00 and up to 12 for $431.00."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What counts as one carpeted area?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "A standard room counts as 1 area, a large master bedroom counts as 2, stairs count as 1, a landing counts as 1, and walk-in closets are free with service and do not count. So 3 standard bedrooms + stairs + landing = 5 areas. Larger open-plan spaces are measured on site and counted as more than one area, and we tell you that before we start. The same counting applies whether you book a special or pay the per-area rate."
         }
       },
       {
@@ -254,7 +262,7 @@
         "name": "How much is air duct cleaning?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "A system base of $155.25 plus $15.53 per supply vent, so a typical single-system home falls between $279.49 and $388.20. The current promotion covers one system with up to 10 vents and 1 return for $199.00 — see the promotion terms."
+          "text": "A system base of $155.25 plus $15.53 per supply vent, so a typical single-system home falls between $279.49 and $388.20. Two specials price it differently: VENTS199 covers one system with up to 10 vents and 1 return for $199.00, and DUCT299 covers every supply and return vent on one HVAC unit, furnace cleaning included, for $299.00 — two units are $598.00 and three are $797.00. See the promotion terms."
         }
       },
       {
@@ -306,8 +314,8 @@
   <a class="skip-link" href="#main">Skip to content</a>
   <div class="announcement">Appointments are subject to route availability. Call (404) 716-2720 for urgent scheduling.</div>
   <div class="promo-strip">
-    <span><strong data-promo-field="name">Whole-home air duct promotion</strong> — <span data-price-compute="promoPrice">$199.00</span> with code <span class="promo-code" data-promo-field="code">VENTS199</span> · <span data-promo-field="summary">One HVAC system, up to 10 supply vents and 1 return.</span></span>
-    <a href="/promotions">See the terms</a>
+    <span><strong>Current specials</strong> — carpet from <span data-special="CARPET199"><span data-special-field="price">$199.00</span></span> with code <span class="promo-code" data-special="CARPET199"><span data-special-field="code">CARPET199</span></span> · air ducts from <span data-special="DUCT299"><span data-special-field="price">$299.00</span></span> per HVAC unit with code <span class="promo-code" data-special="DUCT299"><span data-special-field="code">DUCT299</span></span></span>
+    <a href="/promotions">See every offer</a>
   </div>
   <header class="site-header">
     <div class="container nav-shell">
@@ -507,18 +515,19 @@
     <section class="section">
       <div class="container split-grid">
         <div class="promo-card">
-          <p class="eyebrow">Code <span class="promo-code" data-promo-field="code">VENTS199</span></p>
-          <h2 data-promo-field="name">Whole-home air duct promotion</h2>
-          <p class="promo-figure">
-            <span class="promo-now" data-price-compute="promoPrice">$199.00</span>
-            <s class="promo-was" data-price-compute="promoRegular">$310.55</s>
-            <span class="promo-save">Save <span data-price-compute="promoSavings">$111.55</span></span>
-          </p>
-          <p data-promo-field="summary">One HVAC system, up to 10 supply vents and 1 return.</p>
-          <p class="quantity-hint">The comparison figure is this site's own list price for the same work, calculated from the catalog rather than typed in — so the banner and the terms cannot drift apart.</p>
+          <p class="eyebrow">Current specials</p>
+          <h2>Five offers, and every one of them books in a click.</h2>
+          <dl class="rate-table">
+            <div class="rate-row" data-special="CARPET199"><dt>Carpet, up to <span data-special-field="includedAreas">5</span> areas · <span class="promo-code" data-special-field="code">CARPET199</span></dt><dd><span data-special-field="price">$199.00</span> <a data-special-link href="/quote?code=CARPET199">Book This Special</a></dd></div>
+            <div class="rate-row" data-special="CARPET350"><dt>Carpet, up to <span data-special-field="includedAreas">10</span> areas · <span class="promo-code" data-special-field="code">CARPET350</span></dt><dd><span data-special-field="price">$350.00</span> <a data-special-link href="/quote?code=CARPET350">Book This Special</a></dd></div>
+            <div class="rate-row" data-special="CARPET431"><dt>Carpet, up to <span data-special-field="includedAreas">12</span> areas · <span class="promo-code" data-special-field="code">CARPET431</span></dt><dd><span data-special-field="price">$431.00</span> <a data-special-link href="/quote?code=CARPET431">Book This Special</a></dd></div>
+            <div class="rate-row" data-special="DUCT299"><dt>Air ducts, per HVAC unit · <span class="promo-code" data-special-field="code">DUCT299</span></dt><dd><span data-special-field="price">$299.00</span> <a data-special-link href="/quote?code=DUCT299">Book This Special</a></dd></div>
+            <div class="rate-row" data-special="VENTS199"><dt>Air ducts, up to <span data-special-field="includedVents">10</span> vents · <span class="promo-code" data-special-field="code">VENTS199</span></dt><dd><span data-special-field="price">$199.00</span> <a data-special-link href="/quote?code=VENTS199">Book This Special</a></dd></div>
+          </dl>
+          <p class="quantity-hint">Carpet specials count areas the same way: a standard room is 1, a large master bedroom is 2, stairs are 1, a landing is 1, and walk-in closets are free. The comparison prices on the terms page are this site's own list prices for the same work, calculated from the catalog rather than typed in — so a banner and its terms cannot drift apart.</p>
           <div class="step-actions">
             <a class="button button-dark" href="/promotions">Read the full terms</a>
-            <a class="button button-ghost" href="/book/air-ducts">Apply it to an estimate</a>
+            <a class="button button-ghost" href="/book">Build a full estimate</a>
           </div>
         </div>
         <div>
@@ -545,8 +554,9 @@
         <h2>Useful details before you book.</h2>
         <div class="faq-list">
           <details><summary>Is the online total a final quote?</summary><p>No. It is a planning estimate based on the quantities and options you select. Final pricing is confirmed after reviewing access, measurements, condition, service scope, and treatment needs.</p></details>
-          <details><summary>How much is carpet cleaning?</summary><p><span data-price-key="carpetRoom">$46.58</span> per room, which is the same figure the booking flow uses because both read the same price catalog. A room is a single enclosed carpeted area up to roughly 300 square feet; larger open-plan areas are measured on site and counted as more than one room, and we tell you that before we start.</p></details>
-          <details><summary>How much is air duct cleaning?</summary><p>A system base of <span data-price-key="airDuctBase">$155.25</span> plus <span data-price-key="airVent">$15.53</span> per supply vent, so a typical single-system home falls between <span data-price-compute="ductTypicalLow">$279.49</span> and <span data-price-compute="ductTypicalHigh">$388.20</span>. The current promotion covers one system with up to <span data-promo-field="includedVents">10</span> vents and 1 return for <span data-price-compute="promoPrice">$199.00</span> — see <a href="/promotions">the promotion terms</a>.</p></details>
+          <details><summary>How much is carpet cleaning?</summary><p><span data-price-key="carpetRoom">$46.58</span> per carpeted area, which is the same figure the booking flow uses because both read the same price catalog. Whole-home specials cover up to <span data-special="CARPET199"><span data-special-field="includedAreas">5</span></span> areas for <span data-special="CARPET199"><span data-special-field="price">$199.00</span></span>, up to <span data-special="CARPET350"><span data-special-field="includedAreas">10</span></span> for <span data-special="CARPET350"><span data-special-field="price">$350.00</span></span> and up to <span data-special="CARPET431"><span data-special-field="includedAreas">12</span></span> for <span data-special="CARPET431"><span data-special-field="price">$431.00</span></span>.</p></details>
+          <details><summary>What counts as one carpeted area?</summary><p>A standard room counts as 1 area, a large master bedroom counts as 2, stairs count as 1, a landing counts as 1, and walk-in closets are free with service and do not count. So 3 standard bedrooms + stairs + landing = 5 areas. Larger open-plan spaces are measured on site and counted as more than one area, and we tell you that before we start. The same counting applies whether you book a special or pay the per-area rate — see <a href="/promotions#how-areas-are-counted">the published rules</a>.</p></details>
+          <details><summary>How much is air duct cleaning?</summary><p>A system base of <span data-price-key="airDuctBase">$155.25</span> plus <span data-price-key="airVent">$15.53</span> per supply vent, so a typical single-system home falls between <span data-price-compute="ductTypicalLow">$279.49</span> and <span data-price-compute="ductTypicalHigh">$388.20</span>. Two specials price it differently: <span class="promo-code">VENTS199</span> covers one system with up to <span data-special="VENTS199"><span data-special-field="includedVents">10</span></span> vents and 1 return for <span data-special="VENTS199"><span data-special-field="price">$199.00</span></span>, and <span class="promo-code">DUCT299</span> covers every supply and return vent on one HVAC unit, furnace cleaning included, for <span data-special="DUCT299"><span data-special-field="price">$299.00</span></span> — two units are <span data-special="DUCT299"><span data-special-total="2">$598.00</span></span> and three are <span data-special="DUCT299"><span data-special-total="3">$797.00</span></span>. See <a href="/promotions">the promotion terms</a>.</p></details>
           <details><summary>Why does dryer vent cleaning have two prices?</summary><p>On its own it is <span data-price-key="dryerVent" data-price-group="treatments">$115.00</span>, because it is a separate visit with its own setup. Added to an air duct cleaning on the same visit it is <span data-price-key="dryerVentAddOn" data-price-group="treatments">$70.00</span>, because the crew and the equipment are already at your home. The <a href="/book/add-ons">add-ons step</a> shows whichever rate your selections earn.</p></details>
           <details><summary>Do you use only steam and water?</summary><p>No. Carpet cleaning is described accurately as truck-mounted hot-water extraction with appropriate pre-treatment, spotting, rinsing, and extraction. Products are selected for the material and job condition.</p></details>
           <details><summary>What are the limits of cleaning?</summary><p>Cleaning removes soil and improves appearance. It does not reverse permanent changes to the material: dye loss, bleaching, sun fading, burns, wear patterns and existing damage stay as they are. Odor that has reached padding, subfloor or framing needs the source addressed rather than a surface clean. We look at the actual condition and tell you what we expect to achieve before we start.</p></details>

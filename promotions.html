@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Air Duct Cleaning Promotion — Code VENTS199 | DCA Cleaning Solutions</title>
-  <meta name="description" content="One promotion, one price, one set of terms. Whole-home air duct cleaning for $199.00 with code VENTS199: one HVAC system, up to 10 supply vents and 1 return.">
+  <title>Cleaning Promotions — CARPET199, CARPET350, CARPET431, DUCT299, VENTS199 | DCA Cleaning Solutions</title>
+  <meta name="description" content="Every offer we run, defined in one place. Carpet cleaning from $199.00 for up to 5 areas, $350.00 for up to 10 and $431.00 for up to 12, plus whole-home air duct cleaning at $299.00 per HVAC unit.">
   <link rel="canonical" href="https://www.dcacleaningsolutions.com/promotions">
   <link rel="stylesheet" href="/assets/styles.css">
   <!-- Meta Pixel Code -->
@@ -29,45 +29,205 @@
   <main id="main">
     <section class="page-hero">
       <div class="container">
-        <p class="eyebrow eyebrow-light">Current promotion</p>
-        <h1>One promotion. One price. One set of terms.</h1>
-        <p>We run a single offer at a time, and this page is the only place its terms are defined. The code, the price and the inclusions on every other page on this site are read from the same record you see here, so a banner cannot advertise a number the terms do not support.</p>
+        <p class="eyebrow eyebrow-light">Current promotions</p>
+        <h1>Every offer. One page. One set of terms.</h1>
+        <p>This page is the only place any of our offers are defined. The codes, the prices, the inclusions and the terms on every other page on this site are read from the same records you see here, so a banner cannot advertise a number the terms do not support. Each one has a button that carries its code straight onto your request.</p>
       </div>
     </section>
 
     <section class="section">
       <div class="container split-grid">
         <div>
-          <div class="promo-card">
-            <p class="eyebrow">Code <span class="promo-code" data-promo-field="code">VENTS199</span></p>
-            <h2 data-promo-field="name">Whole-home air duct promotion</h2>
-            <p class="promo-figure">
-              <span class="promo-now" data-price-compute="promoPrice">$199.00</span>
-              <s class="promo-was" data-price-compute="promoRegular">$310.55</s>
-              <span class="promo-save">Save <span data-price-compute="promoSavings">$111.55</span></span>
-            </p>
-            <p data-promo-field="summary">One HVAC system, up to 10 supply vents and 1 return.</p>
-            <p class="quantity-hint">The struck-through figure is not a slogan. It is this catalog's own list price for the same work — the system base of <span data-price-key="airDuctBase">$155.25</span> plus <span data-promo-field="includedVents">10</span> vents at <span data-price-key="airVent">$15.53</span> each — calculated on this page rather than typed in by hand, so the two can never drift apart.</p>
+          <!--
+            One card per offer, and not one of them contains a price, an
+            inclusion or a term written by hand. Each names a catalog record by
+            code with data-special, and the figures, the terms, the inclusion
+            list and the "Book This Special" link are filled from that record —
+            so an offer is defined once, here, and described identically
+            everywhere it appears. The static text inside is what a visitor
+            sees before the script runs.
+          -->
+          <div class="promo-card" data-special="CARPET199">
+            <div>
+              <p class="eyebrow">Code <span class="promo-code" data-special-field="code">CARPET199</span></p>
+              <h2 data-special-field="name">Whole-home carpet cleaning special</h2>
+              <p class="promo-figure">
+                <span class="promo-now" data-special-field="price">$199.00</span>
+                <s class="promo-was" data-special-field="regularPrice" data-special-savings>$232.90</s>
+                <span class="promo-save" data-special-savings>Save <span data-special-field="savings">$33.90</span></span>
+              </p>
+              <p data-special-field="summary">Up to 5 carpeted areas cleaned in one visit.</p>
+              <p class="quantity-hint">The struck-through figure is this catalog's own list price for the same work — <span data-special-field="includedAreas">5</span> areas at <span data-price-key="carpetRoom">$46.58</span> each — calculated on this page rather than typed in by hand, so the two can never drift apart.</p>
+            </div>
             <div class="step-actions">
-              <a class="button button-dark" href="/book/air-ducts">Apply it to an estimate</a>
+              <a class="button button-dark" data-special-link href="/quote?code=CARPET199">Book This Special</a>
               <a class="button button-ghost" href="tel:4047162720"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-phone"></use></svg> Call (404) 716-2720</a>
             </div>
           </div>
 
-          <section class="form-card" style="margin-top:2rem;">
+          <section class="form-card" style="margin-top:2rem;" data-special="CARPET199">
             <p class="eyebrow">The terms</p>
-            <h2>What it covers, in full.</h2>
-            <ul class="icon-list promo-terms" data-promo-terms>
+            <h2>What <span data-special-field="code">CARPET199</span> covers, in full.</h2>
+            <ul class="icon-list promo-terms" data-special-terms>
+              <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Covers up to 5 carpeted areas at one residential address in a single visit. Additional areas are added at the catalog rate per area.</span></li>
+            </ul>
+            <p class="quantity-hint">The request form counts the extra areas for you and shows the figure before you send it, so nothing about the price arrives as a surprise on the day.</p>
+          </section>
+
+          <div class="promo-card" style="margin-top:2rem;" data-special="CARPET350">
+            <div>
+              <p class="eyebrow">Code <span class="promo-code" data-special-field="code">CARPET350</span></p>
+              <h2 data-special-field="name">Whole-home carpet cleaning special</h2>
+              <p class="promo-figure">
+                <span class="promo-now" data-special-field="price">$350.00</span>
+                <s class="promo-was" data-special-field="regularPrice" data-special-savings>$465.80</s>
+                <span class="promo-save" data-special-savings>Save <span data-special-field="savings">$115.80</span></span>
+              </p>
+              <p data-special-field="summary">Up to 10 carpeted areas, with shampoo treatment and deodorizer included.</p>
+              <p class="eyebrow" style="margin-top:1rem;">Included at no extra charge</p>
+              <ul class="icon-list promo-terms" data-special-includes>
+                <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Shampoo treatment</span></li>
+                <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Deodorizer</span></li>
+              </ul>
+              <p class="quantity-hint">The struck-through figure is this catalog's own list price for the same work — <span data-special-field="includedAreas">10</span> areas at <span data-price-key="carpetRoom">$46.58</span> each — before the shampoo treatment and deodorizer this special adds at no charge.</p>
+            </div>
+            <div class="step-actions">
+              <a class="button button-dark" data-special-link href="/quote?code=CARPET350">Book This Special</a>
+              <a class="button button-ghost" href="tel:4047162720"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-phone"></use></svg> Call (404) 716-2720</a>
+            </div>
+          </div>
+
+          <section class="form-card" style="margin-top:2rem;" data-special="CARPET350">
+            <p class="eyebrow">The terms</p>
+            <h2>What <span data-special-field="code">CARPET350</span> covers, in full.</h2>
+            <ul class="icon-list promo-terms" data-special-terms>
+              <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Covers up to 10 carpeted areas at one residential address in a single visit. Additional areas are added at the catalog rate per area.</span></li>
+            </ul>
+          </section>
+
+          <div class="promo-card" style="margin-top:2rem;" data-special="CARPET431">
+            <div>
+              <p class="eyebrow">Code <span class="promo-code" data-special-field="code">CARPET431</span></p>
+              <h2 data-special-field="name">Whole-home carpet cleaning special</h2>
+              <p class="promo-figure">
+                <span class="promo-now" data-special-field="price">$431.00</span>
+                <s class="promo-was" data-special-field="regularPrice" data-special-savings>$526.06</s>
+                <span class="promo-save" data-special-savings>Save <span data-special-field="savings">$95.06</span></span>
+              </p>
+              <p data-special-field="summary">Up to 12 carpeted areas, with shampoo treatment and deodorizer included.</p>
+              <p class="eyebrow" style="margin-top:1rem;">Included at no extra charge</p>
+              <ul class="icon-list promo-terms" data-special-includes>
+                <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Shampoo treatment</span></li>
+                <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Deodorizer</span></li>
+              </ul>
+              <p class="quantity-hint">This is our largest carpet special. The struck-through figure is the published regular price for the same <span data-special-field="includedAreas">12</span> areas.</p>
+            </div>
+            <div class="step-actions">
+              <a class="button button-dark" data-special-link href="/quote?code=CARPET431">Book This Special</a>
+              <a class="button button-ghost" href="tel:4047162720"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-phone"></use></svg> Call (404) 716-2720</a>
+            </div>
+          </div>
+
+          <section class="form-card" style="margin-top:2rem;" data-special="CARPET431">
+            <p class="eyebrow">The terms</p>
+            <h2>What <span data-special-field="code">CARPET431</span> covers, in full.</h2>
+            <ul class="icon-list promo-terms" data-special-terms>
+              <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Covers up to 12 carpeted areas at one residential address in a single visit. Additional areas are added at the catalog rate per area.</span></li>
+            </ul>
+          </section>
+
+          <!--
+            The counting rules are published once, here, and read from the same
+            record the request form and the carpet pages read. There is no
+            second version of them anywhere on this site.
+          -->
+          <section class="form-card" style="margin-top:2rem;" id="how-areas-are-counted">
+            <p class="eyebrow">Applies to every carpet special</p>
+            <h2>How a carpeted area is counted.</h2>
+            <p>All three carpet specials — <span class="promo-code">CARPET199</span>, <span class="promo-code">CARPET350</span> and <span class="promo-code">CARPET431</span> — are quoted in areas, and an area means the same thing in all of them:</p>
+            <ul class="icon-list promo-terms" data-area-rules>
+              <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Each standard room counts as 1 area.</span></li>
+              <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>A large master bedroom counts as 2 areas.</span></li>
+              <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Stairs count as 1 area.</span></li>
+              <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>A landing counts as 1 area.</span></li>
+              <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Walk-in closets are free with service and do not count as an additional area.</span></li>
+            </ul>
+            <p><strong>For example:</strong> <span data-area-example>3 standard bedrooms + stairs + landing = 5 areas.</span></p>
+            <p class="quantity-hint">Count your own home the same way before you send a request, and the figure you see on the form is the figure we start from. If the count differs on the day, we tell you before anything is cleaned.</p>
+          </section>
+
+          <div class="promo-card" style="margin-top:2rem;" data-special="DUCT299">
+            <div>
+              <p class="eyebrow">Code <span class="promo-code" data-special-field="code">DUCT299</span></p>
+              <h2 data-special-field="name">Whole-home air duct cleaning special</h2>
+              <p class="promo-figure">
+                <span class="promo-now" data-special-field="price">$299.00</span>
+                <s class="promo-was" data-special-field="regularPrice" data-special-savings hidden>$0.00</s>
+                <span class="promo-save" data-special-savings hidden>Save <span data-special-field="savings">$0.00</span></span>
+              </p>
+              <p data-special-field="summary">$299.00 per HVAC unit — unlimited supply and return vents on that system, furnace cleaning included.</p>
+              <p class="eyebrow" style="margin-top:1rem;">Included on every unit</p>
+              <ul class="icon-list promo-terms" data-special-includes>
+                <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Unlimited supply vents</span></li>
+                <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Unlimited return vents</span></li>
+                <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Furnace cleaning</span></li>
+              </ul>
+              <p class="eyebrow" style="margin-top:1rem;">What a home with more than one system pays</p>
+              <dl class="rate-table">
+                <div class="rate-row"><dt>1 HVAC unit</dt><dd><span data-special-total="1">$299.00</span></dd></div>
+                <div class="rate-row"><dt>2 HVAC units</dt><dd><span data-special-total="2">$598.00</span></dd></div>
+                <div class="rate-row"><dt>3 HVAC units</dt><dd><span data-special-total="3">$797.00</span></dd></div>
+              </dl>
+              <p class="quantity-hint">The first and second units are the full <span data-special-field="price">$299.00</span> each; a third is <span data-special-field="additionalUnitPrice">$199.00</span> additional. These totals are that arithmetic, run on this page rather than typed in, so the table and the request form cannot quote different numbers.</p>
+            </div>
+            <div class="step-actions">
+              <a class="button button-dark" data-special-link href="/quote?code=DUCT299">Book This Special</a>
+              <a class="button button-ghost" href="tel:4047162720"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-phone"></use></svg> Call (404) 716-2720</a>
+            </div>
+          </div>
+
+          <section class="form-card" style="margin-top:2rem;" data-special="DUCT299">
+            <p class="eyebrow">The terms</p>
+            <h2>What <span data-special-field="code">DUCT299</span> covers, in full.</h2>
+            <ul class="icon-list promo-terms" data-special-terms>
+              <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Covers one HVAC unit at $299.00, including every supply vent and return vent connected to that system, with furnace cleaning included. There is no per-vent charge.</span></li>
+            </ul>
+            <p class="quantity-hint">There is no per-vent charge under this code. A home with fifteen registers on one system pays the same as a home with eight.</p>
+          </section>
+
+          <div class="promo-card" style="margin-top:2rem;" data-special="VENTS199">
+            <div>
+              <p class="eyebrow">Code <span class="promo-code" data-special-field="code">VENTS199</span></p>
+              <h2 data-special-field="name">Whole-home air duct promotion</h2>
+              <p class="promo-figure">
+                <span class="promo-now" data-special-field="price">$199.00</span>
+                <s class="promo-was" data-special-field="regularPrice" data-special-savings>$310.55</s>
+                <span class="promo-save" data-special-savings>Save <span data-special-field="savings">$111.55</span></span>
+              </p>
+              <p data-special-field="summary">One HVAC system, up to 10 supply vents and 1 return.</p>
+              <p class="quantity-hint">The struck-through figure is not a slogan. It is this catalog's own list price for the same work — the system base of <span data-price-key="airDuctBase">$155.25</span> plus <span data-special-field="includedVents">10</span> vents at <span data-price-key="airVent">$15.53</span> each — calculated on this page rather than typed in by hand.</p>
+              <p class="quantity-hint">Counting vents rather than systems, this is the smaller of our two air duct offers. If your home has more than 10 supply vents on the system, compare it against <span class="promo-code">DUCT299</span> above, which covers every vent on a unit for one price. One request carries one code.</p>
+            </div>
+            <div class="step-actions">
+              <a class="button button-dark" data-special-link href="/quote?code=VENTS199">Book This Special</a>
+              <a class="button button-ghost" href="/book/air-ducts">Apply it to a full estimate</a>
+            </div>
+          </div>
+
+          <section class="form-card" style="margin-top:2rem;" data-special="VENTS199">
+            <p class="eyebrow">The terms</p>
+            <h2>What <span data-special-field="code">VENTS199</span> covers, in full.</h2>
+            <ul class="icon-list promo-terms" data-special-terms>
               <li><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-check"></use></svg><span>Covers one HVAC system with up to 10 supply vents and 1 return. Additional vents are added at the catalog rate per vent.</span></li>
             </ul>
             <p class="quantity-hint">Nothing else is hidden in a footnote. If your home needs more than the promotion covers, the extra is added at the published per-vent rate and you see the arithmetic before you agree to it.</p>
           </section>
 
           <section class="form-card" style="margin-top:2rem;">
-            <p class="eyebrow">Why the price says 199</p>
-            <h2>The code and the price match on purpose.</h2>
-            <p>The promotion is <span data-price-compute="promoPrice">$199.00</span> and the code is <span class="promo-code" data-promo-field="code">VENTS199</span>. Those two agree because a code that quotes one number while the banner quotes another is the single most common way a cleaning company loses a customer's trust before the van arrives.</p>
-            <p style="margin-top:1rem;">Our move-in and move-out package starts at <span data-price-key="movePackage">$199.99</span>. That is a different product with a different scope, and the near-identical figure is a coincidence of pricing rather than a second version of this offer. The promotion on this page applies to air duct cleaning only.</p>
+            <p class="eyebrow">Reading the codes</p>
+            <h2>Each code says what it costs.</h2>
+            <p>Every code on this page carries its own price: <span class="promo-code">CARPET199</span> is <span data-special="CARPET199"><span data-special-field="price">$199.00</span></span>, <span class="promo-code">CARPET350</span> is <span data-special="CARPET350"><span data-special-field="price">$350.00</span></span>, <span class="promo-code">CARPET431</span> is <span data-special="CARPET431"><span data-special-field="price">$431.00</span></span>, and <span class="promo-code">DUCT299</span> is <span data-special="DUCT299"><span data-special-field="price">$299.00</span></span> per HVAC unit. A code that quotes one number while the banner quotes another is the single most common way a cleaning company loses a customer's trust before the van arrives, so here the two are the same record.</p>
+            <p style="margin-top:1rem;">The offers cover different work and are quoted separately; one request carries one code. Our move-in and move-out package starts at <span data-price-key="movePackage">$199.99</span>. That is a separate product with its own scope, and the near-identical figure is a coincidence of pricing rather than another version of any offer above.</p>
           </section>
         </div>
 
@@ -90,8 +250,8 @@
           <div class="feature-grid" style="margin-top:2rem;">
             <article class="feature-card">
               <span class="icon-badge"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-tag"></use></svg></span>
-              <h3>Mention the code</h3>
-              <p>Say <span class="promo-code" data-promo-field="code">VENTS199</span> on the phone, or tick it on the air duct step, and it is on the estimate.</p>
+              <h3>The code travels with you</h3>
+              <p>Every "Book This Special" button carries its own code onto the request, so the offer is attached before you type a word. Saying it on the phone works just as well.</p>
             </article>
             <article class="feature-card">
               <span class="icon-badge"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-clipboard"></use></svg></span>
@@ -105,8 +265,8 @@
             </article>
             <article class="feature-card">
               <span class="icon-badge"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-filter"></use></svg></span>
-              <h3>One system per promotion</h3>
-              <p>A second air handler is a second system, estimated at the same published rates.</p>
+              <h3>One code per request</h3>
+              <p>The offers are not combined with each other. Pick the one that fits the work, and a second service is quoted at the published rates alongside it.</p>
             </article>
           </div>
 

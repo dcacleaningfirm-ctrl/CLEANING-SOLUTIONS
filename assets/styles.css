@@ -19,6 +19,14 @@
   box-sizing: border-box;
 }
 
+/* The browser's own [hidden] rule is a user-agent style, so any author rule
+   that sets `display` — and several of the grid layouts below do — silently
+   beats it. Panels that are shown and hidden from script rely on the attribute
+   working, so it is restated here where it can win. */
+[hidden] {
+  display: none !important;
+}
+
 html {
   scroll-behavior: smooth;
 }
