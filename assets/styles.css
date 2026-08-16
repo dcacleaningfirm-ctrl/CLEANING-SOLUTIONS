@@ -1520,6 +1520,21 @@ p {
   font-size: 0.85rem;
 }
 
+/* A form that refuses to send has to say why, somewhere the eye lands. Muted
+   hint type is not enough for that, so this is the one message on a form card
+   that is allowed to shout. */
+.form-status {
+  margin-top: 1.4rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid rgba(155, 44, 44, 0.35);
+  border-radius: 14px;
+  background: rgba(155, 44, 44, 0.07);
+  color: #8c2f2f;
+  font-size: 0.92rem;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
 .quantity-hint {
   display: grid;
   grid-template-columns: auto 1fr;

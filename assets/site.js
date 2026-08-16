@@ -47,16 +47,32 @@
   }
 
   /* Which quantity a special is counted in, and which of the booking form's
-     registered fields carries it. */
+     registered fields carries it.
+     A future offer can name its own quantity outright — quantityField and the
+     labels beside it — and the booking page adopts it without a code change.
+     An offer that is a flat price with nothing to count says so by declaring
+     none of these, and the page hides the counters rather than inventing one. */
   function specialQuantity(offer) {
     if (!offer) return null;
+    if (offer.quantityField) {
+      return {
+        field: offer.quantityField,
+        label: offer.quantityLabel || "Quantity",
+        noun: offer.quantityNoun || "items",
+        included: offer.includedQuantity,
+        max: offer.maxQuantity
+      };
+    }
     if (offer.kind === "carpet") {
       return { field: "carpet_rooms", label: "Carpeted areas", noun: "areas", included: offer.includedAreas, max: 40 };
     }
     if (offer.additionalUnitPrice) {
       return { field: "hvac_units", label: "HVAC units / systems", noun: "units", included: 1, max: offer.maxUnits };
     }
-    return { field: "air_vents", label: "Supply vents", noun: "vents", included: offer.includedVents, max: 60 };
+    if (offer.includedVents) {
+      return { field: "air_vents", label: "Supply vents", noun: "vents", included: offer.includedVents, max: 60 };
+    }
+    return { field: null, label: "Not applicable", noun: "items", included: 1, max: 0 };
   }
 
   /* The estimate for one special at a given quantity. Each shape of offer is
@@ -99,7 +115,7 @@
           extraUnits * offer.additionalUnitPrice
         );
       }
-    } else {
+    } else if (offer.includedVents) {
       add(title, "Up to " + offer.includedVents + " vents", offer.price);
       var extraVents = Math.max(0, quantity - offer.includedVents);
       if (extraVents > 0) {
@@ -109,6 +125,11 @@
           extraVents * services.airVent.price
         );
       }
+    } else {
+      /* An offer that counts nothing — a flat promotional price. Priced here
+         rather than left at zero so a future catalog entry of that shape is
+         bookable the day it is added. */
+      add(title, "Flat promotional rate", offer.price);
     }
 
     return { lines: lines, total: toCents(total) };
@@ -662,6 +683,59 @@
     sync();
   }
 
+  /* --------------------------------------------------- netlify submission */
+
+  /*
+   * One place where a form on this site is handed to Netlify Forms, so every
+   * promotion that uses the booking system submits the same way and a new
+   * offer needs no submission code of its own.
+   *
+   * Netlify records a submission for a POST to any real path on the site as
+   * long as the body carries the `form-name` of a form registered at deploy
+   * time, and answers with that form's success page. The site root is the
+   * default target because it is the one path that always exists and cannot be
+   * renamed out from under the pages that post to it.
+   */
+  var NETLIFY_FORM_ENDPOINT = "/";
+
+  function netlifySubmit(form) {
+    var body = new URLSearchParams();
+
+    /* Built field by field rather than handed straight to URLSearchParams: a
+       File value would otherwise be stringified into the body as
+       "[object File]" and quietly replace the customer's answer. */
+    new FormData(form).forEach(function (value, key) {
+      if (typeof value === "string") body.append(key, value);
+    });
+
+    return fetch(form.dataset.netlifySubmit || NETLIFY_FORM_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString()
+    }).then(function (response) {
+      if (!response.ok) throw new Error("Netlify Forms answered " + response.status);
+      return response;
+    });
+  }
+
+  /* The first control the browser will refuse to submit on, if there is one.
+     Read from the live validity state rather than by calling checkValidity():
+     that call fires an `invalid` event of its own, and anything listening for
+     invalid controls would then be asking the same question from inside its
+     own answer. */
+  function firstInvalidControl(form) {
+    var controls = form.querySelectorAll("input, select, textarea");
+    for (var index = 0; index < controls.length; index += 1) {
+      var control = controls[index];
+      if (control.willValidate && control.validity && !control.validity.valid) return control;
+    }
+    return null;
+  }
+
+  function isVisible(element) {
+    return Boolean(element && (element.offsetWidth || element.offsetHeight || element.getClientRects().length));
+  }
+
   /* ------------------------------------------------------ special requests */
 
   /*
@@ -670,14 +744,16 @@
    * submits to, so a promotion request and a full booking request land in one
    * submission list rather than two. Every field it sends is declared on the
    * booking review form, which is the page Netlify parses at deploy time to
-   * register the form and its fields. The AJAX request posts to that registered
-   * page instead of the site root, while the ordinary form action remains the
-   * no-JavaScript fallback.
+   * register the form and its fields. The AJAX request carries that registered
+   * name in `form-name` and posts through the shared submitter above, while the
+   * ordinary form action remains the no-JavaScript fallback.
    *
    * Which special is being requested is carried by the promotion_code select,
-   * a registered field in its own right. The code therefore travels with the
-   * request whether or not JavaScript ran, and a link of the form
-   * /quote?code=CARPET350 only has to preselect it.
+   * a registered field in its own right, and the menu is built from the shared
+   * catalog. The code therefore travels with the request whether or not
+   * JavaScript ran, a link of the form /quote?code=CARPET350 only has to
+   * preselect it, and a promotion added to the catalog later is bookable and
+   * submittable through this same form without a line of code of its own.
    */
   function setupQuoteForm() {
     var form = document.querySelector("[data-quote-form]");
@@ -728,7 +804,10 @@
     }
 
     function currentOffer() {
-      return (codeField && special(codeField.value)) || entryCarpetSpecial;
+      return (codeField && special(codeField.value))
+        || entryCarpetSpecial
+        || (pricing.specials && pricing.specials[0])
+        || null;
     }
 
     function setHidden(name, value) {
@@ -736,15 +815,44 @@
       if (field) field.value = value;
     }
 
+    function setStatus(message) {
+      if (!status) return;
+      status.textContent = message || "";
+      status.hidden = !message;
+    }
+
+    /*
+     * A control the customer cannot see must never be the thing that stops the
+     * form. A hidden number input left at 0 while its markup says min="1" is
+     * invalid for as long as it is on the page, and the browser then refuses to
+     * submit while showing nothing at all: there is no visible field to point
+     * the message at, and the submit event never fires. That is what made
+     * "Book This Special" look dead — the offer the customer filled in was
+     * fine, and a counter belonging to a different offer was quietly vetoing
+     * it. Clearing the floor on the counters that are not in play is what keeps
+     * the form sendable, and it is re-asserted on every click because it has to
+     * be true at the moment the browser validates.
+     */
+    function relaxIdleQuantities() {
+      form.querySelectorAll("[data-quantity-group]").forEach(function (group) {
+        var field = form.elements[group.dataset.quantityGroup];
+        if (!field || !group.hidden) return;
+        field.required = false;
+        field.min = "0";
+        if (toCount(field.value) <= 0) field.value = "0";
+      });
+    }
+
     /*
      * Point the page at the selected offer: its card, its terms, what it
      * includes, and the one quantity it is counted in. The quantities it is
-     * not counted in are zeroed and their required flag dropped, so a carpet
-     * request never carries a stray HVAC count and a hidden field can never
-     * block submission.
+     * not counted in are zeroed, their required flag dropped and their minimum
+     * cleared, so a carpet request never carries a stray HVAC count and a
+     * hidden counter can never block submission.
      */
     function applyOffer() {
       var offer = currentOffer();
+      if (!offer) return;
       var quantity = specialQuantity(offer);
 
       document.querySelectorAll("[data-quote-offer]").forEach(function (block) {
@@ -768,17 +876,22 @@
       form.querySelectorAll("[data-quantity-group]").forEach(function (group) {
         var name = group.dataset.quantityGroup;
         var field = form.elements[name];
-        var active = name === quantity.field;
+        var active = Boolean(quantity.field) && name === quantity.field;
 
         group.hidden = !active;
         if (!field) return;
 
         if (active) {
+          /* The counter in play is required and counts from one: an offer for
+             nothing is not an offer, and the field is on screen, so the browser
+             can show the customer exactly what it wants. */
           field.required = true;
+          field.min = "1";
           if (quantity.max) field.max = String(quantity.max);
           if (toCount(field.value) <= 0) field.value = String(quantity.included || 1);
         } else {
           field.required = false;
+          field.min = "0";
           field.value = "0";
         }
       });
@@ -789,9 +902,14 @@
        the customer was looking at when they sent it. */
     function sync() {
       var offer = currentOffer();
+      if (!offer) return { lines: [], total: 0 };
       var quantity = specialQuantity(offer);
-      var field = form.elements[quantity.field];
-      var result = specialEstimate(offer, toCount(field ? field.value : 0));
+      var field = quantity.field ? form.elements[quantity.field] : null;
+      /* An offer whose counter is not on this page — a flat-rate promotion, or
+         one naming a quantity the markup has no control for — is still priced
+         and still bookable, at the quantity its own catalog record includes. */
+      var count = field ? toCount(field.value) : (quantity.included || 1);
+      var result = specialEstimate(offer, count);
 
       document.querySelectorAll("[data-quote-total]").forEach(function (element) {
         element.textContent = formatPrice(result.total);
@@ -825,7 +943,7 @@
       }).join("; ") || "No quantity entered");
       setHidden("pricing_version", pricing.version);
       setHidden("promotion_name", offer.name);
-      setHidden("promotion_quantity", String(toCount(field ? field.value : 0)));
+      setHidden("promotion_quantity", String(count));
       setHidden("promotion_quantity_label", quantity.label);
       setHidden("notes", form.elements.job_description ? form.elements.job_description.value : "");
 
@@ -838,9 +956,24 @@
       sync();
     });
 
-    form.addEventListener("invalid", function () {
-      if (status) status.textContent = "Please complete the highlighted required fields before sending.";
+    /* Validation that fails has to say so. The browser points at the first
+       visible control itself; this puts the reason in the page as well, so a
+       customer who scrolled past it is not left looking at a button that
+       appears to do nothing. */
+    form.addEventListener("invalid", function (event) {
+      setStatus("Please complete the highlighted fields, then send again.");
+      if (event.target === firstInvalidControl(form) && isVisible(event.target)) {
+        try {
+          event.target.scrollIntoView({ block: "center" });
+        } catch (error) {
+          event.target.scrollIntoView();
+        }
+      }
     }, true);
+
+    /* Runs before the browser validates, which is the only moment left to make
+       sure nothing invisible is holding the form back. */
+    if (button) button.addEventListener("click", relaxIdleQuantities);
 
     form.addEventListener("submit", function (event) {
       /* Without JavaScript this listener never runs and the browser posts the
@@ -849,13 +982,26 @@
          carries the visitor to the confirmation page. */
       event.preventDefault();
       if (submitting) return;
+
+      /* Belt and braces: the submit event only fires on a valid form, but a
+         programmatic submit() skips validation entirely, and a request that is
+         missing the customer's phone number is worse than one that is refused.
+         reportValidity both re-checks and shows the browser's own message. */
+      relaxIdleQuantities();
+      var validate = form.reportValidity || form.checkValidity;
+      if (typeof validate === "function" && !validate.call(form)) {
+        setStatus("Please complete the highlighted fields, then send again.");
+        return;
+      }
+
       submitting = true;
 
       /* Normalise the count once, at the point of sending, rather than on
          every keystroke — rewriting the field as it is typed makes it fiddly
          to clear and retype. */
       var offer = currentOffer();
-      var countField = form.elements[specialQuantity(offer).field];
+      var quantityField = specialQuantity(offer).field;
+      var countField = quantityField ? form.elements[quantityField] : null;
       if (countField) countField.value = String(toCount(countField.value));
 
       var result = sync();
@@ -864,15 +1010,9 @@
         button.disabled = true;
         button.textContent = "Sending…";
       }
-      if (status) status.textContent = "";
+      setStatus("");
 
-      fetch(form.dataset.netlifySubmit || "/book/review.html", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams(new FormData(form)).toString()
-      }).then(function (response) {
-        if (!response.ok) throw new Error("Submission failed");
-
+      netlifySubmit(form).then(function () {
         if (panel) panel.hidden = true;
         if (confirmation) {
           confirmation.querySelectorAll("[data-quote-total]").forEach(function (element) {
@@ -882,22 +1022,26 @@
           confirmation.setAttribute("tabindex", "-1");
           confirmation.focus();
           confirmation.scrollIntoView({ block: "start" });
+        } else {
+          setStatus("Request received. We will be in touch to confirm the scope.");
         }
-      }).catch(function () {
+      }).catch(function (error) {
+        /* Never fail silently: the button comes back, the reason is on the
+           page, and there is a way to reach us that does not depend on it. */
         submitting = false;
         if (button) {
           button.disabled = false;
           button.textContent = original;
         }
-        if (status) {
-          status.textContent = "That did not send. Please try again, or call (404) 716-2720 and quote "
-            + offer.code + ".";
-        }
+        setStatus("That did not send — please try again, or call (404) 716-2720 and quote "
+          + offer.code + ".");
+        if (window.console && window.console.error) window.console.error(error);
       });
     });
 
     applyOffer();
     sync();
+    setStatus("");
   }
 
   /* -------------------------------------------------------------- interface */
@@ -935,6 +1079,16 @@
       paint();
     });
   }
+
+  /* The shared promotion maths, exposed under one name so it can be exercised
+     without a browser and so anything added later reads the same catalog
+     rather than re-deriving a price of its own. */
+  window.DCA_BOOKING = {
+    special: special,
+    specialQuantity: specialQuantity,
+    specialEstimate: specialEstimate,
+    formatPrice: formatPrice
+  };
 
   renderPrices();
   setupNavigation();

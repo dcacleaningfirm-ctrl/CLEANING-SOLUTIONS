@@ -51,10 +51,19 @@
             no second registration is needed — and deliberately none is made.
             Adding data-netlify here would register a narrower copy of the same
             form name and the review form's other fields would start to be
-            dropped. The action attribute is the no-JavaScript path: Netlify
-            records the submission and sends the visitor to /thank-you.
+            dropped.
+
+            What identifies the submission is the hidden form-name field, not
+            the URL it is posted to: Netlify records a POST to any real path on
+            the site against the registered form of that name, and answers with
+            that form's success page. data-netlify-submit is therefore the site
+            root — the one path that always exists and cannot be renamed out
+            from under this page, unlike the review step's own URL.
+
+            The action attribute is the no-JavaScript path: Netlify records the
+            submission and sends the visitor to /thank-you.
           -->
-          <form class="estimate-form" name="quick-estimate" method="POST" action="/thank-you" netlify-honeypot="bot-field" data-quote-form data-netlify-submit="/book/review.html">
+          <form class="estimate-form" name="quick-estimate" method="POST" action="/thank-you" netlify-honeypot="bot-field" data-quote-form data-netlify-submit="/">
             <input type="hidden" name="form-name" value="quick-estimate">
             <input type="hidden" name="promotion_name" value="Whole-home carpet cleaning special">
             <input type="hidden" name="promotion_quantity" value="5">
@@ -104,6 +113,16 @@
                 </div>
               </div>
 
+              <!--
+                Only one of these counters belongs to the selected offer; the
+                others are hidden. A hidden counter must still be a VALID
+                control, because the browser validates the whole form whether a
+                field is on screen or not and silently refuses to submit when
+                one is not — with no message and nothing to focus. That is why
+                the two idle counters are authored at min="0" and start at 0.
+                The script raises the floor back to 1 on whichever counter the
+                selected offer actually uses.
+              -->
               <div class="quantity-grid" style="margin-top:1.5rem;">
                 <label class="quantity-field" data-quantity-group="carpet_rooms">
                   <span>Carpeted areas <small>counted by the rules below</small></span>
@@ -111,11 +130,11 @@
                 </label>
                 <label class="quantity-field" data-quantity-group="hvac_units" hidden>
                   <span>HVAC units / systems <small>one air handler is one unit</small></span>
-                  <input id="quote-units" name="hvac_units" type="number" min="1" max="3" step="1" inputmode="numeric" value="0">
+                  <input id="quote-units" name="hvac_units" type="number" min="0" max="3" step="1" inputmode="numeric" value="0">
                 </label>
                 <label class="quantity-field" data-quantity-group="air_vents" hidden>
                   <span>Supply vents <small>registers on the system</small></span>
-                  <input id="quote-vents" name="air_vents" type="number" min="1" max="60" step="1" inputmode="numeric" value="0">
+                  <input id="quote-vents" name="air_vents" type="number" min="0" max="60" step="1" inputmode="numeric" value="0">
                 </label>
               </div>
               <p class="quantity-hint">Not sure of the count? Give us your best guess. The scope is confirmed in person before work begins, and the estimate moves with it rather than being held against you.</p>
@@ -154,7 +173,7 @@
 
               <p class="estimate-note"><strong>What this figure is.</strong> A planning estimate, not a quote you are held to. Final scope and price are confirmed before work begins, after dimensions, material condition and accessibility are reviewed. Cleaning removes soil and improves appearance; permanent dye loss, bleaching, sun fading, wear and existing material damage will not improve. Please tell us about children, pets, allergies or sensitivities before service so we can choose suitable products.</p>
 
-              <p class="quantity-hint" role="alert" data-quote-status></p>
+              <p class="form-status" role="alert" aria-live="assertive" data-quote-status hidden></p>
 
               <div class="step-actions">
                 <button class="button button-dark" type="submit">Book This Special</button>
