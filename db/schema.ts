@@ -12,7 +12,8 @@ import {
   pgTable,
   serial,
   text,
-  timestamp
+  timestamp,
+  uniqueIndex
 } from "drizzle-orm/pg-core";
 
 export const customers = pgTable(
@@ -50,9 +51,222 @@ export const customers = pgTable(
     // from the jobs table so a lead that has not become a job yet still counts
     // as activity, which is exactly the case the office cares about.
     lastActivityAt: timestamp("last_activity_at"),
+
+    // --- Marketing consent ------------------------------------------------
+    // Whether this household may be sent promotional messages, held per
+    // channel because the two are not the same promise. A text message is
+    // expressly agreed to; an email is sent on the strength of an existing
+    // relationship and stopped the moment somebody says stop.
+    //
+    // "unknown" is the honest default for every account already on file: no
+    // migration can invent a conversation that never happened, so nothing is
+    // treated as consented until somebody records where the consent came from.
+    // granted | denied | unknown
+    smsConsentStatus: text("sms_consent_status").notNull().default("unknown"),
+    // Where the agreement came from, in words the office could defend: "Booking
+    // form 12 Aug 2026", "Signed work order #1841", "Asked on the phone".
+    smsConsentSource: text("sms_consent_source"),
+    smsConsentAt: timestamp("sms_consent_at"),
+    // Set the moment a STOP arrives, and never cleared by anything except the
+    // customer starting again themselves. Its presence overrides consent.
+    smsOptedOutAt: timestamp("sms_opted_out_at"),
+    emailConsentStatus: text("email_consent_status").notNull().default("unknown"),
+    emailConsentSource: text("email_consent_source"),
+    emailConsentAt: timestamp("email_consent_at"),
+    emailOptedOutAt: timestamp("email_opted_out_at"),
+
     createdAt: timestamp("created_at").defaultNow()
   },
-  (table) => [index("customers_name_idx").on(table.name)]
+  (table) => [
+    index("customers_name_idx").on(table.name),
+    // The audience screen counts and segments on these on every load.
+    index("customers_sms_consent_idx").on(table.smsConsentStatus),
+    index("customers_email_consent_idx").on(table.emailConsentStatus),
+    index("customers_zip_idx").on(table.zip)
+  ]
+);
+
+// The consent trail: every time marketing permission was given, withdrawn, or
+// recorded from a STOP. Append-only, so "when did they agree, and how do we
+// know" has an answer that does not depend on the current state of the customer
+// row. This is the record that has to exist before a single bulk text goes out.
+export const marketingConsentEvents = pgTable(
+  "marketing_consent_events",
+  {
+    id: serial().primaryKey(),
+    // Nullable: a STOP can arrive from a number that is not on any account, and
+    // it still has to be honoured and recorded.
+    customerId: integer("customer_id").references(() => customers.id),
+    // sms | email
+    channel: text().notNull(),
+    // granted | opted_out | opted_in | denied
+    action: text().notNull(),
+    // The status the account was left in: granted | denied | unknown
+    status: text().notNull(),
+    // Free text describing where it came from. Required for a grant.
+    source: text(),
+    detail: text(),
+    // The number or address it applies to, normalised.
+    address: text(),
+    // Who recorded it. Null when the customer did it themselves, by texting
+    // STOP or following an unsubscribe link.
+    actorEmployeeId: integer("actor_employee_id").references(() => employees.id),
+    actorName: text("actor_name"),
+    ip: text(),
+    userAgent: text("user_agent"),
+    createdAt: timestamp("created_at").defaultNow()
+  },
+  (table) => [
+    index("marketing_consent_customer_idx").on(table.customerId),
+    index("marketing_consent_created_idx").on(table.createdAt),
+    index("marketing_consent_channel_idx").on(table.channel)
+  ]
+);
+
+// The suppression list, keyed by the number or address itself rather than by
+// customer. A STOP has to stick even when the person who sent it is on three
+// accounts, on none, or is added to the database again tomorrow by an import —
+// so this is the list every send checks last, after everything else has said
+// yes.
+export const marketingSuppressions = pgTable(
+  "marketing_suppressions",
+  {
+    id: serial().primaryKey(),
+    // sms | email
+    channel: text().notNull(),
+    // E.164 for a number, lower-cased for an address.
+    address: text().notNull(),
+    // opted_out | complaint | bounced | manual
+    reason: text().notNull().default("opted_out"),
+    source: text(),
+    customerId: integer("customer_id").references(() => customers.id),
+    createdAt: timestamp("created_at").defaultNow()
+  },
+  (table) => [
+    uniqueIndex("marketing_suppressions_address_idx").on(table.channel, table.address)
+  ]
+);
+
+// A promotion the office sends out: what it says, who it goes to, and where it
+// got to. The audience is stored as the filter that produced it rather than as
+// a frozen list of people, so the count on screen and the count that is sent to
+// are produced by the same code.
+export const campaigns = pgTable(
+  "campaigns",
+  {
+    id: serial().primaryKey(),
+    name: text().notNull(),
+    promotionTitle: text("promotion_title"),
+    smsBody: text("sms_body"),
+    emailSubject: text("email_subject"),
+    emailBody: text("email_body"),
+    // Where the customer is sent — the existing promotions or booking page.
+    promotionUrl: text("promotion_url"),
+    promoCode: text("promo_code"),
+    expiresAt: timestamp("expires_at"),
+    smsEnabled: boolean("sms_enabled").notNull().default(false),
+    emailEnabled: boolean("email_enabled").notNull().default(false),
+    // The audience filter, exactly as the builder set it.
+    audience: jsonb(),
+    // draft | scheduled | sending | sent | cancelled
+    status: text().notNull().default("draft"),
+    scheduledFor: timestamp("scheduled_for"),
+    // What the count was when it was queued, so the history reads the same a
+    // year later even though the database has moved on.
+    audienceSize: integer("audience_size").notNull().default(0),
+    createdBy: integer("created_by").references(() => employees.id),
+    createdByName: text("created_by_name"),
+    queuedAt: timestamp("queued_at"),
+    startedAt: timestamp("started_at"),
+    sentAt: timestamp("sent_at"),
+    cancelledAt: timestamp("cancelled_at"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow()
+  },
+  (table) => [
+    index("campaigns_status_idx").on(table.status),
+    index("campaigns_scheduled_idx").on(table.scheduledFor)
+  ]
+);
+
+// One row per message: this campaign, this customer, this channel. Every stage
+// the message passes through is stamped here, so a campaign's numbers are read
+// off the same rows that did the sending rather than kept in a counter that can
+// drift away from them.
+export const campaignRecipients = pgTable(
+  "campaign_recipients",
+  {
+    id: serial().primaryKey(),
+    campaignId: integer("campaign_id")
+      .notNull()
+      .references(() => campaigns.id),
+    customerId: integer("customer_id").references(() => customers.id),
+    // sms | email
+    channel: text().notNull(),
+    // The number or address the message was actually addressed to, kept so a
+    // later correction to the account does not rewrite history.
+    address: text().notNull(),
+    // The random string that identifies this message in a link. It is what a
+    // click and an unsubscribe come back on, so it is unguessable and carries
+    // no customer detail in itself.
+    token: text().notNull(),
+    // queued | sent | delivered | failed | suppressed | cancelled
+    status: text().notNull().default("queued"),
+    error: text(),
+    provider: text(),
+    providerRef: text("provider_ref"),
+    attempts: integer().notNull().default(0),
+    queuedAt: timestamp("queued_at").defaultNow(),
+    sentAt: timestamp("sent_at"),
+    deliveredAt: timestamp("delivered_at"),
+    failedAt: timestamp("failed_at"),
+    clickedAt: timestamp("clicked_at"),
+    clickCount: integer("click_count").notNull().default(0),
+    optedOutAt: timestamp("opted_out_at"),
+    // The booking this message led to, and what it was worth.
+    bookedAt: timestamp("booked_at"),
+    jobId: integer("job_id").references(() => jobs.id),
+    revenueCents: integer("revenue_cents").notNull().default(0),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow()
+  },
+  (table) => [
+    uniqueIndex("campaign_recipients_token_idx").on(table.token),
+    uniqueIndex("campaign_recipients_unique_idx").on(
+      table.campaignId,
+      table.channel,
+      table.address
+    ),
+    index("campaign_recipients_campaign_idx").on(table.campaignId),
+    index("campaign_recipients_status_idx").on(table.status),
+    index("campaign_recipients_customer_idx").on(table.customerId)
+  ]
+);
+
+// The timestamped trail behind those columns: queued, sent, delivered, failed,
+// clicked, booked, opted out. The columns above are the current state; this is
+// the sequence that produced it.
+export const campaignEvents = pgTable(
+  "campaign_events",
+  {
+    id: serial().primaryKey(),
+    campaignId: integer("campaign_id")
+      .notNull()
+      .references(() => campaigns.id),
+    recipientId: integer("recipient_id").references(() => campaignRecipients.id),
+    customerId: integer("customer_id").references(() => customers.id),
+    channel: text(),
+    // queued | sent | delivered | failed | clicked | booked | opted_out |
+    // suppressed | cancelled | test
+    kind: text().notNull(),
+    detail: text(),
+    createdAt: timestamp("created_at").defaultNow()
+  },
+  (table) => [
+    index("campaign_events_campaign_idx").on(table.campaignId),
+    index("campaign_events_recipient_idx").on(table.recipientId),
+    index("campaign_events_kind_idx").on(table.kind)
+  ]
 );
 
 export const employees = pgTable("employees", {

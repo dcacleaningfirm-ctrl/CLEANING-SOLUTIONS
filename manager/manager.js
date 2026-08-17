@@ -60,6 +60,10 @@
     // The customer file being brought in: what was parsed out of it, how far
     // through it is, and what it has done so far.
     importJob: null,
+    // Grow tab: the audience filters on screen, the campaign being written and
+    // the counts last read back. Built lazily by growState() so an account that
+    // never opens the tab carries none of it.
+    grow: null,
     // The dashboard job map: the loaded Google Maps namespace, the live map and
     // its markers, and an address waiting to be centred on the next time the
     // dashboard is on screen.
@@ -111,6 +115,7 @@
     { view: "leads", permission: "leads" },
     { view: "jobs", permission: "jobs" },
     { view: "customers", permission: "customers" },
+    { view: "grow", permission: "marketing" },
     { view: "charges", permission: "charges" },
     { view: "crew", permission: "crew" }
   ];
@@ -566,6 +571,7 @@
     if (name === "leads") renderLeads();
     if (name === "jobs") renderJobs();
     if (name === "customers") renderCustomers();
+    if (name === "grow") renderGrow();
     if (name === "charges") renderCharges();
     if (name === "crew") renderCrew();
   }
@@ -2371,6 +2377,735 @@
     link.click();
     link.remove();
     setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  // ---------- Grow / marketing ----------
+  //
+  // Marketing to the customers already on file. Everything on this screen is
+  // drawn from what the server sends: the counts, the eligibility, the provider
+  // readiness. Nothing here decides who may be contacted — the server does that
+  // and does it again at the moment of sending — so a control that slipped
+  // through would still be refused.
+
+  var GROW_TABS = [
+    { key: "audience", label: "Audience" },
+    { key: "campaigns", label: "Campaigns" },
+    { key: "consent", label: "Consent" }
+  ];
+
+  function growState() {
+    if (!state.grow) {
+      state.grow = {
+        tab: "audience",
+        data: null,
+        filter: {
+          channel: "any",
+          service: "",
+          zips: "",
+          cities: "",
+          lastServiceFrom: "",
+          lastServiceTo: "",
+          notBookedDays: "",
+          includeNeverBooked: true
+        },
+        counts: null,
+        preview: [],
+        countTimer: null,
+        editing: null,
+        consent: { q: "", needs: "", rows: [], timer: null }
+      };
+    }
+    return state.grow;
+  }
+
+  function renderGrow() {
+    var host = document.getElementById("view-grow");
+    var g = growState();
+    if (!g.data) {
+      host.innerHTML = '<div class="loading">Loading…</div>';
+      api("marketing/overview")
+        .then(function (d) {
+          g.data = d;
+          renderGrow();
+        })
+        .catch(function (e) {
+          host.innerHTML = '<div class="card"><p class="empty">' +
+            esc(e.message || "The marketing centre could not be loaded.") + "</p></div>";
+        });
+      return;
+    }
+
+    host.innerHTML =
+      growReadiness(g.data.providers) +
+      growStats(g.data.stats) +
+      '<div class="chips grow-tabs">' +
+      GROW_TABS.map(function (t) {
+        return '<button type="button" class="chip' + (g.tab === t.key ? " active" : "") +
+          '" data-grow-tab="' + t.key + '">' + esc(t.label) + "</button>";
+      }).join("") +
+      "</div>" +
+      '<div id="grow-panel"></div>';
+
+    renderGrowPanel();
+  }
+
+  function renderGrowPanel() {
+    var g = growState();
+    var panel = document.getElementById("grow-panel");
+    if (!panel) return;
+    if (g.tab === "campaigns") return renderGrowCampaigns(panel);
+    if (g.tab === "consent") return renderGrowConsent(panel);
+    return renderGrowAudience(panel);
+  }
+
+  // What can actually be sent today. Written plainly and near the top, because
+  // the honest answer on a fresh install is "nothing yet" and the office should
+  // not find that out by building a campaign first.
+  function growReadiness(providers) {
+    if (!providers) return "";
+    var notes = [];
+    if (!providers.sms.ready) {
+      notes.push(
+        "<strong>Promotional texting is off.</strong> " +
+        (providers.sms.configured
+          ? "The provider is connected. Set MARKETING_SMS_ENABLED on the site once the sending number is registered for A2P 10DLC."
+          : "Add these site environment variables: " + esc(providers.sms.missing.join(", ")) + ".")
+      );
+    }
+    if (!providers.email.ready) {
+      notes.push(
+        "<strong>Promotional email is off.</strong> " +
+        (providers.email.configured
+          ? "The provider is connected. Set MARKETING_EMAIL_ENABLED on the site to turn bulk email on."
+          : "Add these site environment variables: " + esc(providers.email.missing.join(", ")) + ".")
+      );
+    }
+    if (!notes.length) {
+      return '<div class="card grow-ready"><p class="hint">Text and email are both connected and switched on. ' +
+        "Messages go out in batches of " + esc(String(providers.batchSize)) +
+        " a minute, and a booking counts towards a campaign for " +
+        esc(String(providers.attributionWindowDays)) + " days after the customer taps its link.</p></div>";
+    }
+    return '<div class="card intake-alert grow-alert">' +
+      notes.map(function (n) { return "<p>" + n + "</p>"; }).join("") +
+      "<p class=\"hint\">Drafts, audiences and consent records all work without a provider. Only sending is held back.</p></div>";
+  }
+
+  function growStats(s) {
+    return '<div class="stat-grid">' +
+      stat("Customers on file", s.total) +
+      stat("With a mobile number", s.withMobile) +
+      stat("With an email address", s.withEmail) +
+      stat("With both", s.withBoth) +
+      stat("Textable now", s.smsEligible) +
+      stat("Emailable now", s.emailEligible) +
+      stat("Awaiting text consent", s.smsConsentPending) +
+      stat("Opted out", s.optedOut) +
+      "</div>";
+  }
+
+  // --- Audience -------------------------------------------------------------
+
+  function renderGrowAudience(panel) {
+    var g = growState();
+    var f = g.filter;
+    var segments = g.data.segments || [];
+    panel.innerHTML =
+      '<div class="card grow-filters">' +
+      '<div class="grow-grid">' +
+      '<label class="field"><span>Reachable by</span><select id="gr-channel">' +
+      growOption("any", "Text or email", f.channel) +
+      growOption("sms", "Text message only", f.channel) +
+      growOption("email", "Email only", f.channel) +
+      growOption("both", "Both text and email", f.channel) +
+      "</select></label>" +
+      '<label class="field"><span>Previous service</span><select id="gr-service">' +
+      growOption("", "Any service", f.service) +
+      segments.map(function (s) { return growOption(s.value, s.label, f.service); }).join("") +
+      "</select></label>" +
+      '<label class="field"><span>ZIP codes</span><input id="gr-zips" type="text" maxlength="400" placeholder="30349, 30291" value="' +
+      esc(f.zips) + '" /></label>' +
+      '<label class="field"><span>Cities</span><input id="gr-cities" type="text" maxlength="400" placeholder="Atlanta, College Park" value="' +
+      esc(f.cities) + '" /></label>' +
+      '<label class="field"><span>Last service on or after</span><input id="gr-from" type="date" value="' +
+      esc(f.lastServiceFrom) + '" /></label>' +
+      '<label class="field"><span>Last service on or before</span><input id="gr-to" type="date" value="' +
+      esc(f.lastServiceTo) + '" /></label>' +
+      '<label class="field"><span>Has not booked in (days)</span><input id="gr-notbooked" type="number" min="1" max="3650" placeholder="180" value="' +
+      esc(f.notBookedDays) + '" /></label>' +
+      '<label class="field checkbox"><input id="gr-never" type="checkbox"' +
+      (f.includeNeverBooked ? " checked" : "") +
+      " /><span>Include customers who have never booked</span></label>" +
+      "</div>" +
+      '<p class="hint">A customer only appears here if they may lawfully be contacted on the chosen channel. ' +
+      "Somebody who has opted out is never in an audience, whatever the filters say.</p>" +
+      "</div>" +
+      '<div id="gr-counts"></div>' +
+      '<div id="gr-preview"></div>';
+
+    ["gr-channel", "gr-service", "gr-zips", "gr-cities", "gr-from", "gr-to", "gr-notbooked", "gr-never"]
+      .forEach(function (id) {
+        var field = document.getElementById(id);
+        if (!field) return;
+        field.addEventListener(field.tagName === "INPUT" && field.type === "text" ? "input" : "change",
+          function () { readAudienceForm(); });
+        if (field.type === "number") field.addEventListener("input", readAudienceForm);
+      });
+
+    loadAudience();
+  }
+
+  function growOption(value, label, current) {
+    return '<option value="' + esc(value) + '"' + (current === value ? " selected" : "") + ">" +
+      esc(label) + "</option>";
+  }
+
+  function readAudienceForm() {
+    var g = growState();
+    g.filter = {
+      channel: val("gr-channel") || "any",
+      service: val("gr-service"),
+      zips: val("gr-zips"),
+      cities: val("gr-cities"),
+      lastServiceFrom: val("gr-from"),
+      lastServiceTo: val("gr-to"),
+      notBookedDays: val("gr-notbooked"),
+      includeNeverBooked: document.getElementById("gr-never")
+        ? document.getElementById("gr-never").checked
+        : true
+    };
+    clearTimeout(g.countTimer);
+    g.countTimer = setTimeout(loadAudience, 350);
+  }
+
+  // The filter as the API wants it. Lists are typed as text and split here; the
+  // server sanitises them again, so this is convenience rather than protection.
+  function audiencePayload() {
+    var f = growState().filter;
+    return {
+      channel: f.channel,
+      service: f.service,
+      zips: f.zips ? f.zips.split(/[,\s]+/).filter(Boolean) : [],
+      cities: f.cities ? f.cities.split(/\s*,\s*/).filter(Boolean) : [],
+      lastServiceFrom: f.lastServiceFrom,
+      lastServiceTo: f.lastServiceTo,
+      notBookedDays: f.notBookedDays ? Number(f.notBookedDays) : null,
+      includeNeverBooked: f.includeNeverBooked
+    };
+  }
+
+  function loadAudience() {
+    var counts = document.getElementById("gr-counts");
+    var preview = document.getElementById("gr-preview");
+    if (!counts) return;
+    counts.innerHTML = '<div class="loading">Counting…</div>';
+    api("marketing/audience", { method: "POST", body: { audience: audiencePayload() } })
+      .then(function (d) {
+        var g = growState();
+        g.counts = d.counts;
+        g.preview = d.preview;
+        counts.innerHTML =
+          '<div class="stat-grid">' +
+          stat("In this audience", d.counts.total) +
+          stat("Can be texted", d.counts.sms) +
+          stat("Can be emailed", d.counts.email) +
+          stat("Both", d.counts.both) +
+          "</div>" +
+          '<div class="card"><p class="hint">' + esc(d.label) + "</p>" +
+          '<button type="button" class="btn btn-primary btn-sm" data-grow-new>Build a campaign for this audience</button>' +
+          "</div>";
+        preview.innerHTML = d.preview.length
+          ? '<div class="card"><h3>A sample of this audience</h3><table><thead><tr><th>Name</th>' +
+            "<th>Where</th><th>Reachable by</th><th>Last service</th></tr></thead><tbody>" +
+            d.preview.map(function (r) {
+              var reach = [];
+              if (r.smsEligible) reach.push('<span class="pill completed">Text</span>');
+              if (r.emailEligible) reach.push('<span class="pill scheduled">Email</span>');
+              return "<tr><td>" + esc(r.name) + '</td><td class="muted">' +
+                esc([r.city, r.zip].filter(Boolean).join(" ") || "—") + "</td><td>" +
+                (reach.join(" ") || '<span class="muted">—</span>') + '</td><td class="muted">' +
+                (r.lastServiceAt ? esc(fmtDate(r.lastServiceAt)) : "Never") + "</td></tr>";
+            }).join("") +
+            "</tbody></table>" +
+            '<p class="hint">Contact details are deliberately not listed here. The count above is what the ' +
+            "campaign will send to.</p></div>"
+          : '<div class="card"><p class="empty">Nobody matches those filters yet.</p></div>';
+      })
+      .catch(function (e) {
+        counts.innerHTML = '<div class="card"><p class="empty">' +
+          esc(e.message || "That audience could not be counted.") + "</p></div>";
+      });
+  }
+
+  // --- Campaigns ------------------------------------------------------------
+
+  function renderGrowCampaigns(panel) {
+    var g = growState();
+    if (g.editing) return renderCampaignBuilder(panel);
+
+    var list = g.data.campaigns || [];
+    panel.innerHTML =
+      '<div class="card grow-actions"><button type="button" class="btn btn-primary btn-sm" data-grow-new>New campaign</button>' +
+      '<p class="hint">Every campaign records what was sent, what was delivered, who tapped the link and which ' +
+      "bookings followed.</p></div>" +
+      (list.length
+        ? '<div class="card"><table><thead><tr><th>Campaign</th><th>Status</th><th class="right">Audience</th>' +
+          '<th class="right">Texts</th><th class="right">Emails</th><th class="right">Delivered</th>' +
+          '<th class="right">Failed</th><th class="right">Clicks</th><th class="right">Bookings</th>' +
+          '<th class="right">Revenue</th></tr></thead><tbody>' +
+          list.map(campaignRow).join("") +
+          "</tbody></table></div>"
+        : '<div class="card"><p class="empty">No campaigns yet.</p></div>');
+  }
+
+  function campaignRow(c) {
+    var t = c.totals || {};
+    return '<tr class="clickable" data-grow-open="' + c.id + '"><td>' + esc(c.name) +
+      (c.promoCode ? ' <span class="muted mono">' + esc(c.promoCode) + "</span>" : "") +
+      '<br /><span class="muted">' + esc(c.audienceLabel || "") + "</span></td>" +
+      "<td>" + campaignPill(c) + "</td>" +
+      '<td class="right mono">' + (c.audienceSize || 0) + "</td>" +
+      '<td class="right mono">' + (t.smsSent || 0) + "</td>" +
+      '<td class="right mono">' + (t.emailSent || 0) + "</td>" +
+      '<td class="right mono">' + (t.delivered || 0) + "</td>" +
+      '<td class="right mono">' + (t.failed || 0) + "</td>" +
+      '<td class="right mono">' + (t.clicked || 0) + "</td>" +
+      '<td class="right mono">' + (t.booked || 0) + "</td>" +
+      '<td class="right mono">' + (t.revenueCents ? fmtMoney(t.revenueCents) : "—") + "</td></tr>";
+  }
+
+  function campaignPill(c) {
+    var map = {
+      draft: "in_progress",
+      scheduled: "scheduled",
+      sending: "en_route",
+      sent: "completed",
+      cancelled: "cancelled"
+    };
+    var label = c.status === "scheduled" && c.scheduledFor
+      ? "Scheduled " + fmtDate(c.scheduledFor)
+      : c.status.charAt(0).toUpperCase() + c.status.slice(1);
+    return '<span class="pill ' + (map[c.status] || "scheduled") + '">' + esc(label) + "</span>";
+  }
+
+  function openCampaign(id) {
+    api("marketing/campaigns/" + id).then(function (d) {
+      var g = growState();
+      g.editing = d.campaign;
+      g.editingEvents = d.events || [];
+      g.tab = "campaigns";
+      renderGrow();
+    });
+  }
+
+  function newCampaign() {
+    var g = growState();
+    g.editing = {
+      id: null,
+      name: "",
+      promotionTitle: "",
+      smsBody: "",
+      emailSubject: "",
+      emailBody: "",
+      promotionUrl: "/promotions",
+      promoCode: "",
+      expiresAt: null,
+      smsEnabled: false,
+      emailEnabled: false,
+      audience: audiencePayload(),
+      status: "draft",
+      editable: true
+    };
+    g.editingEvents = [];
+    g.tab = "campaigns";
+    renderGrow();
+  }
+
+  function renderCampaignBuilder(panel) {
+    var g = growState();
+    var c = g.editing;
+    var links = g.data.promotionLinks || [];
+    var editable = c.editable !== false;
+    var totals = c.totals || null;
+    var expires = c.expiresAt ? String(c.expiresAt).slice(0, 10) : "";
+
+    panel.innerHTML =
+      '<div class="card grow-actions">' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-grow-back>Back to campaigns</button>' +
+      (c.id ? " " + campaignPill(c) : "") +
+      "</div>" +
+      (totals
+        ? '<div class="stat-grid">' +
+          stat("Queued", totals.queued) +
+          stat("Texts sent", totals.smsSent) +
+          stat("Emails sent", totals.emailSent) +
+          stat("Delivered", totals.delivered) +
+          stat("Failed", totals.failed) +
+          stat("Clicks", totals.clicked) +
+          stat("Bookings", totals.booked) +
+          stat("Revenue", fmtMoney(totals.revenueCents || 0)) +
+          "</div>"
+        : "") +
+      '<div class="card">' +
+      '<div class="grow-grid">' +
+      '<label class="field"><span>Campaign name</span><input id="gc-name" type="text" maxlength="120" value="' +
+      esc(c.name || "") + '"' + (editable ? "" : " disabled") + " /></label>" +
+      '<label class="field"><span>Promotion title</span><input id="gc-title" type="text" maxlength="160" placeholder="$99 three-room carpet special" value="' +
+      esc(c.promotionTitle || "") + '"' + (editable ? "" : " disabled") + " /></label>" +
+      '<label class="field"><span>Promo code</span><input id="gc-code" type="text" maxlength="40" placeholder="CARPET199" value="' +
+      esc(c.promoCode || "") + '"' + (editable ? "" : " disabled") + " /></label>" +
+      '<label class="field"><span>Offer ends</span><input id="gc-expires" type="date" value="' +
+      esc(expires) + '"' + (editable ? "" : " disabled") + " /></label>" +
+      '<label class="field"><span>Send them to</span><select id="gc-url"' + (editable ? "" : " disabled") + ">" +
+      links.map(function (l) {
+        return growOption(l.value, l.label, campaignLinkValue(c.promotionUrl));
+      }).join("") +
+      "</select></label>" +
+      "</div>" +
+      '<p class="hint">The link in the message points at this page through a tracking address, so taps and the ' +
+      "bookings that follow are counted. Only DCA pages may be linked.</p>" +
+      "</div>" +
+      '<div class="card">' +
+      '<label class="field checkbox"><input id="gc-sms-on" type="checkbox"' +
+      (c.smsEnabled ? " checked" : "") + (editable ? "" : " disabled") +
+      " /><span>Send this as a text message</span></label>" +
+      '<label class="field"><span>Text message</span><textarea id="gc-sms" rows="4" maxlength="480"' +
+      (editable ? "" : " disabled") + ">" + esc(c.smsBody || "") + "</textarea></label>" +
+      '<p class="hint" id="gc-sms-count"></p>' +
+      '<p class="hint">Merge tags: {{first_name}}, {{city}}, {{offer}}, {{promo_code}}, {{expires}}. ' +
+      "The business name, the link and “Reply STOP to opt out.” are added automatically if they are not in " +
+      "what you write.</p>" +
+      "</div>" +
+      '<div class="card">' +
+      '<label class="field checkbox"><input id="gc-email-on" type="checkbox"' +
+      (c.emailEnabled ? " checked" : "") + (editable ? "" : " disabled") +
+      " /><span>Send this as an email</span></label>" +
+      '<label class="field"><span>Subject</span><input id="gc-subject" type="text" maxlength="160" value="' +
+      esc(c.emailSubject || "") + '"' + (editable ? "" : " disabled") + " /></label>" +
+      '<label class="field"><span>Email message</span><textarea id="gc-email" rows="8" maxlength="20000"' +
+      (editable ? "" : " disabled") + ">" + esc(c.emailBody || "") + "</textarea></label>" +
+      '<p class="hint">An unsubscribe link is added to every promotional email. It cannot be turned off.</p>' +
+      "</div>" +
+      '<div class="card"><h3>Who this goes to</h3><p class="hint">' +
+      esc(c.audienceLabel || "The audience currently set on the Audience tab") + "</p>" +
+      '<p id="gc-count" class="grow-count">Counting…</p>' +
+      (editable
+        ? '<p class="hint">Saving uses whatever is set on the Audience tab right now.</p>'
+        : "") +
+      "</div>" +
+      '<div class="card grow-actions">' +
+      (editable
+        ? '<button type="button" class="btn btn-primary btn-sm" data-grow-save>Save draft</button> ' +
+          '<button type="button" class="btn btn-ghost btn-sm" data-grow-test>Send test</button> ' +
+          (c.id
+            ? '<button type="button" class="btn btn-ghost btn-sm" data-grow-schedule>Schedule</button> ' +
+              '<button type="button" class="btn btn-primary btn-sm" data-grow-send>Send campaign</button> '
+            : "") +
+          (c.id && c.status === "draft"
+            ? '<button type="button" class="btn btn-ghost btn-sm" data-grow-delete>Delete draft</button>'
+            : "")
+        : "") +
+      (c.id && (c.status === "scheduled" || c.status === "sending")
+        ? ' <button type="button" class="btn btn-ghost btn-sm" data-grow-cancel>Cancel campaign</button>'
+        : "") +
+      "</div>" +
+      (g.editingEvents && g.editingEvents.length
+        ? '<div class="card"><h3>What has happened</h3><table><thead><tr><th>When</th><th>Event</th>' +
+          "<th>Customer</th><th>Detail</th></tr></thead><tbody>" +
+          g.editingEvents.map(function (ev) {
+            return '<tr><td class="muted">' + esc(fmtDate(ev.createdAt)) + "</td><td>" +
+              esc(ev.kind) + '</td><td class="muted">' + esc(ev.customerName || "—") +
+              '</td><td class="muted">' + esc(ev.detail || "—") + "</td></tr>";
+          }).join("") +
+          "</tbody></table></div>"
+        : "");
+
+    var smsBox = document.getElementById("gc-sms");
+    if (smsBox) {
+      var updateCount = function () {
+        var len = smsBox.value.length;
+        var segments = len <= 160 ? 1 : Math.ceil(len / 153);
+        document.getElementById("gc-sms-count").textContent =
+          len + " characters — about " + segments + (segments === 1 ? " segment" : " segments") +
+          " per message, before the business name and opt-out line are added.";
+      };
+      smsBox.addEventListener("input", updateCount);
+      updateCount();
+    }
+
+    var countLine = document.getElementById("gc-count");
+    api("marketing/audience", { method: "POST", body: { audience: c.id ? c.audience : audiencePayload() } })
+      .then(function (d) {
+        countLine.textContent =
+          d.counts.total + " customers in this audience — " + d.counts.sms +
+          " can be texted, " + d.counts.email + " can be emailed.";
+      })
+      .catch(function () { countLine.textContent = "The audience could not be counted."; });
+  }
+
+  // The saved promotion URL as one of the offered pages, so re-opening a
+  // campaign selects the page it was pointed at rather than the first option.
+  function campaignLinkValue(url) {
+    if (!url) return "/promotions";
+    try {
+      return new URL(url, location.origin).pathname;
+    } catch (e) {
+      return url;
+    }
+  }
+
+  function campaignPayload() {
+    var g = growState();
+    return {
+      name: val("gc-name"),
+      promotionTitle: val("gc-title"),
+      promoCode: val("gc-code"),
+      expiresAt: val("gc-expires") || null,
+      promotionUrl: val("gc-url"),
+      smsEnabled: document.getElementById("gc-sms-on").checked,
+      smsBody: document.getElementById("gc-sms").value.trim(),
+      emailEnabled: document.getElementById("gc-email-on").checked,
+      emailSubject: val("gc-subject"),
+      emailBody: document.getElementById("gc-email").value.trim(),
+      audience: g.editing && g.editing.id ? g.editing.audience : audiencePayload()
+    };
+  }
+
+  function saveCampaign(then) {
+    var g = growState();
+    var payload = campaignPayload();
+    if (!payload.name) { toast("Give the campaign a name"); return; }
+    var request = g.editing.id
+      ? api("marketing/campaigns/" + g.editing.id, { method: "PUT", body: payload })
+      : api("marketing/campaigns", { method: "POST", body: payload });
+    request
+      .then(function (d) {
+        g.editing = d.campaign;
+        toast("Draft saved.");
+        return refreshGrow().then(function () {
+          if (then) then(d.campaign);
+        });
+      })
+      .catch(function (e) { toast(e.message || "That campaign could not be saved"); });
+  }
+
+  function refreshGrow() {
+    var g = growState();
+    return api("marketing/overview").then(function (d) {
+      g.data = d;
+      renderGrow();
+      return d;
+    });
+  }
+
+  function promptCampaignTest() {
+    saveCampaign(function (campaign) {
+      openModal(
+        "Send a test",
+        '<p class="hint">One message to you, so you can read it on a real handset. It does not touch anybody ' +
+        "on file and is not recorded against the campaign.</p>" +
+        '<label class="field"><span>Phone number</span><input id="m-test-phone" type="tel" maxlength="30" /></label>' +
+        '<label class="field"><span>Email address</span><input id="m-test-email" type="email" maxlength="160" /></label>',
+        function () {
+          return api("marketing/campaigns/" + campaign.id + "/test", {
+            method: "POST",
+            body: { phone: val("m-test-phone"), email: val("m-test-email") }
+          }).then(function (d) {
+            var failed = (d.results || []).filter(function (r) { return !r.ok; });
+            return failed.length
+              ? failed.map(function (r) { return r.channel + ": " + r.error; }).join(" · ")
+              : "Test sent.";
+          });
+        }
+      );
+    });
+  }
+
+  function promptCampaignSchedule() {
+    saveCampaign(function (campaign) {
+      openModal(
+        "Schedule this campaign",
+        '<p class="hint">It goes out on its own at the time you pick, whether or not anybody has this app open.</p>' +
+        '<label class="field"><span>Send at</span><input id="m-when" type="datetime-local" /></label>',
+        function () {
+          var when = val("m-when");
+          if (!when) return Promise.reject(new Error("Pick a date and time"));
+          return api("marketing/campaigns/" + campaign.id + "/schedule", {
+            method: "POST",
+            body: { scheduledFor: new Date(when).toISOString() }
+          }).then(function () {
+            refreshGrow();
+            return "Campaign scheduled.";
+          });
+        }
+      );
+    });
+  }
+
+  // The last step before a promotion reaches real phones. The count is read back
+  // from the server inside the confirmation, so what is agreed to is the number
+  // the send will actually use rather than one left over on screen.
+  function promptCampaignSend() {
+    saveCampaign(function (campaign) {
+      api("marketing/audience", { method: "POST", body: { audience: campaign.audience } })
+        .then(function (d) {
+          var reach = (campaign.smsEnabled ? d.counts.sms : 0) + (campaign.emailEnabled ? d.counts.email : 0);
+          openModal(
+            "Send “" + campaign.name + "”",
+            "<p>This sends <strong>" + reach + "</strong> messages — " +
+            (campaign.smsEnabled ? d.counts.sms + " texts" : "no texts") + " and " +
+            (campaign.emailEnabled ? d.counts.email + " emails" : "no emails") +
+            ".</p><p class=\"hint\">Messages go out in batches over the next few minutes. Anybody who opts out " +
+            "part way through stops receiving them straight away.</p>" +
+            '<label class="field"><span>Type SEND to confirm</span><input id="m-confirm" type="text" maxlength="8" /></label>',
+            function () {
+              if (val("m-confirm").toUpperCase() !== "SEND") {
+                return Promise.reject(new Error("Type SEND to confirm"));
+              }
+              return api("marketing/campaigns/" + campaign.id + "/send", { method: "POST" })
+                .then(function (res) {
+                  growState().editing = res.campaign;
+                  refreshGrow();
+                  return "Sending — " + res.queued.queued + " messages queued.";
+                });
+            }
+          );
+        });
+    });
+  }
+
+  function cancelCampaign() {
+    var g = growState();
+    if (!g.editing || !g.editing.id) return;
+    openModal(
+      "Cancel this campaign",
+      "<p>Anything already handed to the phone network cannot be recalled. Everything still waiting will not " +
+      "be sent.</p>",
+      function () {
+        return api("marketing/campaigns/" + g.editing.id + "/cancel", { method: "POST" })
+          .then(function (res) {
+            g.editing = res.campaign;
+            refreshGrow();
+            return res.dropped + " queued messages were stopped.";
+          });
+      }
+    );
+  }
+
+  function deleteCampaignDraft() {
+    var g = growState();
+    if (!g.editing || !g.editing.id) return;
+    openModal("Delete this draft", "<p>The draft is removed. Nothing has been sent from it.</p>", function () {
+      return api("marketing/campaigns/" + g.editing.id, { method: "DELETE" }).then(function () {
+        g.editing = null;
+        refreshGrow();
+        return "Draft deleted.";
+      });
+    });
+  }
+
+  // --- Consent --------------------------------------------------------------
+
+  function renderGrowConsent(panel) {
+    var g = growState();
+    panel.innerHTML =
+      '<div class="card">' +
+      '<p class="hint">Texting somebody a promotion is only lawful with their express permission, and the ' +
+      "record has to show where that permission came from. Marking it here is what puts a customer into the " +
+      "textable count above.</p>" +
+      '<div class="grow-grid">' +
+      '<label class="field"><span>Find a customer</span><input id="gk-q" type="search" maxlength="80" placeholder="Name, phone or email…" value="' +
+      esc(g.consent.q) + '" /></label>' +
+      '<label class="field"><span>Show</span><select id="gk-needs">' +
+      growOption("", "Anybody", g.consent.needs) +
+      growOption("sms", "Nobody has asked about texting", g.consent.needs) +
+      growOption("email", "Nobody has asked about email", g.consent.needs) +
+      "</select></label>" +
+      "</div></div>" +
+      '<div id="gk-list"><div class="loading">Loading…</div></div>';
+
+    document.getElementById("gk-q").addEventListener("input", function () {
+      var value = this.value.trim();
+      clearTimeout(g.consent.timer);
+      g.consent.timer = setTimeout(function () {
+        g.consent.q = value;
+        loadConsentList();
+      }, 300);
+    });
+    document.getElementById("gk-needs").addEventListener("change", function () {
+      g.consent.needs = this.value;
+      loadConsentList();
+    });
+
+    loadConsentList();
+  }
+
+  function loadConsentList() {
+    var g = growState();
+    var list = document.getElementById("gk-list");
+    if (!list) return;
+    list.innerHTML = '<div class="loading">Loading…</div>';
+    api("marketing/consent/customers?q=" + encodeURIComponent(g.consent.q) +
+      "&needs=" + encodeURIComponent(g.consent.needs))
+      .then(function (d) {
+        list.innerHTML = d.customers.length
+          ? '<div class="card"><table><thead><tr><th>Customer</th><th>Text messages</th><th>Email</th>' +
+            "<th></th></tr></thead><tbody>" +
+            d.customers.map(function (c) {
+              return "<tr><td>" + esc(c.name) + '<br /><span class="muted">' +
+                esc([c.phone, c.email].filter(Boolean).join(" · ") || "No contact details") + "</span></td>" +
+                "<td>" + consentCell(c.smsConsentStatus, c.smsConsentSource, c.smsOptedOutAt) + "</td>" +
+                "<td>" + consentCell(c.emailConsentStatus, c.emailConsentSource, c.emailOptedOutAt) + "</td>" +
+                '<td class="right"><button type="button" class="btn btn-ghost btn-sm" data-grow-consent="' +
+                c.id + '" data-name="' + esc(c.name) + '">Record</button></td></tr>';
+            }).join("") +
+            "</tbody></table></div>"
+          : '<div class="card"><p class="empty">Nobody matches that.</p></div>';
+      })
+      .catch(function (e) {
+        list.innerHTML = '<div class="card"><p class="empty">' + esc(e.message || "Could not load that list.") +
+          "</p></div>";
+      });
+  }
+
+  function consentCell(status, source, optedOutAt) {
+    if (optedOutAt) return '<span class="pill cancelled">Opted out</span>';
+    if (status === "granted") {
+      return '<span class="pill completed">Agreed</span>' +
+        (source ? '<br /><span class="muted">' + esc(source) + "</span>" : "");
+    }
+    if (status === "denied") return '<span class="pill cancelled">Declined</span>';
+    return '<span class="muted">Not asked</span>';
+  }
+
+  function promptConsent(customerId, name) {
+    openModal(
+      "Marketing permission — " + name,
+      '<label class="field"><span>Channel</span><select id="m-channel">' +
+      '<option value="sms">Text messages</option><option value="email">Email</option></select></label>' +
+      '<label class="field"><span>Decision</span><select id="m-decision">' +
+      '<option value="granted">They agreed to receive promotions</option>' +
+      '<option value="opted_out">They asked to stop</option>' +
+      '<option value="denied">They said no</option></select></label>' +
+      '<label class="field"><span>Where this came from</span><input id="m-source" type="text" maxlength="200" placeholder="Signed service agreement, 14 Aug 2026" /></label>' +
+      '<p class="hint">Permission to text has to be traceable to something that happened — a form they signed, ' +
+      "a box they ticked, a text they sent in. Say which.</p>",
+      function () {
+        return api("marketing/consent", {
+          method: "POST",
+          body: {
+            customerId: customerId,
+            channel: val("m-channel"),
+            action: val("m-decision"),
+            source: val("m-source")
+          }
+        }).then(function () {
+          loadConsentList();
+          refreshGrow();
+          return "Recorded.";
+        });
+      }
+    );
   }
 
   function renderCharges() {
@@ -4779,6 +5514,35 @@
       }
       var row = e.target.closest("[data-job]");
       if (row) { openJob(Number(row.dataset.job)); return; }
+
+      // --- Grow ---
+      var growTab = e.target.closest("[data-grow-tab]");
+      if (growTab) {
+        growState().tab = growTab.dataset.growTab;
+        growState().editing = null;
+        renderGrow();
+        return;
+      }
+      if (e.target.closest("[data-grow-new]")) { newCampaign(); return; }
+      var openCamp = e.target.closest("[data-grow-open]");
+      if (openCamp) { openCampaign(Number(openCamp.dataset.growOpen)); return; }
+      if (e.target.closest("[data-grow-back]")) {
+        growState().editing = null;
+        renderGrow();
+        return;
+      }
+      if (e.target.closest("[data-grow-save]")) { saveCampaign(); return; }
+      if (e.target.closest("[data-grow-test]")) { promptCampaignTest(); return; }
+      if (e.target.closest("[data-grow-schedule]")) { promptCampaignSchedule(); return; }
+      if (e.target.closest("[data-grow-send]")) { promptCampaignSend(); return; }
+      if (e.target.closest("[data-grow-cancel]")) { cancelCampaign(); return; }
+      if (e.target.closest("[data-grow-delete]")) { deleteCampaignDraft(); return; }
+      var consentBtn = e.target.closest("[data-grow-consent]");
+      if (consentBtn) {
+        promptConsent(Number(consentBtn.dataset.growConsent), consentBtn.dataset.name);
+        return;
+      }
+
       var leadRow = e.target.closest("[data-lead]");
       if (leadRow) { openLead(Number(leadRow.dataset.lead)); return; }
       if (e.target.matches("[data-close]")) { closeDrawer(); return; }

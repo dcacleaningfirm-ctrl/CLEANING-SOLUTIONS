@@ -91,6 +91,7 @@ import {
   leadStatusLabel,
   retryIntakeFailure
 } from "../../lib/lead-intake.js";
+import { handleMarketingRoute } from "../../lib/marketing-routes.js";
 
 // Read + write API for the DCA Pro Manager app. Login lives in a separate
 // function (manager-login); everything here requires a valid session cookie.
@@ -2012,6 +2013,26 @@ export default async (req: Request, context: Context) => {
           ip: row.ip,
           createdAt: row.createdAt
         }))
+      });
+    }
+
+    // --- Grow / Marketing ------------------------------------------------
+    //
+    // One gate in front of the whole section rather than a check inside each
+    // route. Marketing is the only place in the app that reads the entire
+    // contact list at once and the only place that can send to it, so the
+    // permission is tested before the request is even routed: a path this
+    // branch does not recognise is refused for a role without the permission
+    // just the same, and no new marketing route can be added later that
+    // accidentally forgets its own check.
+    if (path === "marketing" || path.startsWith("marketing/")) {
+      if (!allows("marketing")) return denied("marketing campaigns");
+      return await handleMarketingRoute({
+        path,
+        method,
+        req,
+        url,
+        account: { id: account.id, name: account.name, role: account.role }
       });
     }
 
