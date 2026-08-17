@@ -77,7 +77,9 @@
   var CREW_ROLES = ["owner", "manager", "admin", "management_specialist", "technician"];
 
   var ROLE_LABELS = {
-    owner: "Owner",
+    // Matches ROLE_LABELS in lib/manager-session.ts. The server sends the label
+    // with every row; this copy only covers an older response that did not.
+    owner: "Owner / Super Admin",
     manager: "Manager",
     admin: "Admin",
     management_specialist: "Management Specialist",
