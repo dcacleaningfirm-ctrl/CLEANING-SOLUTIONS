@@ -148,8 +148,12 @@
     "customer_name",
     "phone",
     "email",
+    "service_address",
+    "city",
+    "state",
     "zip_code",
     "preferred_date",
+    "preferred_time",
     "contact_method",
     "job_description"
   ];

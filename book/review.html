@@ -95,8 +95,12 @@
               <div class="field"><label for="customer-name">Name</label><input id="customer-name" name="customer_name" autocomplete="name" required></div>
               <div class="field"><label for="phone">Phone</label><input id="phone" name="phone" type="tel" autocomplete="tel" required></div>
               <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div>
+              <div class="field field-full"><label for="service-address">Service address <span class="field-optional">optional</span></label><input id="service-address" name="service_address" autocomplete="street-address" placeholder="Street address where the work happens"></div>
+              <div class="field"><label for="city">City <span class="field-optional">optional</span></label><input id="city" name="city" autocomplete="address-level2"></div>
+              <div class="field"><label for="state">State <span class="field-optional">optional</span></label><input id="state" name="state" autocomplete="address-level1" maxlength="20" placeholder="GA"></div>
               <div class="field"><label for="zip">Service ZIP code</label><input id="zip" name="zip_code" inputmode="numeric" autocomplete="postal-code" pattern="[0-9]{5}(-[0-9]{4})?" required></div>
               <div class="field"><label for="preferred-date">Preferred date</label><input id="preferred-date" name="preferred_date" type="date"></div>
+              <div class="field"><label for="preferred-time">Preferred arrival</label><select id="preferred-time" name="preferred_time"><option value="">No preference</option><option value="Morning (8am–12pm)">Morning (8am–12pm)</option><option value="Afternoon (12pm–4pm)">Afternoon (12pm–4pm)</option><option value="Late afternoon (4pm–6pm)">Late afternoon (4pm–6pm)</option></select></div>
               <div class="field"><label for="contact-method">Best way to reach you</label><select id="contact-method" name="contact_method"><option value="Phone">Phone</option><option value="Text">Text</option><option value="Email">Email</option></select></div>
             </div>
           </section>

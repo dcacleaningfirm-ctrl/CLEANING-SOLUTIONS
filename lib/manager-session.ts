@@ -73,10 +73,131 @@ export interface SessionPayload {
 // can still change their own code.
 const ADMIN_ROLES = ["owner", "admin", "manager"];
 
-export const CREW_ROLES = ["owner", "manager", "admin", "technician"];
+export const ROLE_OWNER = "owner";
+export const ROLE_MANAGEMENT_SPECIALIST = "management_specialist";
+
+export const CREW_ROLES = [
+  "owner",
+  "manager",
+  "admin",
+  ROLE_MANAGEMENT_SPECIALIST,
+  "technician"
+];
+
+// What each role is called on screen. The stored value stays machine-readable
+// so it can be compared without worrying about spacing or capitalisation.
+export const ROLE_LABELS: Record<string, string> = {
+  owner: "Owner",
+  manager: "Manager",
+  admin: "Admin",
+  management_specialist: "Management Specialist",
+  technician: "Technician"
+};
+
+export function normalizeRole(role: string | undefined): string {
+  return String(role || "").trim().toLowerCase();
+}
+
+export function roleLabel(role: string | undefined): string {
+  const key = normalizeRole(role);
+  return ROLE_LABELS[key] || key;
+}
 
 export function canManageCrew(role: string | undefined): boolean {
-  return ADMIN_ROLES.includes(String(role || "").trim().toLowerCase());
+  return ADMIN_ROLES.includes(normalizeRole(role));
+}
+
+// The Owner / Super Admin. Deliberately narrower than canManageCrew: an admin
+// or a manager runs the day-to-day crew list, but only the owner may touch a
+// Management Specialist account or its login code.
+export function isOwner(role: string | undefined): boolean {
+  return normalizeRole(role) === ROLE_OWNER;
+}
+
+export function isManagementSpecialist(role: string | undefined): boolean {
+  return normalizeRole(role) === ROLE_MANAGEMENT_SPECIALIST;
+}
+
+// What a signed-in account is allowed to reach. Permissions are derived from
+// the role stored on the employee row and nowhere else, so a code typed at the
+// login screen can only ever unlock whatever its own account is entitled to —
+// an admin's code cannot produce a Management Specialist session, and a
+// Management Specialist's code cannot produce an admin one.
+export const PERMISSIONS = {
+  dashboard: "dashboard",
+  book: "book",
+  leads: "leads",
+  jobs: "jobs",
+  customers: "customers",
+  crew: "crew",
+  charges: "charges",
+  imports: "imports",
+  securityLog: "security_log"
+} as const;
+
+export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
+
+const FIELD_PERMISSIONS: Permission[] = [
+  "dashboard",
+  "book",
+  "leads",
+  "jobs",
+  "customers"
+];
+
+// The office floor: everything needed to answer the phone, price a visit, work
+// the lead list and put a job on the calendar. Field crew reach the same
+// screens today, so this is the shared non-administrative set; narrowing what a
+// technician sees would be a separate decision from adding this role.
+const OFFICE_PERMISSIONS: Permission[] = [...FIELD_PERMISSIONS];
+
+const ADMIN_PERMISSIONS: Permission[] = [
+  ...OFFICE_PERMISSIONS,
+  "crew",
+  "charges",
+  "imports"
+];
+
+const ROLE_PERMISSIONS: Record<string, Permission[]> = {
+  owner: [...ADMIN_PERMISSIONS, "security_log"],
+  admin: ADMIN_PERMISSIONS,
+  manager: ADMIN_PERMISSIONS,
+  // A Management Specialist gets the office floor and nothing else: no crew
+  // list, no login codes, no custom charges, no bulk customer import.
+  management_specialist: OFFICE_PERMISSIONS,
+  technician: FIELD_PERMISSIONS
+};
+
+export function permissionsFor(role: string | undefined): Permission[] {
+  return ROLE_PERMISSIONS[normalizeRole(role)] || FIELD_PERMISSIONS;
+}
+
+export function can(role: string | undefined, permission: Permission): boolean {
+  return permissionsFor(role).includes(permission);
+}
+
+// Who may create a given account, change its role, turn its access off, or
+// reissue its login code.
+//
+// Management Specialist accounts are owner-only in every one of those
+// directions — an admin or a manager can run the rest of the crew list but
+// cannot see, reset or repoint a Management Specialist code.
+//
+// Owner accounts are owner-only for the same reason. An admin who could mint a
+// new owner, with a code of their own choosing, would hold every Management
+// Specialist power one sign-in later; keeping the owner role in the owner's
+// gift is what makes the rule above mean anything. The recovery door
+// (MANAGER_SETUP_KEY) still creates and promotes owners for the case where
+// there is no owner left to ask.
+export function canAdministerAccount(
+  actorRole: string | undefined,
+  targetRole: string | undefined
+): boolean {
+  const target = normalizeRole(targetRole);
+  if (target === ROLE_MANAGEMENT_SPECIALIST || target === ROLE_OWNER) {
+    return isOwner(actorRole);
+  }
+  return canManageCrew(actorRole);
 }
 
 // Create a signed, tamper-evident session token (payload.signature).
