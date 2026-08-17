@@ -251,6 +251,7 @@ export const NAV_SECTIONS: { view: string; label: string; permission: Permission
   { view: "leads", label: "Leads", permission: "leads" },
   { view: "jobs", label: "Jobs", permission: "jobs" },
   { view: "customers", label: "Customers", permission: "customers" },
+  { view: "grow", label: "Grow", permission: "marketing" },
   { view: "charges", label: "Custom charge", permission: "charges" },
   { view: "crew", label: "Crew", permission: "crew" }
 ];

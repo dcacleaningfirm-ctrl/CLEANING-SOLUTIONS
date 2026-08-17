@@ -943,3 +943,49 @@ tbody tr.clickable:hover { background: var(--surface-2); }
 
 #security-log table { font-size: 0.84rem; }
 #security-log .mono { font-size: 0.78rem; }
+
+/* Grow — marketing to the customers already on file
+   ------------------------------------------------------------------------ */
+
+/* What can be sent today. On a fresh site the honest answer is "nothing yet",
+   and that has to be the first thing on the screen rather than something the
+   office discovers after writing a campaign. */
+.grow-alert { display: block; }
+.grow-alert p { margin: 0 0 8px; }
+.grow-alert p:last-child { margin-bottom: 0; }
+.grow-ready { margin-bottom: 18px; }
+.grow-ready .hint { margin: 0; }
+
+.grow-tabs { margin-top: 4px; }
+
+/* An even grid, unlike the 1.4fr/1.0fr .grid-2 used for page layout: these are
+   filter boxes of equal weight, and a wide ZIP field beside a narrow date one
+   reads as though the ZIP mattered more. */
+.grow-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+.grow-filters .hint { margin: 14px 0 0; }
+
+.field.checkbox {
+  grid-auto-flow: column;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 9px;
+  align-self: end;
+  padding-bottom: 9px;
+}
+.field.checkbox input { width: 17px; height: 17px; accent-color: var(--brand); }
+
+.grow-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+.grow-actions .hint { margin: 0; flex: 1 1 240px; }
+
+/* The number of people a campaign is about to reach. Set large on purpose —
+   it is the one figure worth reading twice before pressing send. */
+.grow-count {
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 12px 0 0;
+}

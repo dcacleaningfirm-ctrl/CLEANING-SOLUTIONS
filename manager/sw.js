@@ -7,7 +7,7 @@
  *
  * Bump VERSION to push a new shell to every installed phone.
  */
-var VERSION = "dca-manager-v14";
+var VERSION = "dca-manager-v15";
 var SHELL = [
   "/manager/",
   "/manager/manager.css",
