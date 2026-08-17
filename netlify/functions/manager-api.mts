@@ -1467,6 +1467,33 @@ export default async (req: Request, context: Context) => {
         .orderBy(employees.name);
 
       const viewerIsOwner = isOwner(account.role);
+
+      // An account without the crew permission — a Management Specialist or a
+      // technician — still reaches this route, because the job and lead screens
+      // fill their "assigned to" list from it. It gets the roster as it always
+      // has, minus every field describing a login code: no code state, no
+      // lockouts, no sign-in times, for any row. The trimming happens here
+      // rather than on the screen, so those fields are absent from the response
+      // instead of merely unrendered.
+      if (!canManageCrew(account.role)) {
+        return json({
+          crew: rows.map((row) => ({
+            id: row.id,
+            name: row.name,
+            email: row.email,
+            phone: row.phone,
+            role: row.role,
+            roleLabel: roleLabel(row.role),
+            active: row.active,
+            isManagementSpecialist: isManagementSpecialist(row.role),
+            canAdminister: false
+          })),
+          canManageCrew: false,
+          isOwner: false,
+          roles: []
+        });
+      }
+
       const crew = rows.map((row) => {
         const specialist = isManagementSpecialist(row.role);
         // A Management Specialist row is a name and a role to anybody but the
