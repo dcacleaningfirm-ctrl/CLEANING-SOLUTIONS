@@ -2603,8 +2603,13 @@
 
   // What the app can say about a login code without ever revealing it. For a
   // Management Specialist row seen by anybody but the owner, the server sends
-  // nothing at all and there is genuinely nothing to show.
+  // nothing at all and there is genuinely nothing to show. An account that does
+  // not run the crew list is sent no code state for any row, so the column is
+  // simply blank for them rather than claiming the owner is hiding something.
   function codeState(e) {
+    if (!state.canManage) {
+      return '<span class="muted">—</span>';
+    }
     if (e.hasCode === null || e.hasCode === undefined) {
       return '<span class="muted">Owner only</span>';
     }
