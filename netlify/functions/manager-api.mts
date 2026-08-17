@@ -1,23 +1,47 @@
 import type { Config, Context } from "@netlify/functions";
-import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../../db/index.js";
 import {
   customers,
   employees,
+  intakeFailures,
   jobEvents,
   jobItems,
   jobs,
+  leadEvents,
+  leads,
   notifications,
-  payments
+  payments,
+  securityEvents
 } from "../../db/schema.js";
-import { newPinRecord, validatePin, verifyPin } from "../../lib/manager-pin.js";
+import {
+  generateTempPin,
+  newPinRecord,
+  validatePin,
+  verifyPin
+} from "../../lib/manager-pin.js";
 import {
   CREW_ROLES,
+  canAdministerAccount,
   canManageCrew,
   clearedCookie,
-  readSessionCookie
+  isManagementSpecialist,
+  isOwner,
+  permissionsFor,
+  readSessionCookie,
+  roleLabel
 } from "../../lib/manager-session.js";
+import {
+  LOCKOUT_MINUTES,
+  MAX_FAILED_ATTEMPTS,
+  SECURITY_EVENTS,
+  isLockedOut,
+  lockoutUntil,
+  minutesRemaining,
+  recordSecurityEvent,
+  securityEventLabel
+} from "../../lib/security-log.js";
 import {
   addressKey,
   backfill,
@@ -51,6 +75,18 @@ import {
   type AppointmentSummary,
   type NotifyChannel
 } from "../../lib/notify.js";
+import {
+  LEAD_SOURCES,
+  LEAD_SOURCE_VALUES,
+  LEAD_STATUSES,
+  LEAD_STATUS_VALUES,
+  genericAdapter,
+  ingestLead,
+  isTestLead,
+  leadSourceLabel,
+  leadStatusLabel,
+  retryIntakeFailure
+} from "../../lib/lead-intake.js";
 
 // Read + write API for the DCA Pro Manager app. Login lives in a separate
 // function (manager-login); everything here requires a valid session cookie.
@@ -794,6 +830,18 @@ export default async (req: Request, context: Context) => {
     { status: 403 }
   );
 
+  // Management Specialist accounts are the owner's to run, and so is the owner
+  // role itself — an admin who could mint an owner would hold every Management
+  // Specialist power one sign-in later. An admin or a manager keeps the rest of
+  // the crew list.
+  const ownerOnly = json(
+    {
+      error:
+        "Only the owner can create, change or reset an owner or Management Specialist account"
+    },
+    { status: 403 }
+  );
+
   try {
     // Reading the cookie is inside the try: it verifies a signature, and any
     // failure there must come back as a clean 500 rather than a stack trace.
@@ -805,12 +853,17 @@ export default async (req: Request, context: Context) => {
     // The session cookie is stateless, so the account is re-read on every
     // request. Turning someone's access off, or changing their role, then takes
     // effect immediately instead of whenever their 12-hour session runs out.
+    //
+    // It is also what settles what this session may do: permissions come from
+    // the role on this row and never from anything the browser sent, so a code
+    // typed at the login screen can only ever open the account it belongs to.
     const [account] = await db
       .select({
         id: employees.id,
         name: employees.name,
         role: employees.role,
-        active: employees.active
+        active: employees.active,
+        mustChangePin: employees.mustChangePin
       })
       .from(employees)
       .where(eq(employees.id, session.employeeId));
@@ -829,13 +882,30 @@ export default async (req: Request, context: Context) => {
           id: account.id,
           name: account.name,
           role: account.role,
-          canManageCrew: canManageCrew(account.role)
+          roleLabel: roleLabel(account.role),
+          permissions: permissionsFor(account.role),
+          canManageCrew: canManageCrew(account.role),
+          isOwner: isOwner(account.role),
+          mustChangePin: Boolean(account.mustChangePin)
         }
       });
     }
 
     if (path === "logout" && method === "POST") {
       return json({ ok: true }, { headers: { "set-cookie": clearedCookie() } });
+    }
+
+    // A temporary code gets its holder as far as this line and no further. The
+    // only thing an account with one may do is replace it, so a code somebody
+    // else knows can never be used to work in the app.
+    if (account.mustChangePin && path !== "pin") {
+      return json(
+        {
+          error: "Choose your own login code before using the app.",
+          mustChangePin: true
+        },
+        { status: 403 }
+      );
     }
 
     // --- Dashboard -------------------------------------------------------
@@ -1388,11 +1458,53 @@ export default async (req: Request, context: Context) => {
           role: employees.role,
           active: employees.active,
           // Whether a login code has been issued — never the code material.
-          hasCode: sql<boolean>`${employees.pinHash} is not null`
+          hasCode: sql<boolean>`${employees.pinHash} is not null`,
+          mustChangePin: employees.mustChangePin,
+          lockedUntil: employees.lockedUntil,
+          lastLoginAt: employees.lastLoginAt
         })
         .from(employees)
         .orderBy(employees.name);
-      return json({ crew: rows, canManageCrew: canManageCrew(account.role) });
+
+      const viewerIsOwner = isOwner(account.role);
+      const crew = rows.map((row) => {
+        const specialist = isManagementSpecialist(row.role);
+        // A Management Specialist row is a name and a role to anybody but the
+        // owner. Its code state — issued, temporary, locked — is part of what
+        // an admin must not be able to read, so it is dropped from the payload
+        // rather than merely hidden by the screen that renders it.
+        const visible = viewerIsOwner || !specialist;
+        return {
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          phone: row.phone,
+          role: row.role,
+          roleLabel: roleLabel(row.role),
+          active: row.active,
+          isManagementSpecialist: specialist,
+          hasCode: visible ? row.hasCode : null,
+          mustChangePin: visible ? Boolean(row.mustChangePin) : null,
+          locked: visible ? isLockedOut(row.lockedUntil) : null,
+          lockedMinutes: visible ? minutesRemaining(row.lockedUntil) : null,
+          lastLoginAt: visible ? row.lastLoginAt : null,
+          // What this viewer may do to this row, decided on the server and
+          // repeated to the screen so it shows the buttons that will work.
+          canAdminister: canAdministerAccount(account.role, row.role)
+        };
+      });
+
+      return json({
+        crew,
+        canManageCrew: canManageCrew(account.role),
+        isOwner: viewerIsOwner,
+        roles: CREW_ROLES.map((r) => ({
+          value: r,
+          label: roleLabel(r),
+          // Only the owner may hand out or take away the specialist role.
+          allowed: canAdministerAccount(account.role, r)
+        }))
+      });
     }
 
     // Add a crew member and issue their first login code.
@@ -1408,13 +1520,24 @@ export default async (req: Request, context: Context) => {
 
       const name = (body.name || "").trim();
       const role = (body.role || "technician").trim().toLowerCase();
-      const pin = String(body.pin || "");
       if (!name) return json({ error: "Enter a name" }, { status: 400 });
       if (!CREW_ROLES.includes(role)) {
         return json({ error: "Choose a valid role" }, { status: 400 });
       }
-      const pinProblem = validatePin(pin);
-      if (pinProblem) return json({ error: pinProblem }, { status: 400 });
+      if (!canAdministerAccount(account.role, role)) return ownerOnly;
+
+      const specialist = isManagementSpecialist(role);
+
+      // A Management Specialist never has a code chosen for them. The app draws
+      // a temporary one from the operating system's random source, stores only
+      // its hash, and shows the digits to the owner once — after which the
+      // account has to replace it before it can do anything.
+      const tempPin = specialist ? generateTempPin() : "";
+      const pin = specialist ? tempPin : String(body.pin || "");
+      if (!specialist) {
+        const pinProblem = validatePin(pin);
+        if (pinProblem) return json({ error: pinProblem }, { status: 400 });
+      }
 
       const email = (body.email || "").trim() || null;
       if (email) {
@@ -1435,15 +1558,55 @@ export default async (req: Request, context: Context) => {
           email,
           phone: (body.phone || "").trim() || null,
           active: true,
+          mustChangePin: specialist,
+          pinUpdatedAt: new Date(),
+          createdByEmployeeId: account.id,
           ...newPinRecord(pin)
         })
         .returning({ id: employees.id, name: employees.name, role: employees.role });
 
-      console.log(`crew member ${created.id} added by employee ${session.employeeId}`);
-      return json({ member: created }, { status: 201 });
+      // The function log records that an account was created and by whom. It
+      // never records the code — not here and not anywhere else.
+      console.log(
+        `crew member ${created.id} (${role}) added by employee ${session.employeeId}`
+      );
+      await recordSecurityEvent({
+        event: SECURITY_EVENTS.accountCreated,
+        employeeId: created.id,
+        employeeName: created.name,
+        employeeRole: created.role,
+        actorEmployeeId: account.id,
+        actorName: account.name,
+        actorRole: account.role,
+        detail: specialist
+          ? "Management Specialist account created with a temporary code"
+          : `Account created as ${roleLabel(role)}`,
+        outcome: "success",
+        req
+      });
+
+      return json(
+        {
+          member: { ...created, roleLabel: roleLabel(created.role) },
+          // Returned exactly once, to the owner who just created the account,
+          // over the same authenticated request. It is never stored in plain
+          // text and cannot be retrieved again — a lost temporary code is
+          // replaced by issuing a new one.
+          ...(specialist
+            ? {
+                tempPin,
+                mustChangePin: true,
+                tempPinNotice:
+                  "Give this code to the Management Specialist in person. It is shown once, and they must choose their own code the first time they sign in."
+              }
+            : {})
+        },
+        { status: 201 }
+      );
     }
 
-    // Change your own login code. Available to every signed-in crew member.
+    // Change your own login code. Available to every signed-in crew member, and
+    // the one thing an account holding a temporary code is allowed to do.
     if (path === "pin" && method === "POST") {
       const body = (await req.json().catch(() => ({}))) as {
         currentPin?: string;
@@ -1462,7 +1625,52 @@ export default async (req: Request, context: Context) => {
       if (!me || !me.pinHash || !me.pinSalt) {
         return json({ error: "Not authenticated" }, { status: 401 });
       }
+
+      // This is the one route an account holding a temporary code can reach, so
+      // it gets the same brake the login screen has: guessing the current code
+      // from behind a session is no cheaper than guessing it from the front.
+      if (isLockedOut(me.lockedUntil)) {
+        return json(
+          {
+            error: `Too many incorrect codes. Try again in ${minutesRemaining(me.lockedUntil)} minute(s).`
+          },
+          { status: 429 }
+        );
+      }
+
       if (!verifyPin(currentPin, me.pinHash, me.pinSalt)) {
+        const attempts = Number(me.failedPinAttempts || 0) + 1;
+        const locking = attempts >= MAX_FAILED_ATTEMPTS;
+        await db
+          .update(employees)
+          .set({
+            failedPinAttempts: locking ? 0 : attempts,
+            lastFailedPinAt: new Date(),
+            ...(locking ? { lockedUntil: lockoutUntil() } : {})
+          })
+          .where(eq(employees.id, me.id));
+        await recordSecurityEvent({
+          event: locking
+            ? SECURITY_EVENTS.loginLocked
+            : SECURITY_EVENTS.loginFailed,
+          employeeId: me.id,
+          employeeName: me.name,
+          employeeRole: me.role,
+          actorEmployeeId: me.id,
+          actorName: me.name,
+          actorRole: me.role,
+          detail: locking
+            ? `Locked after ${MAX_FAILED_ATTEMPTS} incorrect codes while changing own code`
+            : `Wrong current code given while changing own code (attempt ${attempts} of ${MAX_FAILED_ATTEMPTS})`,
+          outcome: locking ? "locked" : "rejected",
+          req
+        });
+        if (locking) {
+          return json(
+            { error: `Too many incorrect codes. Try again in ${LOCKOUT_MINUTES} minute(s).` },
+            { status: 429 }
+          );
+        }
         return json({ error: "Current code is incorrect" }, { status: 403 });
       }
       if (currentPin === newPin) {
@@ -1473,10 +1681,32 @@ export default async (req: Request, context: Context) => {
 
       await db
         .update(employees)
-        .set(newPinRecord(newPin))
+        .set({
+          ...newPinRecord(newPin),
+          // Whatever brought them here — a routine change or a temporary code
+          // they were handed — they now hold a code nobody else knows.
+          mustChangePin: false,
+          pinUpdatedAt: new Date(),
+          failedPinAttempts: 0,
+          lockedUntil: null
+        })
         .where(eq(employees.id, me.id));
       console.log(`employee ${me.id} changed their own login code`);
-      return json({ ok: true });
+      await recordSecurityEvent({
+        event: SECURITY_EVENTS.pinChanged,
+        employeeId: me.id,
+        employeeName: me.name,
+        employeeRole: me.role,
+        actorEmployeeId: me.id,
+        actorName: me.name,
+        actorRole: me.role,
+        detail: me.mustChangePin
+          ? "Replaced a temporary code with their own"
+          : "Changed their own login code",
+        outcome: "success",
+        req
+      });
+      return json({ ok: true, mustChangePin: false });
     }
 
     // Issue a new login code for another crew member.
@@ -1484,23 +1714,68 @@ export default async (req: Request, context: Context) => {
     if (crewPinMatch && method === "POST") {
       if (!canManageCrew(account.role)) return forbidden;
       const id = Number(crewPinMatch[1]);
-      const body = (await req.json().catch(() => ({}))) as { newPin?: string };
-      const newPin = String(body.newPin || "");
-      const problem = validatePin(newPin);
-      if (problem) return json({ error: problem }, { status: 400 });
 
       const [target] = await db
-        .select({ id: employees.id, name: employees.name })
+        .select({ id: employees.id, name: employees.name, role: employees.role })
         .from(employees)
         .where(eq(employees.id, id));
       if (!target) return json({ error: "Unknown crew member" }, { status: 404 });
+      if (!canAdministerAccount(account.role, target.role)) return ownerOnly;
+
+      const specialist = isManagementSpecialist(target.role);
+      const body = (await req.json().catch(() => ({}))) as { newPin?: string };
+
+      // Resetting a Management Specialist code works the same way as issuing
+      // the first one: the app draws it, the owner reads it once and hands it
+      // over, and the specialist replaces it at the next sign-in. The owner
+      // never sets a code they would then know permanently.
+      const tempPin = specialist ? generateTempPin() : "";
+      const newPin = specialist ? tempPin : String(body.newPin || "");
+      if (!specialist) {
+        const problem = validatePin(newPin);
+        if (problem) return json({ error: problem }, { status: 400 });
+      }
 
       await db
         .update(employees)
-        .set(newPinRecord(newPin))
+        .set({
+          ...newPinRecord(newPin),
+          mustChangePin: specialist,
+          pinUpdatedAt: new Date(),
+          // A reset also clears a lockout: the person whose code was just
+          // replaced should not have to wait out somebody else's guessing.
+          failedPinAttempts: 0,
+          lockedUntil: null
+        })
         .where(eq(employees.id, id));
       console.log(`login code reissued for employee ${id} by employee ${session.employeeId}`);
-      return json({ ok: true, member: target });
+      await recordSecurityEvent({
+        event: SECURITY_EVENTS.pinReset,
+        employeeId: target.id,
+        employeeName: target.name,
+        employeeRole: target.role,
+        actorEmployeeId: account.id,
+        actorName: account.name,
+        actorRole: account.role,
+        detail: specialist
+          ? "Management Specialist code reset to a new temporary code"
+          : "Login code reissued",
+        outcome: "success",
+        req
+      });
+
+      return json({
+        ok: true,
+        member: { id: target.id, name: target.name },
+        ...(specialist
+          ? {
+              tempPin,
+              mustChangePin: true,
+              tempPinNotice:
+                "Give this code to the Management Specialist in person. It is shown once, and they must choose their own code the next time they sign in."
+            }
+          : {})
+      });
     }
 
     // Change a crew member's role, or turn their access on and off.
@@ -1516,12 +1791,17 @@ export default async (req: Request, context: Context) => {
       const [target] = await db.select().from(employees).where(eq(employees.id, id));
       if (!target) return json({ error: "Unknown crew member" }, { status: 404 });
 
+      // Owner-only in both directions: an admin can neither touch an existing
+      // Management Specialist nor promote somebody into the role.
+      if (!canAdministerAccount(account.role, target.role)) return ownerOnly;
+
       const updates: { role?: string; active?: boolean } = {};
       if (typeof body.role === "string") {
         const role = body.role.trim().toLowerCase();
         if (!CREW_ROLES.includes(role)) {
           return json({ error: "Choose a valid role" }, { status: 400 });
         }
+        if (!canAdministerAccount(account.role, role)) return ownerOnly;
         updates.role = role;
       }
       if (typeof body.active === "boolean") {
@@ -1552,10 +1832,115 @@ export default async (req: Request, context: Context) => {
       }
 
       if (Object.keys(updates).length > 0) {
-        await db.update(employees).set(updates).where(eq(employees.id, id));
+        // Changing somebody into or out of the specialist role starts them on
+        // a code the owner has to reissue, rather than carrying the old one
+        // across a change in what it unlocks.
+        const becomingSpecialist =
+          updates.role !== undefined &&
+          isManagementSpecialist(updates.role) &&
+          !isManagementSpecialist(target.role);
+
+        await db
+          .update(employees)
+          .set({
+            ...updates,
+            ...(becomingSpecialist ? { mustChangePin: true } : {})
+          })
+          .where(eq(employees.id, id));
         console.log(`crew member ${id} updated by employee ${session.employeeId}`);
+
+        if (updates.role !== undefined && updates.role !== target.role) {
+          await recordSecurityEvent({
+            event: SECURITY_EVENTS.roleChanged,
+            employeeId: target.id,
+            employeeName: target.name,
+            employeeRole: updates.role,
+            actorEmployeeId: account.id,
+            actorName: account.name,
+            actorRole: account.role,
+            detail: `Role changed from ${roleLabel(target.role)} to ${roleLabel(updates.role)}`,
+            outcome: "success",
+            req
+          });
+        }
+        if (updates.active !== undefined && updates.active !== target.active) {
+          await recordSecurityEvent({
+            event: SECURITY_EVENTS.accessChanged,
+            employeeId: target.id,
+            employeeName: target.name,
+            employeeRole: target.role,
+            actorEmployeeId: account.id,
+            actorName: account.name,
+            actorRole: account.role,
+            detail: updates.active
+              ? "App access turned on"
+              : "App access turned off",
+            outcome: "success",
+            req
+          });
+        }
       }
-      return json({ ok: true });
+      return json({
+        ok: true,
+        ...(updates.role !== undefined &&
+        isManagementSpecialist(updates.role) &&
+        !isManagementSpecialist(target.role)
+          ? {
+              notice:
+                "Issue a new login code for this account — a Management Specialist starts on a temporary code."
+            }
+          : {})
+      });
+    }
+
+    // --- Security audit log ----------------------------------------------
+    //
+    // Owner-only. It records who signed in, who failed, whose code was reset
+    // and who changed a role, so the movement of access can be reviewed after
+    // the fact by the one person entitled to review it.
+    if (path === "security-log" && method === "GET") {
+      if (!isOwner(account.role)) {
+        return json(
+          { error: "Only the owner can read the security log" },
+          { status: 403 }
+        );
+      }
+      const limit = Math.min(
+        Math.max(Number(url.searchParams.get("limit")) || 100, 1),
+        300
+      );
+      const wantEvent = (url.searchParams.get("event") || "").trim();
+      const wantEmployee = Number(url.searchParams.get("employeeId")) || 0;
+
+      const conditions: Array<SQL | undefined> = [];
+      if (wantEvent) conditions.push(eq(securityEvents.event, wantEvent));
+      if (wantEmployee) conditions.push(eq(securityEvents.employeeId, wantEmployee));
+      const filters = conditions.filter((c): c is SQL => Boolean(c));
+
+      const rows = await db
+        .select()
+        .from(securityEvents)
+        .where(filters.length ? and(...filters) : undefined)
+        .orderBy(desc(securityEvents.createdAt), desc(securityEvents.id))
+        .limit(limit);
+
+      return json({
+        events: rows.map((row) => ({
+          id: row.id,
+          event: row.event,
+          label: securityEventLabel(row.event),
+          employeeId: row.employeeId,
+          employeeName: row.employeeName,
+          employeeRole: row.employeeRole,
+          employeeRoleLabel: row.employeeRole ? roleLabel(row.employeeRole) : null,
+          actorName: row.actorName,
+          actorRole: row.actorRole ? roleLabel(row.actorRole) : null,
+          detail: row.detail,
+          outcome: row.outcome,
+          ip: row.ip,
+          createdAt: row.createdAt
+        }))
+      });
     }
 
     // --- Customers -------------------------------------------------------
@@ -2334,12 +2719,573 @@ export default async (req: Request, context: Context) => {
       return json(job);
     }
 
+    // --- Leads / requests -------------------------------------------------
+    // Everything that arrived from outside the office, whatever brought it in.
+    // The list is deliberately one table with a source column rather than a
+    // screen per channel: the office works a lead the same way whether it came
+    // from the website, a directory or a phone call.
+
+    // The vocabulary the console builds its filters from, so a source added in
+    // lib/lead-intake.ts appears in the app without a second edit here.
+    if (path === "leads/vocabulary" && method === "GET") {
+      return json({ sources: LEAD_SOURCES, statuses: LEAD_STATUSES });
+    }
+
+    // Requests that reached the site but could not be filed. The submission
+    // itself is never lost — Netlify keeps its own copy — so this is the queue
+    // of imports to try again.
+    if (path === "leads/failures" && method === "GET") {
+      const rows = await db
+        .select()
+        .from(intakeFailures)
+        .where(eq(intakeFailures.status, "open"))
+        .orderBy(desc(intakeFailures.createdAt))
+        .limit(50);
+      return json({
+        failures: rows.map((row) => ({
+          id: row.id,
+          source: row.source,
+          sourceLabel: leadSourceLabel(row.source),
+          sourceRef: row.sourceRef,
+          formName: row.formName,
+          error: row.error,
+          attempts: row.attempts,
+          createdAt: row.createdAt,
+          lastAttemptAt: row.lastAttemptAt
+        }))
+      });
+    }
+
+    const failureRetryMatch = path.match(/^leads\/failures\/(\d+)\/retry$/);
+    if (failureRetryMatch && method === "POST") {
+      if (!canManageCrew(account.role)) return forbidden;
+      const id = Number(failureRetryMatch[1]);
+      const [failure] = await db
+        .select()
+        .from(intakeFailures)
+        .where(eq(intakeFailures.id, id));
+      if (!failure) return json({ error: "That import is no longer listed" }, { status: 404 });
+      if (failure.status === "resolved") {
+        return json({ ok: true, leadId: failure.leadId, alreadyResolved: true });
+      }
+
+      try {
+        const result = await retryIntakeFailure(failure);
+        await db.insert(leadEvents).values({
+          leadId: result.lead.id,
+          employeeId: account.id,
+          kind: "imported",
+          message: `${account.name} retried the failed import and it came through`
+        });
+        console.log(`intake failure ${id} retried by employee ${account.id}`);
+        return json({ ok: true, leadId: result.lead.id });
+      } catch (retryError) {
+        const message =
+          retryError instanceof Error ? retryError.message : "The import failed again";
+        await db
+          .update(intakeFailures)
+          .set({
+            attempts: failure.attempts + 1,
+            error: message.slice(0, 2000),
+            lastAttemptAt: new Date()
+          })
+          .where(eq(intakeFailures.id, id));
+        return json({ error: `That import failed again: ${message}` }, { status: 502 });
+      }
+    }
+
+    if (path === "leads" && method === "GET") {
+      const status = (url.searchParams.get("status") || "").trim();
+      const source = (url.searchParams.get("source") || "").trim();
+      const service = (url.searchParams.get("service") || "").trim();
+      const promotion = (url.searchParams.get("promotion") || "").trim();
+      const from = (url.searchParams.get("from") || "").trim();
+      const to = (url.searchParams.get("to") || "").trim();
+      const q = (url.searchParams.get("q") || "").trim();
+
+      // Everything except the status chips, so the count on each chip says how
+      // many requests that chip would show under the filters already in force.
+      const base: Array<SQL | undefined> = [];
+      if (source && LEAD_SOURCE_VALUES.includes(source)) base.push(eq(leads.source, source));
+      if (service) base.push(ilike(leads.service, `%${service.replace(/[\\%_]/g, "\\$&")}%`));
+      if (promotion) {
+        base.push(ilike(leads.promotionCode, `%${promotion.replace(/[\\%_]/g, "\\$&")}%`));
+      }
+      // A date range the office types is read in its own calendar days: "to" is
+      // inclusive, so a range of one day shows that day's requests.
+      if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
+        base.push(sql`${leads.submittedAt} >= ${from + "T00:00:00"}::timestamp`);
+      }
+      if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        base.push(sql`${leads.submittedAt} < (${to + "T00:00:00"}::timestamp + interval '1 day')`);
+      }
+      if (q) {
+        const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
+        const digits = q.replace(/\D/g, "");
+        base.push(
+          or(
+            ilike(leads.customerName, like),
+            ilike(leads.email, like),
+            ilike(leads.address, like),
+            ilike(leads.promotionCode, like),
+            digits.length >= 3
+              ? sql`regexp_replace(coalesce(${leads.phone}, ''), '[^0-9]', '', 'g') like ${"%" + digits + "%"}`
+              : undefined
+          )
+        );
+      }
+
+      const conditions = base.filter((part): part is SQL => Boolean(part));
+      const baseFilter = conditions.length ? and(...conditions) : undefined;
+      const statusFilter =
+        status && LEAD_STATUS_VALUES.includes(status) ? eq(leads.status, status) : undefined;
+      const listFilter =
+        baseFilter && statusFilter ? and(baseFilter, statusFilter) : statusFilter || baseFilter;
+
+      const rows = await db
+        .select({
+          id: leads.id,
+          customerId: leads.customerId,
+          jobId: leads.jobId,
+          source: leads.source,
+          status: leads.status,
+          campaign: leads.campaign,
+          customerName: leads.customerName,
+          phone: leads.phone,
+          email: leads.email,
+          city: leads.city,
+          state: leads.state,
+          zip: leads.zip,
+          service: leads.service,
+          promotionCode: leads.promotionCode,
+          promotionName: leads.promotionName,
+          totalCents: leads.totalCents,
+          requestedDate: leads.requestedDate,
+          requestedTime: leads.requestedTime,
+          customerNotes: leads.customerNotes,
+          submittedAt: leads.submittedAt,
+          updatedAt: leads.updatedAt,
+          assignedName: employees.name
+        })
+        .from(leads)
+        .leftJoin(employees, eq(leads.assignedTo, employees.id))
+        .where(listFilter)
+        .orderBy(desc(leads.submittedAt))
+        .limit(300);
+
+      const countRows = await db
+        .select({ status: leads.status, count: sql<number>`cast(count(*) as int)` })
+        .from(leads)
+        .where(baseFilter)
+        .groupBy(leads.status);
+      const byStatus: Record<string, number> = {};
+      for (const row of countRows) byStatus[row.status] = row.count;
+
+      // The values actually present, so the service and promotion menus only
+      // ever offer something that will match a row.
+      const serviceRows = await db
+        .selectDistinct({ value: leads.service })
+        .from(leads)
+        .where(sql`${leads.service} is not null and ${leads.service} <> ''`)
+        .orderBy(leads.service)
+        .limit(60);
+      const promoRows = await db
+        .selectDistinct({ value: leads.promotionCode })
+        .from(leads)
+        .where(sql`${leads.promotionCode} is not null and ${leads.promotionCode} <> ''`)
+        .orderBy(leads.promotionCode)
+        .limit(60);
+
+      const [openFailures] = await db
+        .select({ count: sql<number>`cast(count(*) as int)` })
+        .from(intakeFailures)
+        .where(eq(intakeFailures.status, "open"));
+
+      return json({
+        leads: rows.map((row) => ({
+          ...row,
+          sourceLabel: leadSourceLabel(row.source),
+          statusLabel: leadStatusLabel(row.status),
+          isTest: isTestLead(row)
+        })),
+        byStatus,
+        total: Object.values(byStatus).reduce((sum, n) => sum + n, 0),
+        services: serviceRows.map((r) => r.value).filter(Boolean),
+        promotions: promoRows.map((r) => r.value).filter(Boolean),
+        sources: LEAD_SOURCES,
+        statuses: LEAD_STATUSES,
+        openFailures: openFailures?.count || 0
+      });
+    }
+
+    // A request taken by hand: a phone call, a walk-in, a note passed across
+    // the office. Same table, same statuses, same conversion — only the source
+    // is different, which is the whole point of the intake being shared.
+    if (path === "leads" && method === "POST") {
+      const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const source = String(body.source || "phone").trim();
+      if (!LEAD_SOURCE_VALUES.includes(source)) {
+        return json({ error: "Choose where this request came from" }, { status: 400 });
+      }
+      if (!String(body.customerName || body.name || "").trim()) {
+        return json({ error: "Enter the customer's name" }, { status: 400 });
+      }
+      if (!String(body.phone || "").trim() && !String(body.email || "").trim()) {
+        return json(
+          { error: "Enter a phone number or an email so somebody can call them back" },
+          { status: 400 }
+        );
+      }
+
+      const draft = genericAdapter(body, { source });
+      const result = await ingestLead(draft);
+      await db.insert(leadEvents).values({
+        leadId: result.lead.id,
+        employeeId: account.id,
+        kind: "note",
+        message: `${account.name} added this request by hand`
+      });
+      console.log(`lead ${result.lead.id} added by employee ${account.id}`);
+      return json(await loadLead(result.lead.id), { status: 201 });
+    }
+
+    const leadMatch = path.match(/^leads\/(\d+)$/);
+    if (leadMatch && method === "GET") {
+      const detail = await loadLead(Number(leadMatch[1]));
+      if (!detail) return json({ error: "That request no longer exists" }, { status: 404 });
+      return json(detail);
+    }
+
+    // Working the lead: who owns it, where it has got to, and corrections to
+    // what was submitted. The customer's own record is edited through the
+    // customers endpoint, so one account is never described in two places.
+    if (leadMatch && method === "PATCH") {
+      const id = Number(leadMatch[1]);
+      const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const [existing] = await db.select().from(leads).where(eq(leads.id, id));
+      if (!existing) return json({ error: "That request no longer exists" }, { status: 404 });
+
+      const updates: Record<string, string | number | Date | null> = {};
+      const changed: string[] = [];
+
+      if (typeof body.status === "string" && body.status !== existing.status) {
+        if (!LEAD_STATUS_VALUES.includes(body.status)) {
+          return json({ error: "That is not a lead status" }, { status: 400 });
+        }
+        updates.status = body.status;
+        changed.push(`status to ${leadStatusLabel(body.status)}`);
+      }
+
+      if (body.assignedTo !== undefined) {
+        const raw = body.assignedTo;
+        if (raw === null || raw === "") {
+          if (existing.assignedTo !== null) {
+            updates.assignedTo = null;
+            changed.push("owner to nobody");
+          }
+        } else {
+          const assignedTo = Number(raw);
+          const [emp] = await db
+            .select({ id: employees.id, name: employees.name, active: employees.active })
+            .from(employees)
+            .where(eq(employees.id, assignedTo));
+          if (!emp || !emp.active) {
+            return json({ error: "Choose an active crew member" }, { status: 400 });
+          }
+          if (existing.assignedTo !== assignedTo) {
+            updates.assignedTo = assignedTo;
+            changed.push(`owner to ${emp.name}`);
+          }
+        }
+      }
+
+      const LEAD_TEXT_FIELDS = [
+        { key: "campaign", label: "campaign", max: 120 },
+        { key: "promotionCode", label: "promotion code", max: 60 },
+        { key: "promotionName", label: "promotion", max: 200 },
+        { key: "service", label: "service", max: 200 },
+        { key: "requestedDate", label: "requested date", max: 40 },
+        { key: "requestedTime", label: "requested time", max: 80 },
+        { key: "customerNotes", label: "notes", max: 4000 }
+      ] as const;
+
+      for (const field of LEAD_TEXT_FIELDS) {
+        const raw = body[field.key];
+        if (typeof raw !== "string") continue;
+        const value = raw.trim().slice(0, field.max) || null;
+        if ((existing[field.key] || null) === value) continue;
+        updates[field.key] = value;
+        changed.push(field.label);
+      }
+
+      if (!changed.length) {
+        return json(await loadLead(id));
+      }
+
+      updates.updatedAt = new Date();
+      await db.update(leads).set(updates).where(eq(leads.id, id));
+      await db.insert(leadEvents).values({
+        leadId: id,
+        employeeId: account.id,
+        kind: updates.status ? "status" : "note",
+        message: `${account.name} changed the ${changed.join(", ")}`
+      });
+      if (existing.customerId) {
+        await db
+          .update(customers)
+          .set({ lastActivityAt: new Date() })
+          .where(eq(customers.id, existing.customerId));
+      }
+
+      console.log(`lead ${id} updated by employee ${account.id}`);
+      return json(await loadLead(id));
+    }
+
+    const leadNoteMatch = path.match(/^leads\/(\d+)\/notes$/);
+    if (leadNoteMatch && method === "POST") {
+      const id = Number(leadNoteMatch[1]);
+      const body = (await req.json().catch(() => ({}))) as { message?: string };
+      const message = (body.message || "").trim().slice(0, 2000);
+      if (!message) return json({ error: "Note is empty" }, { status: 400 });
+      const [existing] = await db.select({ id: leads.id }).from(leads).where(eq(leads.id, id));
+      if (!existing) return json({ error: "That request no longer exists" }, { status: 404 });
+      await db.insert(leadEvents).values({
+        leadId: id,
+        employeeId: account.id,
+        kind: "note",
+        message
+      });
+      await db.update(leads).set({ updatedAt: new Date() }).where(eq(leads.id, id));
+      return json(await loadLead(id));
+    }
+
+    // Turning a request into work. This is the one place a lead touches the
+    // calendar, and it goes through the same appointment rules a phone booking
+    // does — including the double-booking warning — so a converted lead is an
+    // ordinary job from the moment it exists.
+    const convertMatch = path.match(/^leads\/(\d+)\/convert$/);
+    if (convertMatch && method === "POST") {
+      const id = Number(convertMatch[1]);
+      const body = (await req.json().catch(() => ({}))) as {
+        serviceType?: string;
+        scheduledFor?: string;
+        durationMinutes?: number;
+        assignedTo?: number | null;
+        priceCents?: number;
+        address?: string;
+        notes?: string;
+        force?: boolean;
+      };
+
+      const [lead] = await db.select().from(leads).where(eq(leads.id, id));
+      if (!lead) return json({ error: "That request no longer exists" }, { status: 404 });
+      if (lead.jobId) {
+        return json(
+          { error: `That request is already booked as job #${lead.jobId}`, jobId: lead.jobId },
+          { status: 409 }
+        );
+      }
+
+      const serviceType = (body.serviceType || lead.service || "").trim();
+      if (!serviceType) {
+        return json({ error: "Say what is being booked" }, { status: 400 });
+      }
+
+      const when = readAppointmentTime(body.scheduledFor);
+      if (!when.at) return json({ error: when.error }, { status: 400 });
+      const length = readDuration(body.durationMinutes);
+      if (!length.minutes) return json({ error: length.error }, { status: 400 });
+
+      const priceCents =
+        body.priceCents === undefined ? lead.totalCents : Math.round(Number(body.priceCents));
+      if (!Number.isFinite(priceCents) || priceCents < 0 || priceCents > MAX_JOB_TOTAL_CENTS) {
+        return json({ error: "Check the total — it is outside the allowed range" }, { status: 400 });
+      }
+
+      let assignedTo: number | null = null;
+      if (body.assignedTo !== undefined && body.assignedTo !== null && String(body.assignedTo) !== "") {
+        assignedTo = Number(body.assignedTo);
+        const [emp] = await db
+          .select({ id: employees.id, active: employees.active })
+          .from(employees)
+          .where(eq(employees.id, assignedTo));
+        if (!emp || !emp.active) {
+          return json({ error: "Choose an active crew member" }, { status: 400 });
+        }
+      }
+
+      // A request with no contact details never got an account of its own.
+      // Booking it is the moment one is owed.
+      let customer: typeof customers.$inferSelect | null = null;
+      if (lead.customerId) {
+        const [found] = await db.select().from(customers).where(eq(customers.id, lead.customerId));
+        customer = found || null;
+      }
+      if (!customer) {
+        const [created] = await db
+          .insert(customers)
+          .values({
+            name: lead.customerName.slice(0, 120),
+            phone: lead.phone,
+            email: lead.email,
+            address: lead.address,
+            city: lead.city,
+            state: lead.state,
+            zip: lead.zip,
+            leadSource: leadSourceLabel(lead.source),
+            service: lead.service,
+            notes: `Created by ${account.name} while booking a ${leadSourceLabel(lead.source)} request`,
+            cloverSyncStatus: "pending",
+            lastActivityAt: new Date()
+          })
+          .returning();
+        customer = created;
+        await db.update(leads).set({ customerId: customer.id }).where(eq(leads.id, id));
+      }
+
+      if (assignedTo !== null && !body.force) {
+        const conflicts = await findConflicts(assignedTo, when.at, length.minutes);
+        if (conflicts.length) {
+          return json(
+            { error: "That crew member is already booked at that time", conflicts },
+            { status: 409 }
+          );
+        }
+      }
+
+      const address =
+        (body.address || "").trim() ||
+        [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ") ||
+        [customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(", ") ||
+        null;
+
+      // What the customer told us, carried onto the job so the crew reads it at
+      // the door rather than in a tab nobody opens.
+      const jobNotes =
+        (body.notes || "").trim().slice(0, 2000) ||
+        [
+          lead.customerNotes,
+          lead.promotionCode ? `Promotion ${lead.promotionCode}` : null,
+          lead.serviceDetail ? `Quoted: ${lead.serviceDetail}` : null
+        ]
+          .filter(Boolean)
+          .join("\n")
+          .slice(0, 2000) ||
+        null;
+
+      const [job] = await db
+        .insert(jobs)
+        .values({
+          customerId: customer.id,
+          assignedTo,
+          serviceType: serviceType.slice(0, 120),
+          status: "scheduled",
+          priceCents,
+          scheduledFor: when.at,
+          durationMinutes: length.minutes,
+          // Where the work came from stays true all the way to the job, so the
+          // revenue a source produced can be read off the jobs table.
+          source: lead.source,
+          bookedBy: account.id,
+          address,
+          notes: jobNotes
+        })
+        .returning({ id: jobs.id });
+
+      await db.insert(jobEvents).values({
+        jobId: job.id,
+        employeeId: account.id,
+        kind: "created",
+        message:
+          `Booked by ${account.name} from a ${leadSourceLabel(lead.source)} request ` +
+          `(lead #${lead.id}) for ${spellOutAppointment(when.at)}`
+      });
+
+      await db
+        .update(leads)
+        .set({ jobId: job.id, status: "scheduled", updatedAt: new Date() })
+        .where(eq(leads.id, id));
+
+      await db.insert(leadEvents).values({
+        leadId: id,
+        employeeId: account.id,
+        kind: "converted",
+        message: `${account.name} booked this request as job #${job.id} for ${spellOutAppointment(when.at)}`
+      });
+
+      await db
+        .update(customers)
+        .set({ lastActivityAt: new Date() })
+        .where(eq(customers.id, customer.id));
+
+      console.log(`lead ${id} converted to job ${job.id} by employee ${account.id}`);
+      return json({ jobId: job.id, lead: await loadLead(id) }, { status: 201 });
+    }
+
     return json({ error: "Not found" }, { status: 404 });
   } catch (err) {
     console.error("manager-api error", err);
     return json({ error: "Server error" }, { status: 500 });
   }
 };
+
+// One request with everything the console shows around it: the account it was
+// filed under, the appointment it became, and its own trail.
+async function loadLead(id: number) {
+  const [lead] = await db
+    .select({
+      lead: leads,
+      assignedName: employees.name
+    })
+    .from(leads)
+    .leftJoin(employees, eq(leads.assignedTo, employees.id))
+    .where(eq(leads.id, id));
+  if (!lead) return null;
+
+  const [customer] = lead.lead.customerId
+    ? await db.select().from(customers).where(eq(customers.id, lead.lead.customerId))
+    : [null];
+
+  const [job] = lead.lead.jobId
+    ? await db
+        .select({
+          id: jobs.id,
+          serviceType: jobs.serviceType,
+          status: jobs.status,
+          scheduledFor: jobs.scheduledFor,
+          priceCents: jobs.priceCents
+        })
+        .from(jobs)
+        .where(eq(jobs.id, lead.lead.jobId))
+    : [null];
+
+  const events = await db
+    .select({
+      id: leadEvents.id,
+      kind: leadEvents.kind,
+      message: leadEvents.message,
+      createdAt: leadEvents.createdAt,
+      employeeName: employees.name
+    })
+    .from(leadEvents)
+    .leftJoin(employees, eq(leadEvents.employeeId, employees.id))
+    .where(eq(leadEvents.leadId, id))
+    .orderBy(desc(leadEvents.createdAt))
+    .limit(50);
+
+  return {
+    lead: {
+      ...lead.lead,
+      assignedName: lead.assignedName,
+      sourceLabel: leadSourceLabel(lead.lead.source),
+      statusLabel: leadStatusLabel(lead.lead.status),
+      isTest: isTestLead(lead.lead)
+    },
+    customer: customer || null,
+    job: job || null,
+    events
+  };
+}
 
 async function loadJob(id: number) {
   const assignee = employees;
@@ -2841,6 +3787,50 @@ async function buildDashboard() {
     .innerJoin(jobs, eq(payments.jobId, jobs.id))
     .where(and(eq(payments.status, "paid"), ne(jobs.status, "cancelled")));
 
+  // --- The intake counters ------------------------------------------------
+  // What came in today, how much of it the website produced, and how far the
+  // office has got with the rest.
+  const [newLeadsToday] = await db
+    .select({ count: sql<number>`cast(count(*) as int)` })
+    .from(leads)
+    .where(and(gte(leads.submittedAt, startOfToday), lt(leads.submittedAt, startOfTomorrow)));
+
+  const [websiteLeads] = await db
+    .select({ count: sql<number>`cast(count(*) as int)` })
+    .from(leads)
+    .where(eq(leads.source, "website"));
+
+  const leadStatusRows = await db
+    .select({ status: leads.status, count: sql<number>`cast(count(*) as int)` })
+    .from(leads)
+    .groupBy(leads.status);
+  const leadsByStatus: Record<string, number> = {};
+  for (const row of leadStatusRows) leadsByStatus[row.status] = row.count;
+
+  const [openIntakeFailures] = await db
+    .select({ count: sql<number>`cast(count(*) as int)` })
+    .from(intakeFailures)
+    .where(eq(intakeFailures.status, "open"));
+
+  // The newest requests nobody has touched yet, so the dashboard shows work to
+  // pick up rather than only work already booked.
+  const newLeads = await db
+    .select({
+      id: leads.id,
+      customerName: leads.customerName,
+      phone: leads.phone,
+      service: leads.service,
+      promotionCode: leads.promotionCode,
+      totalCents: leads.totalCents,
+      source: leads.source,
+      status: leads.status,
+      submittedAt: leads.submittedAt
+    })
+    .from(leads)
+    .where(sql`${leads.status} in ('new','contacted')`)
+    .orderBy(desc(leads.submittedAt))
+    .limit(6);
+
   return {
     stats: {
       jobsToday: today?.count || 0,
@@ -2851,6 +3841,19 @@ async function buildDashboard() {
       customers: customerCount?.count || 0,
       activeCrew: crewCount?.count || 0
     },
+    leadStats: {
+      newToday: newLeadsToday?.count || 0,
+      website: websiteLeads?.count || 0,
+      scheduled: leadsByStatus.scheduled || 0,
+      completed: leadsByStatus.completed || 0,
+      open: (leadsByStatus.new || 0) + (leadsByStatus.contacted || 0) + (leadsByStatus.estimate_sent || 0),
+      failedImports: openIntakeFailures?.count || 0
+    },
+    newLeads: newLeads.map((row) => ({
+      ...row,
+      sourceLabel: leadSourceLabel(row.source),
+      statusLabel: leadStatusLabel(row.status)
+    })),
     byStatus,
     upcoming,
     mapJobs,

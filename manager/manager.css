@@ -845,3 +845,101 @@ tbody tr.clickable:hover { background: var(--surface-2); }
 @media (max-width: 680px) {
   .pay-summary, .pay-grid, .channel-row { grid-template-columns: 1fr; }
 }
+
+/* ---------- Leads / requests ----------
+   The intake screen: everything that asked for work but has not been booked.
+   It reuses the cards, tables and pills the rest of the console is built from,
+   so a request reads the same way a job does. Only the things a request has and
+   a job does not — a source, a promotion, a quote that is still an offer — get
+   rules of their own. */
+.lead-filters { margin-bottom: 16px; }
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin: 14px 0 12px;
+}
+.filter-grid .field input, .filter-grid .field select { padding: 9px 11px; font-size: 0.88rem; }
+
+/* Where a request came from and where it has got to. Deliberately the same
+   shapes as the job status pills — one glance, one vocabulary. */
+.pill.lead-new { color: var(--brand); background: rgba(47, 109, 246, 0.14); }
+.pill.lead-contacted { color: var(--sky); background: rgba(56, 189, 248, 0.12); }
+.pill.lead-estimate_sent { color: var(--amber); background: rgba(251, 191, 36, 0.12); }
+.pill.lead-scheduled { color: var(--violet); background: rgba(167, 139, 250, 0.12); }
+.pill.lead-completed { color: var(--green); background: rgba(52, 211, 153, 0.12); }
+.pill.lead-lost { color: var(--red); background: rgba(248, 113, 113, 0.12); }
+.pill.source { color: var(--muted); background: var(--surface-2); }
+.pill.campaign { color: var(--sky); background: rgba(56, 189, 248, 0.1); }
+.pill.test { color: var(--amber); background: rgba(251, 191, 36, 0.14); }
+
+.promo-cell { display: grid; gap: 1px; }
+.promo-cell strong { font-size: 0.82rem; }
+.promo-cell small { color: var(--muted); font-size: 0.72rem; }
+
+.lead-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.lead-actions { margin: 16px 0; }
+.lead-actions .btn { flex: 1; }
+.lead-booked { margin: 16px 0; }
+.lead-booked p { font-size: 0.88rem; margin-bottom: 10px; }
+.lead-notes { margin: 16px 0; }
+.lead-notes p { font-size: 0.88rem; line-height: 1.5; white-space: pre-wrap; }
+
+.lead-quantities { margin: 16px 0; }
+.lead-quantities ul { list-style: none; display: grid; gap: 6px; margin-top: 8px; }
+.lead-quantities li {
+  display: flex; justify-content: space-between; gap: 10px;
+  font-size: 0.86rem; padding: 7px 0; border-bottom: 1px solid var(--border);
+}
+.lead-quantities span { color: var(--muted); }
+
+/* A submission that could not be filed. Stated plainly, because the fix is a
+   button and the original is never lost. */
+.intake-alert {
+  margin-bottom: 18px;
+  border-color: rgba(251, 191, 36, 0.35);
+  background: rgba(251, 191, 36, 0.07);
+  font-size: 0.88rem;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.intake-failures { margin-bottom: 18px; border-color: rgba(251, 191, 36, 0.3); }
+.intake-failures .hint { margin-bottom: 12px; }
+
+.feed-item .dot.imported { background: var(--sky); }
+.feed-item .dot.converted { background: var(--green); }
+
+/* Login codes and the security log
+   ------------------------------------------------------------------------ */
+
+/* A temporary code, on screen for the only time it will ever be readable.
+   Deliberately large and spaced: it is going to be read aloud or copied onto
+   paper, not selected and pasted. */
+.temp-code {
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.07);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 14px;
+  text-align: center;
+}
+.temp-code .muted { font-size: 0.84rem; }
+.temp-code-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 2.1rem;
+  font-weight: 700;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--text);
+  margin: 12px 0;
+  user-select: all;
+}
+
+.code-state { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.pill.temp-code-pill {
+  background: rgba(56, 189, 248, 0.14);
+  color: var(--sky);
+  border-color: rgba(56, 189, 248, 0.3);
+}
+
+#security-log table { font-size: 0.84rem; }
+#security-log .mono { font-size: 0.78rem; }

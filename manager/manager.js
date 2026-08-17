@@ -23,6 +23,11 @@
     crew: [],
     jobFilter: "",
     canManage: false,
+    // Whether this account is the owner, and which roles it may hand out. Both
+    // come from the server; the screens only use them to decide which controls
+    // are worth drawing, since the server refuses the rest regardless.
+    isOwner: false,
+    crewRoles: null,
     cloverScript: null,
     chargeClover: null,
     booking: null,
@@ -38,6 +43,14 @@
     // Customers tab: the search term in force and its debounce timer.
     customerSearch: "",
     customerTimer: null,
+    // Leads tab: the filters in force, the request open in the drawer, the
+    // debounce timer behind the search box, and the source/status vocabulary
+    // the server sent — which is what the filter menus are built from, so a new
+    // source appears here without this file changing.
+    leadFilters: { status: "", source: "", service: "", promotion: "", from: "", to: "", q: "" },
+    leadTimer: null,
+    leadVocab: null,
+    lead: null,
     // The customer file being brought in: what was parsed out of it, how far
     // through it is, and what it has done so far.
     importJob: null,
@@ -58,7 +71,27 @@
     }
   };
 
-  var CREW_ROLES = ["owner", "manager", "admin", "technician"];
+  // The roles an account can hold. Kept in step with CREW_ROLES in
+  // lib/manager-session.ts; the crew screen prefers the list the server sends
+  // back, which also says which of them this account is allowed to hand out.
+  var CREW_ROLES = ["owner", "manager", "admin", "management_specialist", "technician"];
+
+  var ROLE_LABELS = {
+    owner: "Owner",
+    manager: "Manager",
+    admin: "Admin",
+    management_specialist: "Management Specialist",
+    technician: "Technician"
+  };
+
+  function roleLabel(role) {
+    var key = String(role || "").trim().toLowerCase();
+    return ROLE_LABELS[key] || key;
+  }
+
+  function isSpecialistRole(role) {
+    return String(role || "").trim().toLowerCase() === "management_specialist";
+  }
 
   // ---------- helpers ----------
   function api(path, options) {
@@ -76,6 +109,16 @@
       }
       return res.json().then(function (data) {
         if (!res.ok) {
+          // An account still holding a temporary code is refused everything
+          // except changing it. Rather than show that refusal on whichever
+          // screen happened to ask, put the change-your-code dialog up.
+          if (res.status === 403 && data && data.mustChangePin) {
+            forcePinChange();
+            var blocked = new Error(data.error || "Choose your own login code first");
+            blocked.status = 403;
+            blocked.handled = true;
+            throw blocked;
+          }
           // Keep the body on the error: a booking clash comes back as a 409
           // carrying the appointments it collided with, and the booking screen
           // shows them rather than just saying no.
@@ -205,6 +248,10 @@
     document.getElementById("modal").hidden = true;
     document.getElementById("modal-form").innerHTML = "";
     modalSubmit = null;
+    // Dismissing the forced code change (Escape, or the backdrop) does not
+    // grant anything — every screen still comes back 403 — but the flag has to
+    // clear or the dialog could never be put back up.
+    forcingPinChange = false;
   }
 
   function modalError(message) {
@@ -388,7 +435,11 @@
     // search.
     state.customerSearch = "";
     state.ticket = null;
+    state.crewRoles = null;
+    state.isOwner = false;
+    forcingPinChange = false;
     document.getElementById("view-customers").innerHTML = "";
+    document.getElementById("view-crew").innerHTML = "";
     var err = document.getElementById("login-error");
     err.hidden = true;
     var sel = document.getElementById("login-employee");
@@ -407,7 +458,10 @@
         }
         sel.innerHTML = people
           .map(function (e) {
-            return '<option value="' + e.id + '">' + esc(e.name) + " · " + esc(e.role) + "</option>";
+            return (
+              '<option value="' + e.id + '">' + esc(e.name) + " · " +
+              esc(e.roleLabel || roleLabel(e.role)) + "</option>"
+            );
           })
           .join("");
       })
@@ -456,6 +510,7 @@
     });
     if (name === "dashboard") renderDashboard();
     if (name === "book") renderBook();
+    if (name === "leads") renderLeads();
     if (name === "jobs") renderJobs();
     if (name === "customers") renderCustomers();
     if (name === "charges") renderCharges();
@@ -467,10 +522,25 @@
     host.innerHTML = '<div class="loading">Loading…</div>';
     api("dashboard").then(function (d) {
       var s = d.stats;
+      var leadStats = d.leadStats || { newToday: 0, website: 0, scheduled: 0, completed: 0, open: 0, failedImports: 0 };
       var statuses = STATUS_ORDER.filter(function (k) { return d.byStatus[k]; }).map(function (k) {
         return statusPill(k) + ' <span class="mono">' + d.byStatus[k] + "</span>";
       });
       host.innerHTML =
+        // What came in, before what is already on the books: a request nobody
+        // has picked up is the most perishable thing on this screen.
+        '<div class="stat-grid lead-stats">' +
+        stat("New leads today", leadStats.newToday) +
+        stat("Website leads", leadStats.website) +
+        stat("Scheduled", leadStats.scheduled) +
+        stat("Completed", leadStats.completed) +
+        "</div>" +
+        (leadStats.failedImports
+          ? '<div class="card intake-alert"><strong>' + leadStats.failedImports +
+            (leadStats.failedImports === 1 ? " website submission" : " website submissions") +
+            " could not be imported.</strong> The submissions are still stored safely in Netlify. " +
+            '<button type="button" class="btn btn-ghost btn-sm" data-goto="leads">Open the Leads tab</button></div>'
+          : "") +
         '<div class="stat-grid">' +
         stat("Jobs today", s.jobsToday) +
         stat("Open pipeline", fmtMoney(s.pipelineCents)) +
@@ -480,7 +550,11 @@
         stat("Customers", s.customers) +
         stat("Active crew", s.activeCrew) +
         "</div>" +
-        '<div class="grid-2">' +
+        '<div class="card"><div class="row-between"><h3 class="section-title">New requests</h3>' +
+        '<button class="btn btn-ghost btn-sm" data-goto="leads">See all requests</button></div>' +
+        newLeadsTable(d.newLeads || []) +
+        "</div>" +
+        '<div class="grid-2" style="margin-top:18px">' +
         '<div class="card"><div class="row-between"><h3 class="section-title">Upcoming jobs</h3>' +
         '<button class="btn btn-primary btn-sm" data-goto="book">Book appointment</button></div>' +
         upcomingTable(d.upcoming) +
@@ -493,6 +567,24 @@
         mapCardHtml();
       initJobMap(d.mapJobs || []);
     });
+  }
+
+  // The requests nobody has booked yet, newest first. Clicking one opens it in
+  // the same drawer the Leads tab uses.
+  function newLeadsTable(rows) {
+    if (!rows.length) return '<p class="empty">No requests waiting.</p>';
+    return (
+      '<table><thead><tr><th>Customer</th><th>Phone</th><th>Service</th><th>Promotion</th>' +
+      '<th class="right">Quoted</th><th>Source</th><th>Submitted</th><th>Status</th></tr></thead><tbody>' +
+      rows.map(function (l) {
+        return '<tr class="clickable" data-lead="' + l.id + '"><td>' + esc(l.customerName) +
+          "</td><td>" + phoneText(l.phone) + '</td><td class="muted">' + esc(l.service || "—") +
+          '</td><td class="muted">' + esc(l.promotionCode || "—") + '</td><td class="right mono">' +
+          fmtMoney(l.totalCents) + '</td><td class="muted">' + esc(l.sourceLabel || l.source) +
+          '</td><td class="muted">' + fmtDate(l.submittedAt) + "</td><td>" + leadPill(l) + "</td></tr>";
+      }).join("") +
+      "</tbody></table>"
+    );
   }
 
   function stat(label, value) {
@@ -936,6 +1028,573 @@
     });
   }
 
+  // ---------- Leads / requests ----------
+  // Everything that asked for work but has not been booked yet, wherever it came
+  // from: the website's booking form arrives here by itself, and a call taken at
+  // the desk is typed in through the same screen. One list, one set of statuses,
+  // one way to turn a request into an appointment — so adding a new source later
+  // adds rows here rather than a screen of its own.
+
+  function renderLeads() {
+    var host = document.getElementById("view-leads");
+    // The filter card is built once and left alone, so a date being typed or a
+    // half-finished search term survives the list refreshing underneath it.
+    if (!document.getElementById("lead-filters")) {
+      host.innerHTML =
+        leadFilterHtml() + '<div id="lead-list"><div class="loading">Loading…</div></div>';
+      wireLeadFilters();
+    }
+    loadLeadList();
+  }
+
+  function leadFilterHtml() {
+    var f = state.leadFilters;
+    return (
+      '<div class="card lead-filters" id="lead-filters">' +
+      '<div class="row-between"><h3 class="section-title">Requests</h3>' +
+      '<button type="button" class="btn btn-primary btn-sm" id="lead-add">Log a request</button></div>' +
+      '<div class="filter-grid">' +
+      '<label class="field"><span>Search</span><input id="lf-q" type="search" maxlength="80" ' +
+      'placeholder="Name, phone, email, promo…" value="' + esc(f.q) + '" /></label>' +
+      '<label class="field"><span>Lead source</span><select id="lf-source"></select></label>' +
+      '<label class="field"><span>Service</span><select id="lf-service"></select></label>' +
+      '<label class="field"><span>Promotion code</span><select id="lf-promotion"></select></label>' +
+      '<label class="field"><span>From</span><input id="lf-from" type="date" value="' + esc(f.from) + '" /></label>' +
+      '<label class="field"><span>To</span><input id="lf-to" type="date" value="' + esc(f.to) + '" /></label>' +
+      "</div>" +
+      '<div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" id="lf-clear">Clear filters</button></div>' +
+      "</div>"
+    );
+  }
+
+  function wireLeadFilters() {
+    ["lf-source", "lf-service", "lf-promotion", "lf-from", "lf-to"].forEach(function (id) {
+      var field = document.getElementById(id);
+      if (!field) return;
+      field.addEventListener("change", function () {
+        state.leadFilters[id.slice(3)] = this.value;
+        loadLeadList();
+      });
+    });
+    document.getElementById("lf-q").addEventListener("input", function () {
+      var value = this.value.trim();
+      clearTimeout(state.leadTimer);
+      state.leadTimer = setTimeout(function () {
+        if (value === state.leadFilters.q) return;
+        state.leadFilters.q = value;
+        loadLeadList();
+      }, 300);
+    });
+    document.getElementById("lf-clear").addEventListener("click", function () {
+      state.leadFilters = emptyLeadFilters();
+      ["lf-q", "lf-source", "lf-service", "lf-promotion", "lf-from", "lf-to"].forEach(function (id) {
+        var field = document.getElementById(id);
+        if (field) field.value = "";
+      });
+      loadLeadList();
+    });
+    document.getElementById("lead-add").addEventListener("click", openLeadForm);
+  }
+
+  function emptyLeadFilters() {
+    return { status: "", source: "", service: "", promotion: "", from: "", to: "", q: "" };
+  }
+
+  function leadQuery() {
+    var f = state.leadFilters;
+    var parts = [];
+    Object.keys(f).forEach(function (key) {
+      if (f[key]) parts.push(key + "=" + encodeURIComponent(f[key]));
+    });
+    return parts.length ? "?" + parts.join("&") : "";
+  }
+
+  function loadLeadList() {
+    var list = document.getElementById("lead-list");
+    if (!list) return;
+    list.innerHTML = '<div class="loading">Loading…</div>';
+    api("leads" + leadQuery()).then(function (d) {
+      state.leadVocab = { sources: d.sources, statuses: d.statuses };
+      fillLeadSelect("lf-source", d.sources, state.leadFilters.source, "Every source");
+      fillLeadSelect("lf-service", plainOptions(d.services), state.leadFilters.service, "Every service");
+      fillLeadSelect("lf-promotion", plainOptions(d.promotions), state.leadFilters.promotion, "Every promotion");
+      list.innerHTML =
+        leadStatusChips(d) + '<div id="lead-failures"></div>' + leadsTable(d.leads);
+      if (d.openFailures) renderIntakeFailures();
+    });
+  }
+
+  function plainOptions(values) {
+    return (values || []).map(function (v) {
+      return { value: v, label: v };
+    });
+  }
+
+  // Rebuilt from what the API says exists, so a source added in the intake
+  // library shows up in the filters without this file being touched.
+  function fillLeadSelect(id, options, current, allLabel) {
+    var select = document.getElementById(id);
+    if (!select) return;
+    select.innerHTML =
+      '<option value="">' + esc(allLabel) + "</option>" +
+      (options || [])
+        .map(function (o) {
+          return (
+            '<option value="' + esc(o.value) + '"' + (o.value === current ? " selected" : "") +
+            ">" + esc(o.label) + "</option>"
+          );
+        })
+        .join("");
+  }
+
+  // The status chips carry the count each one would show under the filters
+  // already in force, so it is obvious where the work is sitting.
+  function leadStatusChips(d) {
+    var total = d.total || 0;
+    return (
+      '<div class="chips">' +
+      '<button class="chip' + (state.leadFilters.status ? "" : " active") + '" data-lead-status="">All ' +
+      '<span class="mono">' + total + "</span></button>" +
+      (d.statuses || [])
+        .map(function (s) {
+          var count = d.byStatus[s.value] || 0;
+          return (
+            '<button class="chip' + (state.leadFilters.status === s.value ? " active" : "") +
+            '" data-lead-status="' + esc(s.value) + '">' + esc(s.label) +
+            ' <span class="mono">' + count + "</span></button>"
+          );
+        })
+        .join("") +
+      "</div>"
+    );
+  }
+
+  function leadsTable(rows) {
+    if (!rows.length) {
+      return '<div class="card"><p class="empty">No requests match these filters.</p></div>';
+    }
+    return (
+      '<div class="card"><table><thead><tr><th>Customer</th><th>Phone</th><th>Service</th>' +
+      '<th>Promotion</th><th class="right">Quoted</th><th>Source</th><th>Submitted</th><th>Status</th></tr></thead><tbody>' +
+      rows
+        .map(function (l) {
+          return (
+            '<tr class="clickable" data-lead="' + l.id + '"><td>' + esc(l.customerName) +
+            (l.isTest ? ' <span class="pill test">Test</span>' : "") +
+            "</td><td>" + phoneText(l.phone) + '</td><td class="muted">' + esc(l.service || "—") +
+            "</td><td>" + promoCell(l) + '</td><td class="right mono">' + fmtMoney(l.totalCents) +
+            '</td><td class="muted">' + esc(l.sourceLabel || l.source) + '</td><td class="muted">' +
+            fmtDate(l.submittedAt) + "</td><td>" + leadPill(l) + "</td></tr>"
+          );
+        })
+        .join("") +
+      "</tbody></table></div>"
+    );
+  }
+
+  function promoCell(l) {
+    if (!l.promotionCode && !l.promotionName) return '<span class="muted">—</span>';
+    return (
+      '<span class="promo-cell"><strong>' + esc(l.promotionCode || "—") + "</strong>" +
+      (l.promotionName ? "<small>" + esc(l.promotionName) + "</small>" : "") +
+      "</span>"
+    );
+  }
+
+  function leadPill(l) {
+    return (
+      '<span class="pill lead-' + esc(l.status) + '">' + esc(l.statusLabel || l.status) + "</span>"
+    );
+  }
+
+  // Requests that reached the site but could not be filed. Netlify still holds
+  // its own copy of every one of them, so nothing here is lost — this is the
+  // queue of imports to run again, and the error that stopped each one.
+  function renderIntakeFailures() {
+    var host = document.getElementById("lead-failures");
+    if (!host) return;
+    api("leads/failures").then(function (d) {
+      if (!d.failures.length) {
+        host.innerHTML = "";
+        return;
+      }
+      host.innerHTML =
+        '<div class="card intake-failures"><h3 class="section-title">Imports that need a retry</h3>' +
+        '<p class="hint">These submissions are still stored safely in Netlify. Retrying reads the ' +
+        "saved copy again — the customer is not contacted and nothing is charged.</p>" +
+        '<table><thead><tr><th>Source</th><th>Reference</th><th>What went wrong</th>' +
+        '<th class="right">Tries</th><th class="right"></th></tr></thead><tbody>' +
+        d.failures
+          .map(function (f) {
+            return (
+              '<tr><td>' + esc(f.sourceLabel || f.source) + '</td><td class="muted mono">' +
+              esc(f.sourceRef || "—") + '</td><td class="muted">' + esc(f.error) +
+              '</td><td class="right mono">' + f.attempts + '</td><td class="right">' +
+              (state.canManage
+                ? '<button type="button" class="btn btn-ghost btn-sm" data-retry-import="' + f.id + '">Retry</button>'
+                : '<span class="muted">Ask a manager</span>') +
+              "</td></tr>"
+            );
+          })
+          .join("") +
+        "</tbody></table></div>";
+    });
+  }
+
+  function retryIntakeFailure(id, button) {
+    button.disabled = true;
+    button.textContent = "Retrying…";
+    api("leads/failures/" + id + "/retry", { method: "POST" })
+      .then(function (res) {
+        toast(
+          res.alreadyResolved
+            ? "That submission was already imported."
+            : "Imported as request #" + res.leadId + "."
+        );
+        loadLeadList();
+      })
+      .catch(function (e) {
+        toast(e.message || "That import failed again");
+        button.disabled = false;
+        button.textContent = "Retry";
+      });
+  }
+
+  // A request taken by hand: a phone call, a walk-in, a note left on the desk.
+  // It goes into the same table the website writes into, so it dedupes against
+  // the same customers and converts to a job the same way.
+  function openLeadForm() {
+    var sources = (state.leadVocab && state.leadVocab.sources) || [
+      { value: "phone", label: "Phone call" }
+    ];
+    openModal(
+      "Log a request",
+      '<label class="field"><span>Where did it come from?</span><select id="nl-source">' +
+        sources
+          .map(function (s) {
+            return (
+              '<option value="' + esc(s.value) + '"' + (s.value === "phone" ? " selected" : "") +
+              ">" + esc(s.label) + "</option>"
+            );
+          })
+          .join("") +
+        "</select></label>" +
+        '<div class="booking-fields">' +
+        '<label class="field"><span>Customer name</span><input id="nl-name" maxlength="120" required /></label>' +
+        '<label class="field"><span>Phone</span><input id="nl-phone" type="tel" maxlength="30" placeholder="(404) 555-0134" /></label>' +
+        '<label class="field"><span>Email</span><input id="nl-email" type="email" maxlength="160" /></label>' +
+        '<label class="field"><span>Service address</span><input id="nl-address" maxlength="200" /></label>' +
+        '<label class="field"><span>City</span><input id="nl-city" maxlength="80" /></label>' +
+        '<label class="field bk-narrow"><span>State</span><input id="nl-state" maxlength="20" /></label>' +
+        '<label class="field bk-narrow"><span>ZIP</span><input id="nl-zip" maxlength="12" inputmode="numeric" /></label>' +
+        '<label class="field"><span>Service asked for</span><input id="nl-service" maxlength="200" /></label>' +
+        '<label class="field"><span>Promotion code</span><input id="nl-promo" maxlength="60" /></label>' +
+        '<label class="field"><span>Quoted total</span><input id="nl-total" type="number" min="0" step="0.01" placeholder="0.00" /></label>' +
+        '<label class="field"><span>Requested date</span><input id="nl-date" type="date" /></label>' +
+        '<label class="field"><span>Requested time</span><input id="nl-time" maxlength="80" placeholder="Morning, after 3pm…" /></label>' +
+        "</div>" +
+        '<label class="field"><span>What the customer said</span><textarea id="nl-notes" maxlength="2000" rows="3"></textarea></label>' +
+        '<p class="hint">This creates the customer if they are new, or files the request against the ' +
+        "account they already have. Nothing is scheduled or charged until you book it.</p>",
+      function () {
+        var body = {
+          source: val("nl-source"),
+          customerName: val("nl-name"),
+          phone: val("nl-phone"),
+          email: val("nl-email"),
+          address: val("nl-address"),
+          city: val("nl-city"),
+          state: val("nl-state"),
+          zip: val("nl-zip"),
+          service: val("nl-service"),
+          promotionCode: val("nl-promo"),
+          total: val("nl-total"),
+          requestedDate: val("nl-date"),
+          requestedTime: val("nl-time"),
+          notes: val("nl-notes")
+        };
+        if (!body.customerName) throw new Error("Enter the customer's name");
+        if (!body.phone && !body.email) {
+          throw new Error("Enter a phone number or an email so somebody can call them back");
+        }
+        return api("leads", { method: "POST", body: body }).then(function (data) {
+          loadLeadList();
+          openLead(data.lead.id);
+          return "Request logged for " + data.lead.customerName + ".";
+        });
+      }
+    );
+  }
+
+  // ---------- one request, opened ----------
+  function openLead(id) {
+    var drawer = document.getElementById("drawer");
+    var panel = document.getElementById("drawer-panel");
+    drawer.hidden = false;
+    panel.innerHTML = '<div class="loading">Loading…</div>';
+    // The drawer is shared with jobs. Clear anything the job panel left behind
+    // so a payment or ticket from the last thing opened cannot leak into this.
+    state.job = null;
+    state.pay = null;
+    state.ticket = null;
+    Promise.all([
+      api("leads/" + id),
+      state.crew.length ? Promise.resolve({ crew: state.crew }) : api("crew")
+    ]).then(function (results) {
+      state.crew = results[1].crew;
+      renderLeadDrawer(results[0]);
+    });
+  }
+
+  function renderLeadDrawer(data) {
+    var l = data.lead;
+    state.lead = data;
+    var panel = document.getElementById("drawer-panel");
+    var statuses = (state.leadVocab && state.leadVocab.statuses) || [
+      { value: l.status, label: l.statusLabel }
+    ];
+    var statusOptions = statuses
+      .map(function (s) {
+        return (
+          '<option value="' + esc(s.value) + '"' + (s.value === l.status ? " selected" : "") +
+          ">" + esc(s.label) + "</option>"
+        );
+      })
+      .join("");
+    var crewOptions =
+      '<option value="">Nobody yet</option>' +
+      state.crew
+        .map(function (c) {
+          return (
+            '<option value="' + c.id + '"' + (c.id === l.assignedTo ? " selected" : "") + ">" +
+            esc(c.name) + "</option>"
+          );
+        })
+        .join("");
+    var place = [l.address, l.city, l.state, l.zip].filter(Boolean).join(", ");
+
+    panel.innerHTML =
+      '<button class="drawer-close" data-close>×</button>' +
+      "<h2>" + esc(l.customerName) + "</h2>" +
+      '<div class="lead-badges">' + leadPill(l) +
+      '<span class="pill source">' + esc(l.sourceLabel || l.source) + "</span>" +
+      (l.campaign ? '<span class="pill campaign">' + esc(l.campaign) + "</span>" : "") +
+      (l.isTest ? '<span class="pill test">Test — do not schedule</span>' : "") +
+      "</div>" +
+      (l.isTest
+        ? '<p class="hint warn">This request is labelled as a test. Nothing here has been ' +
+          "scheduled or charged.</p>"
+        : "") +
+      '<div class="control-row">' +
+      '<label>Status<select id="l-status">' + statusOptions + "</select></label>" +
+      '<label>Assigned to<select id="l-assign">' + crewOptions + "</select></label>" +
+      "</div>" +
+      '<dl class="kv">' +
+      "<dt>Phone</dt><dd>" + phoneText(l.phone) + "</dd>" +
+      "<dt>Email</dt><dd>" + emailText(l.email) + "</dd>" +
+      "<dt>Address</dt><dd>" + esc(place || "—") + "</dd>" +
+      "<dt>Service</dt><dd>" + esc(l.service || "—") + "</dd>" +
+      (l.serviceDetail ? "<dt>Quoted</dt><dd>" + esc(l.serviceDetail) + "</dd>" : "") +
+      (l.promotionCode || l.promotionName
+        ? "<dt>Promotion</dt><dd>" +
+          esc([l.promotionName, l.promotionCode].filter(Boolean).join(" · ")) + "</dd>"
+        : "") +
+      "<dt>Subtotal</dt><dd>" + fmtMoney(l.subtotalCents) + "</dd>" +
+      (l.discountCents ? "<dt>Discount</dt><dd>−" + fmtMoney(l.discountCents) + "</dd>" : "") +
+      "<dt>Quoted total</dt><dd><strong>" + fmtMoney(l.totalCents) + "</strong></dd>" +
+      "<dt>Wants</dt><dd>" +
+      esc([l.requestedDate, l.requestedTime].filter(Boolean).join(" · ") || "No preference given") +
+      "</dd>" +
+      (l.contactMethod ? "<dt>Best contact</dt><dd>" + esc(l.contactMethod) + "</dd>" : "") +
+      "<dt>Submitted</dt><dd>" + fmtDate(l.submittedAt) + "</dd>" +
+      "</dl>" +
+      leadQuantities(l) +
+      (l.customerNotes
+        ? '<div class="lead-notes"><h3 class="section-title">What the customer said</h3><p>' +
+          esc(l.customerNotes) + "</p></div>"
+        : "") +
+      contactActions({ id: l.customerId, phone: l.phone, email: l.email }, null) +
+      // Booking it, or the job it already became.
+      (data.job
+        ? '<div class="card lead-booked"><h3 class="section-title">Booked</h3>' +
+          '<p>Job #' + data.job.id + " · " + esc(data.job.serviceType) + " · " +
+          fmtDate(data.job.scheduledFor) + " · " + fmtMoney(data.job.priceCents) + "</p>" +
+          '<button type="button" class="btn btn-ghost btn-sm" data-job="' + data.job.id + '">Open the job</button></div>'
+        : '<div class="btn-row lead-actions">' +
+          '<button type="button" class="btn btn-primary" id="l-convert">Book this request</button>' +
+          "</div>") +
+      '<h3 class="section-title" style="margin-top:20px">Activity</h3>' +
+      '<form class="note-form" id="l-note"><input type="text" id="l-note-input" placeholder="Add a note…" maxlength="500" /><button class="btn btn-primary btn-sm" type="submit">Add</button></form>' +
+      leadFeed(data.events);
+
+    document.getElementById("l-status").addEventListener("change", function () {
+      patchLead(l.id, { status: this.value });
+    });
+    document.getElementById("l-assign").addEventListener("change", function () {
+      patchLead(l.id, { assignedTo: this.value === "" ? null : Number(this.value) });
+    });
+    var convert = document.getElementById("l-convert");
+    if (convert) {
+      convert.addEventListener("click", function () {
+        openLeadConverter(data);
+      });
+    }
+    document.getElementById("l-note").addEventListener("submit", function (ev) {
+      ev.preventDefault();
+      var input = document.getElementById("l-note-input");
+      var message = input.value.trim();
+      if (!message) return;
+      api("leads/" + l.id + "/notes", { method: "POST", body: { message: message } })
+        .then(renderLeadDrawer);
+    });
+  }
+
+  // Counts the customer gave: rooms, vents, units. Stored as they were
+  // submitted, so a quote can be checked against what was actually asked for.
+  function leadQuantities(l) {
+    var q = l.quantities || {};
+    var keys = Object.keys(q).filter(function (k) {
+      return q[k];
+    });
+    if (!keys.length) return "";
+    return (
+      '<div class="lead-quantities"><h3 class="section-title">What was requested</h3><ul>' +
+      keys
+        .map(function (k) {
+          return "<li><span>" + esc(k) + "</span><strong>" + esc(q[k]) + "</strong></li>";
+        })
+        .join("") +
+      "</ul></div>"
+    );
+  }
+
+  function leadFeed(events) {
+    if (!events.length) return '<p class="empty">Nothing recorded yet.</p>';
+    return (
+      '<div class="feed">' +
+      events
+        .map(function (e) {
+          return (
+            '<div class="feed-item"><span class="dot ' + esc(e.kind) + '"></span><div><div>' +
+            esc(e.message) + "</div><time>" +
+            (e.employeeName ? esc(e.employeeName) + " · " : "") + timeAgo(e.createdAt) +
+            "</time></div></div>"
+          );
+        })
+        .join("") +
+      "</div>"
+    );
+  }
+
+  function patchLead(id, body) {
+    return api("leads/" + id, { method: "PATCH", body: body })
+      .then(function (data) {
+        renderLeadDrawer(data);
+        refreshAfterLeadChange();
+        return data;
+      })
+      .catch(function (e) {
+        toast(e.message || "Could not update that request");
+      });
+  }
+
+  // Whatever screen is behind the drawer needs to agree with what just changed.
+  function refreshAfterLeadChange() {
+    var active = document.querySelector(".tab.active");
+    if (!active) return;
+    if (active.dataset.view === "leads") loadLeadList();
+    if (active.dataset.view === "dashboard") renderDashboard();
+    if (active.dataset.view === "jobs") renderJobs();
+  }
+
+  // Turning a request into work. The server runs the same double-booking check
+  // the booking screen does, so a clash comes back as a question rather than as
+  // two crews sent to two addresses at once.
+  function openLeadConverter(data) {
+    var l = data.lead;
+    var crewOptions =
+      '<option value="">Unassigned</option>' +
+      state.crew
+        .map(function (c) {
+          return (
+            '<option value="' + c.id + '"' + (c.id === l.assignedTo ? " selected" : "") + ">" +
+            esc(c.name) + "</option>"
+          );
+        })
+        .join("");
+    var durationOptions = VISIT_LENGTHS.map(function (v) {
+      return '<option value="' + v.minutes + '"' + (v.minutes === 120 ? " selected" : "") + ">" + esc(v.label) + "</option>";
+    }).join("");
+    var wanted = /^\d{4}-\d{2}-\d{2}$/.test(String(l.requestedDate || "")) ? l.requestedDate : "";
+    var place = [l.address, l.city, l.state, l.zip].filter(Boolean).join(", ");
+
+    openModal(
+      "Book " + l.customerName,
+      '<div class="booking-fields">' +
+        '<label class="field"><span>Service</span><input id="cv-service" maxlength="120" required value="' +
+        esc(l.service || "") + '" /></label>' +
+        '<label class="field"><span>Total</span><input id="cv-price" type="number" min="0" step="0.01" value="' +
+        ((Number(l.totalCents) || 0) / 100).toFixed(2) + '" /></label>' +
+        '<label class="field"><span>Date</span><input id="cv-date" type="date" value="' + esc(wanted) + '" required /></label>' +
+        '<label class="field"><span>Arrival</span><input id="cv-time" type="time" required /></label>' +
+        '<label class="field"><span>Length</span><select id="cv-duration">' + durationOptions + "</select></label>" +
+        '<label class="field"><span>Crew</span><select id="cv-crew">' + crewOptions + "</select></label>" +
+        "</div>" +
+        '<label class="field"><span>Address the crew is sent to</span><input id="cv-address" maxlength="200" value="' +
+        esc(place) + '" /></label>' +
+        '<label class="field"><span>Notes for the crew</span><textarea id="cv-notes" maxlength="2000" rows="3">' +
+        esc(l.customerNotes || "") + "</textarea></label>" +
+        (l.requestedDate || l.requestedTime
+          ? '<p class="hint">They asked for ' +
+            esc([l.requestedDate, l.requestedTime].filter(Boolean).join(" · ")) + ".</p>"
+          : "") +
+        (l.isTest
+          ? '<p class="hint warn">This request is labelled as a test. Book it only if you mean to.</p>'
+          : "") +
+        '<p class="hint">Booking creates the job and moves the request to Scheduled. No card is ' +
+        "charged here — payment is taken from the job when the work is done.</p>",
+      function () {
+        var when = instantFrom(val("cv-date"), val("cv-time"));
+        if (!val("cv-service")) throw new Error("Say what is being booked");
+        if (!when) throw new Error("Pick both a date and an arrival time");
+        var body = {
+          serviceType: val("cv-service"),
+          scheduledFor: when.toISOString(),
+          durationMinutes: Number(val("cv-duration")),
+          assignedTo: val("cv-crew") === "" ? null : Number(val("cv-crew")),
+          priceCents: Math.round((Number(val("cv-price")) || 0) * 100),
+          address: val("cv-address"),
+          notes: val("cv-notes")
+        };
+        return convertLead(l.id, body);
+      }
+    );
+  }
+
+  function convertLead(id, body) {
+    return api("leads/" + id + "/convert", { method: "POST", body: body })
+      .then(function (res) {
+        refreshAfterLeadChange();
+        openJob(res.jobId);
+        return "Booked as job #" + res.jobId + ".";
+      })
+      .catch(function (e) {
+        if (e.status === 409 && e.data && e.data.conflicts) {
+          var clash = e.data.conflicts
+            .map(function (c) {
+              return fmtTimeRange(c.scheduledFor, c.durationMinutes) + " — " + c.customerName;
+            })
+            .join("\n");
+          if (confirm("That crew member is already booked:\n\n" + clash + "\n\nBook this time anyway?")) {
+            body.force = true;
+            return convertLead(id, body);
+          }
+          throw new Error("Pick another time or another crew member");
+        }
+        throw e;
+      });
+  }
+
   function renderCustomers() {
     var host = document.getElementById("view-customers");
     var term = state.customerSearch || "";
@@ -1107,6 +1766,11 @@
             var active = document.querySelector(".tab.active");
             if (active && active.dataset.view === "customers") renderCustomers();
             if (jobId && state.job && state.job.job.id === jobId) openJob(jobId);
+            // Edited from a request rather than a job: reopen it so the drawer
+            // agrees with the account behind it.
+            if (!jobId && state.lead && state.lead.lead.customerId === customerId) {
+              openLead(state.lead.lead.id);
+            }
             return res.changed && res.changed.length
               ? "Updated " + res.changed.join(", ") + "."
               : "Nothing needed changing.";
@@ -1850,6 +2514,8 @@
     api("crew").then(function (d) {
       state.crew = d.crew;
       state.canManage = Boolean(d.canManageCrew);
+      state.isOwner = Boolean(d.isOwner);
+      state.crewRoles = d.roles || null;
 
       var header =
         '<div class="row-between" style="margin-bottom:14px">' +
@@ -1863,22 +2529,34 @@
 
       var rows = d.crew
         .map(function (e) {
-          var roleCell = state.canManage
-            ? '<select class="row-select" data-role-for="' + e.id + '">' +
-              CREW_ROLES.map(function (r) {
-                return '<option value="' + r + '"' + (r === e.role ? " selected" : "") + ">" + esc(r) + "</option>";
-              }).join("") +
-              "</select>"
-            : esc(e.role);
-          var codeCell = e.hasCode
-            ? '<span class="pill completed">Code set</span>'
-            : '<span class="pill in_progress">No code yet</span>';
-          var actions = state.canManage
-            ? '<button class="btn btn-ghost btn-sm" data-new-code="' + e.id + '">New code</button>' +
-              '<button class="btn btn-ghost btn-sm" data-toggle-active="' + e.id + '">' +
-              (e.active ? "Turn off access" : "Turn on access") +
-              "</button>"
-            : '<span class="muted">—</span>';
+          // The role dropdown only offers what this account may actually hand
+          // out, and a row it may not administer is shown as plain text — the
+          // server refuses the rest either way, but a button that cannot work
+          // should not be on screen.
+          var roleCell =
+            state.canManage && e.canAdminister
+              ? '<select class="row-select" data-role-for="' + e.id + '">' +
+                allowedRoles(e.role)
+                  .map(function (r) {
+                    return (
+                      '<option value="' + r.value + '"' +
+                      (r.value === e.role ? " selected" : "") + ">" + esc(r.label) + "</option>"
+                    );
+                  })
+                  .join("") +
+                "</select>"
+              : esc(e.roleLabel || roleLabel(e.role));
+
+          var codeCell = codeState(e);
+          var actions =
+            state.canManage && e.canAdminister
+              ? '<button class="btn btn-ghost btn-sm" data-new-code="' + e.id + '">' +
+                (e.isManagementSpecialist ? "Reset code" : "New code") +
+                "</button>" +
+                '<button class="btn btn-ghost btn-sm" data-toggle-active="' + e.id + '">' +
+                (e.active ? "Turn off access" : "Turn on access") +
+                "</button>"
+              : '<span class="muted">—</span>';
           return (
             '<tr><td><span class="assignee"><span class="avatar" style="background:' +
             avatarColor(e.name) + '">' + esc(initials(e.name)) + "</span>" + esc(e.name) +
@@ -1899,8 +2577,51 @@
         (rows ||
           '<tr><td colspan="6" class="empty">No crew members yet.</td></tr>') +
         "</tbody></table></div>" +
-        '<p class="muted" style="margin-top:12px;font-size:0.82rem">Login codes are stored scrambled, so an existing code can never be looked up — issue a new one instead and hand it over in person.</p>';
+        '<p class="muted" style="margin-top:12px;font-size:0.82rem">Login codes are stored scrambled, so an existing code can never be looked up — issue a new one instead and hand it over in person.</p>' +
+        (state.isOwner
+          ? '<p class="muted" style="margin-top:6px;font-size:0.82rem">Management Specialist accounts are yours alone: nobody else can create one, reset its code, change its role or turn it off.</p>'
+          : "") +
+        (state.isOwner ? securityLogCard() : "");
+
+      if (state.isOwner) loadSecurityLog();
     });
+  }
+
+  // The roles this account may choose in the dropdown, always including the one
+  // the row already holds so an existing value is never silently dropped.
+  function allowedRoles(current) {
+    var list = state.crewRoles;
+    if (!list) {
+      return CREW_ROLES.map(function (r) {
+        return { value: r, label: roleLabel(r) };
+      });
+    }
+    return list
+      .filter(function (r) { return r.allowed || r.value === current; })
+      .map(function (r) { return { value: r.value, label: r.label || roleLabel(r.value) }; });
+  }
+
+  // What the app can say about a login code without ever revealing it. For a
+  // Management Specialist row seen by anybody but the owner, the server sends
+  // nothing at all and there is genuinely nothing to show.
+  function codeState(e) {
+    if (e.hasCode === null || e.hasCode === undefined) {
+      return '<span class="muted">Owner only</span>';
+    }
+    var parts = [];
+    if (!e.hasCode) {
+      parts.push('<span class="pill in_progress">No code yet</span>');
+    } else if (e.mustChangePin) {
+      parts.push('<span class="pill temp-code-pill">Temporary code</span>');
+    } else {
+      parts.push('<span class="pill completed">Code set</span>');
+    }
+    if (e.locked) {
+      parts.push(
+        '<span class="pill cancelled">Locked ' + Number(e.lockedMinutes || 0) + "m</span>"
+      );
+    }
+    return '<span class="code-state">' + parts.join(" ") + "</span>";
   }
 
   function findCrew(id) {
@@ -1910,7 +2631,98 @@
     return null;
   }
 
+  // ---------- security audit log ----------
+  //
+  // Owner-only, and shown under the crew list rather than as its own tab: it is
+  // read when a code changes hands, which is when somebody is already here.
+  function securityLogCard() {
+    return (
+      '<h2 class="section-title" style="margin-top:26px">Security log</h2>' +
+      '<p class="muted" style="font-size:0.82rem;margin-bottom:10px">Sign-ins, wrong codes, lockouts, code resets and role changes. Codes themselves are never recorded.</p>' +
+      '<div class="card" id="security-log"><div class="loading">Loading…</div></div>'
+    );
+  }
+
+  function loadSecurityLog() {
+    api("security-log?limit=100")
+      .then(function (d) {
+        var host = document.getElementById("security-log");
+        if (!host) return;
+        var rows = (d.events || [])
+          .map(function (ev) {
+            var who = ev.employeeName || "—";
+            var by =
+              ev.actorName && ev.actorName !== ev.employeeName
+                ? '<span class="muted"> by ' + esc(ev.actorName) + "</span>"
+                : "";
+            return (
+              "<tr><td>" + shortDateTime(ev.createdAt) +
+              '</td><td><span class="pill ' + esc(logPillClass(ev.event)) + '">' +
+              esc(ev.label || ev.event) + "</span></td><td>" + esc(who) +
+              (ev.employeeRoleLabel
+                ? ' <span class="muted">· ' + esc(ev.employeeRoleLabel) + "</span>"
+                : "") +
+              by + '</td><td class="muted">' + esc(ev.detail || "") +
+              '</td><td class="mono muted">' + esc(ev.ip || "") + "</td></tr>"
+            );
+          })
+          .join("");
+        host.innerHTML =
+          "<table><thead><tr><th>When</th><th>Event</th><th>Account</th><th>Detail</th><th>From</th></tr></thead><tbody>" +
+          (rows || '<tr><td colspan="5" class="empty">Nothing recorded yet.</td></tr>') +
+          "</tbody></table>";
+      })
+      .catch(function () {
+        var host = document.getElementById("security-log");
+        if (host) host.innerHTML = '<div class="empty">The security log could not be loaded.</div>';
+      });
+  }
+
+  function logPillClass(event) {
+    if (event === "login_success" || event === "pin_changed") return "completed";
+    if (event === "login_failed") return "in_progress";
+    if (event === "login_locked" || event === "login_blocked") return "cancelled";
+    return "source";
+  }
+
+  function shortDateTime(value) {
+    if (!value) return "";
+    var d = new Date(value);
+    if (isNaN(d.getTime())) return esc(String(value));
+    return esc(
+      d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) +
+        " " +
+        d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+    );
+  }
+
   // ---------- login codes ----------
+
+  // A temporary code generated by a dialog that is about to close. The shared
+  // modal handler closes the form before showing anything, so the digits are
+  // parked here and the reveal happens after that.
+  var pendingTempCode = null;
+
+  // Shows a freshly generated temporary code to the owner, once. There is no
+  // way back to this screen: the app only ever held the digits for as long as
+  // this response was on their screen, and the database has only the hash.
+  function showTempCode(name, tempPin, notice) {
+    var form = document.getElementById("modal-form");
+    document.getElementById("modal-title").textContent = "Temporary code for " + name;
+    form.innerHTML =
+      '<div class="temp-code">' +
+      '<p class="muted">Write this down now — it is shown once and cannot be looked up again.</p>' +
+      '<p class="temp-code-value">' + esc(tempPin) + "</p>" +
+      '<p class="muted">' +
+      esc(notice || "Hand it over in person. They must choose their own code the first time they sign in.") +
+      "</p></div>" +
+      '<div class="modal-actions">' +
+      '<button type="button" class="btn btn-primary" data-modal-close>Done</button>' +
+      "</div>";
+    modalSubmit = null;
+    document.getElementById("modal").hidden = false;
+  }
+
   function promptOwnCode() {
     openModal(
       "Change my login code",
@@ -1933,6 +2745,31 @@
   function promptNewCode(id) {
     var member = findCrew(id);
     if (!member) return;
+
+    // A Management Specialist code is drawn by the app, not typed by the owner.
+    // There is nothing to fill in — the dialog only asks for confirmation, and
+    // the digits come back on the response.
+    if (member.isManagementSpecialist) {
+      openModal(
+        "Reset code for " + member.name,
+        '<p class="muted" style="font-size:0.84rem">This account is a Management Specialist. The app will draw a new temporary code and show it to you once. Their old code stops working straight away, and they will have to choose their own code the next time they sign in.</p>',
+        function () {
+          return api("crew/" + id + "/pin", { method: "POST", body: {} }).then(function (d) {
+            if (d.tempPin) {
+              pendingTempCode = {
+                name: member.name,
+                pin: d.tempPin,
+                notice: d.tempPinNotice
+              };
+              return "";
+            }
+            return "New code saved for " + member.name + ".";
+          });
+        }
+      );
+      return;
+    }
+
     openModal(
       "New login code for " + member.name,
       '<p class="muted" style="font-size:0.84rem;margin-bottom:4px">This replaces their old code straight away. Give them the new one in person.</p>' +
@@ -1950,35 +2787,108 @@
   }
 
   function promptAddCrew() {
+    var roles = allowedRoles("technician");
     openModal(
       "Add crew member",
       '<label class="field"><span>Name</span><input id="m-name" type="text" maxlength="80" required /></label>' +
         '<label class="field"><span>Role</span><select id="m-role">' +
-        CREW_ROLES.map(function (r) {
-          return '<option value="' + r + '"' + (r === "technician" ? " selected" : "") + ">" + esc(r) + "</option>";
-        }).join("") +
+        roles
+          .map(function (r) {
+            return (
+              '<option value="' + r.value + '"' +
+              (r.value === "technician" ? " selected" : "") + ">" + esc(r.label) + "</option>"
+            );
+          })
+          .join("") +
         "</select></label>" +
         '<label class="field"><span>Phone (optional)</span><input id="m-phone" type="tel" maxlength="30" /></label>' +
         '<label class="field"><span>Email (optional)</span><input id="m-email" type="email" maxlength="120" /></label>' +
-        codeFields("Login code"),
+        '<div id="m-code-fields">' + codeFields("Login code") + "</div>" +
+        '<p class="muted" id="m-temp-note" style="font-size:0.84rem" hidden>The app will draw a temporary code for this account and show it to you once. Hand it over in person — they must choose their own code the first time they sign in.</p>',
       function () {
-        var pin = readNewCode();
         var name = val("m-name");
         if (!name) throw new Error("Enter a name");
+        var role = val("m-role");
+        var generated = isSpecialistRole(role);
+        var pin = generated ? "" : readNewCode();
         return api("crew", {
           method: "POST",
           body: {
             name: name,
-            role: val("m-role"),
+            role: role,
             phone: val("m-phone"),
             email: val("m-email"),
             pin: pin
           }
-        }).then(function () {
+        }).then(function (d) {
+          if (d.tempPin) {
+            pendingTempCode = { name: name, pin: d.tempPin, notice: d.tempPinNotice };
+            return "";
+          }
           return name + " can now sign in with that code.";
         });
       }
     );
+    syncAddCrewForm();
+  }
+
+  // Adding a Management Specialist takes no typed code, so the two code boxes
+  // come off the form rather than sitting there collecting a value the server
+  // would throw away.
+  function syncAddCrewForm() {
+    var select = document.getElementById("m-role");
+    if (!select) return;
+    var specialist = isSpecialistRole(select.value);
+    var fields = document.getElementById("m-code-fields");
+    var note = document.getElementById("m-temp-note");
+    if (note) note.hidden = !specialist;
+    if (fields) {
+      fields.hidden = specialist;
+      var inputs = fields.querySelectorAll("input");
+      for (var i = 0; i < inputs.length; i++) inputs[i].required = !specialist;
+    }
+  }
+
+  // An account that signed in with a code somebody else issued cannot reach any
+  // screen until it has chosen its own. The dialog has no cancel: closing it
+  // signs the session out rather than leaving the app half-open.
+  var forcingPinChange = false;
+  function forcePinChange() {
+    if (forcingPinChange) return;
+    forcingPinChange = true;
+    var form = document.getElementById("modal-form");
+    document.getElementById("modal-title").textContent = "Choose your own login code";
+    form.innerHTML =
+      '<p class="muted" style="font-size:0.86rem">You signed in with a temporary code. Choose a code only you know before going any further — the temporary one stops working as soon as you do.</p>' +
+      '<label class="field"><span>Temporary code</span>' +
+      '<input id="m-current" class="pin-input" type="password" inputmode="numeric" pattern="[0-9]*" ' +
+      'maxlength="8" placeholder="••••" required autocomplete="current-password" /></label>' +
+      codeFields("New code") +
+      '<p class="login-error modal-error" id="modal-error" hidden></p>' +
+      '<div class="modal-actions">' +
+      '<button type="button" class="btn btn-ghost" id="m-force-signout">Sign out instead</button>' +
+      '<button type="submit" class="btn btn-primary" id="modal-submit">Save</button>' +
+      "</div>";
+    modalSubmit = function () {
+      var newPin = readNewCode();
+      return api("pin", {
+        method: "POST",
+        body: { currentPin: val("m-current"), newPin: newPin }
+      }).then(function () {
+        forcingPinChange = false;
+        if (state.me) state.me.mustChangePin = false;
+        boot();
+        return "Your login code was changed.";
+      });
+    };
+    document.getElementById("modal").hidden = false;
+    document.getElementById("m-force-signout").addEventListener("click", function () {
+      forcingPinChange = false;
+      closeModal();
+      api("logout", { method: "POST" }).finally(showLogin);
+    });
+    var first = form.querySelector("input");
+    if (first) first.focus();
   }
 
   function toggleAccess(id) {
@@ -2005,8 +2915,8 @@
 
   function changeRole(id, role) {
     api("crew/" + id, { method: "PATCH", body: { role: role } })
-      .then(function () {
-        toast("Role updated.");
+      .then(function (d) {
+        toast((d && d.notice) || "Role updated.");
         renderCrew();
       })
       .catch(function (e) {
@@ -2761,6 +3671,7 @@
     panel.innerHTML = '<div class="loading">Loading…</div>';
     state.pay = null;
     state.ticket = null;
+    state.lead = null;
     Promise.all([
       api("jobs/" + id),
       state.crew.length ? Promise.resolve({ crew: state.crew }) : api("crew"),
@@ -3604,6 +4515,7 @@
   function closeDrawer() {
     document.getElementById("drawer").hidden = true;
     state.ticket = null;
+    state.lead = null;
   }
 
   // ---------- boot ----------
@@ -3614,7 +4526,7 @@
 
   // Home-screen shortcuts in the manifest open the app straight on a tab.
   function initialView() {
-    var allowed = ["dashboard", "book", "jobs", "customers", "crew"];
+    var allowed = ["dashboard", "book", "leads", "jobs", "customers", "crew"];
     if (state.canManage) allowed.push("charges");
     var want = new URLSearchParams(location.search).get("view");
     return allowed.indexOf(want) === -1 ? "dashboard" : want;
@@ -3642,10 +4554,18 @@
         // sign-in. Waiting for the crew tab to fill this in left every other
         // screen believing an office account could not manage anything.
         state.canManage = accountCanManage(d.employee);
-        document.getElementById("who").textContent = d.employee.name + " · " + d.employee.role;
+        state.isOwner = Boolean(d.employee.isOwner);
+        document.getElementById("who").textContent =
+          d.employee.name + " · " + (d.employee.roleLabel || roleLabel(d.employee.role));
         var chargeTab = document.querySelector('[data-view="charges"]');
         if (chargeTab) chargeTab.hidden = !state.canManage;
         showApp();
+        // A temporary code gets no further than this. The dialog goes up before
+        // any screen is drawn, and the API would refuse those screens anyway.
+        if (d.employee.mustChangePin) {
+          forcePinChange();
+          return;
+        }
         switchView(initialView());
         // If the customers tab was already on screen from an earlier session,
         // its search card is still in the page and would keep whatever button
@@ -3680,6 +4600,14 @@
           if (message) toast(message);
           var active = document.querySelector(".tab.active");
           if (active && active.dataset.view === "crew") renderCrew();
+          // A temporary code was generated while that dialog was open. Show it
+          // now the form has been cleared, so closing this one does not wipe
+          // the only copy the owner will ever see.
+          if (pendingTempCode) {
+            var t = pendingTempCode;
+            pendingTempCode = null;
+            showTempCode(t.name, t.pin, t.notice);
+          }
         })
         .catch(function (e) {
           modalError(e.message || "Could not save that");
@@ -3692,9 +4620,14 @@
         var err = document.getElementById("modal-error");
         if (err) err.hidden = true;
       }
+      // Choosing Management Specialist takes the code boxes off the form.
+      if (ev.target.id === "m-role") syncAddCrewForm();
     });
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape") return;
+      // The forced code change has no way out but changing the code or signing
+      // out, so Escape does not dismiss it.
+      if (forcingPinChange) return;
       if (!document.getElementById("modal").hidden) { closeModal(); return; }
       if (!document.getElementById("import").hidden) closeImport();
     });
@@ -3712,11 +4645,19 @@
       // A Call, Text or Email link hands off to the handset. It is checked first
       // because these links sit inside rows that would otherwise open a job.
       if (e.target.closest('a[href^="tel:"], a[href^="sms:"], a[href^="mailto:"]')) return;
-      if (e.target.closest("[data-modal-close]")) { closeModal(); return; }
+      if (e.target.closest("[data-modal-close]")) {
+        if (!forcingPinChange) closeModal();
+        return;
+      }
       if (e.target.closest("[data-import-close]")) { closeImport(); return; }
       var retrySync = e.target.closest("[data-clover-retry]");
       if (retrySync) {
         retryCloverSync(Number(retrySync.dataset.cloverRetry), retrySync);
+        return;
+      }
+      var retryImport = e.target.closest("[data-retry-import]");
+      if (retryImport) {
+        retryIntakeFailure(Number(retryImport.dataset.retryImport), retryImport);
         return;
       }
       var goTo = e.target.closest("[data-goto]");
@@ -3746,7 +4687,15 @@
       }
       var row = e.target.closest("[data-job]");
       if (row) { openJob(Number(row.dataset.job)); return; }
+      var leadRow = e.target.closest("[data-lead]");
+      if (leadRow) { openLead(Number(leadRow.dataset.lead)); return; }
       if (e.target.matches("[data-close]")) { closeDrawer(); return; }
+      var leadChip = e.target.closest("[data-lead-status]");
+      if (leadChip && leadChip.classList.contains("chip")) {
+        state.leadFilters.status = leadChip.dataset.leadStatus;
+        loadLeadList();
+        return;
+      }
       var chip = e.target.closest("[data-status]");
       if (chip && chip.classList.contains("chip")) {
         state.jobFilter = chip.dataset.status;

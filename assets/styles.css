@@ -784,6 +784,16 @@ p {
   font-size: 0.72rem;
 }
 
+/* Says out loud which details are nice to have rather than needed, so an
+   address the customer would rather give on the phone does not read as a
+   blocked form. */
+.field-optional {
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
 .field input,
 .field select,
 .field textarea {

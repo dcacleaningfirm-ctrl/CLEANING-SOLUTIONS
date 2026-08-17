@@ -93,3 +93,26 @@ export function newPinRecord(pin: string): { pinHash: string; pinSalt: string } 
   const pinSalt = generateSalt();
   return { pinHash: hashPin(pin, pinSalt), pinSalt };
 }
+
+// Length of a temporary PIN issued by the app rather than chosen by a person.
+// Longer than the four digits a crew member may pick, because a temporary code
+// is handed over rather than remembered.
+export const TEMP_PIN_LENGTH = 6;
+
+// A temporary PIN, generated on the server with the operating system's random
+// source. Nobody chooses it and nobody can predict it — Math.random and
+// timestamp-derived codes are both unsuitable here.
+//
+// The result is run through the same rules a person's PIN has to pass, so a
+// generated 111111 or 123456 is discarded and drawn again. The loop is bounded
+// so a mistake in those rules can never hang a request.
+export function generateTempPin(): string {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    let pin = "";
+    for (let i = 0; i < TEMP_PIN_LENGTH; i += 1) {
+      pin += String(crypto.randomInt(0, 10));
+    }
+    if (!validatePin(pin)) return pin;
+  }
+  throw new Error("Could not generate a temporary PIN");
+}

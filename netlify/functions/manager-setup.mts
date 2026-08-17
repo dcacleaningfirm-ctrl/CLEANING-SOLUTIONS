@@ -3,8 +3,13 @@ import crypto from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/index.js";
 import { employees } from "../../db/schema.js";
-import { newPinRecord, validatePin } from "../../lib/manager-pin.js";
-import { CREW_ROLES } from "../../lib/manager-session.js";
+import { generateTempPin, newPinRecord, validatePin } from "../../lib/manager-pin.js";
+import {
+  CREW_ROLES,
+  isManagementSpecialist,
+  roleLabel
+} from "../../lib/manager-session.js";
+import { SECURITY_EVENTS, recordSecurityEvent } from "../../lib/security-log.js";
 
 // Recovery door for the DCA Pro Manager login codes.
 //
@@ -101,10 +106,6 @@ export default async (req: Request) => {
       return json({ error: "Unknown action" }, { status: 400 });
     }
 
-    const pin = String(body.pin || "");
-    const problem = validatePin(pin);
-    if (problem) return json({ error: problem }, { status: 400 });
-
     // Replace an existing member's code, reactivating them and optionally
     // giving them the owner role so they can manage everyone else's codes.
     if (body.action === "reset") {
@@ -116,19 +117,60 @@ export default async (req: Request) => {
         .where(eq(employees.id, id));
       if (!target) return json({ error: "Unknown crew member" }, { status: 404 });
 
+      // A Management Specialist code is never typed by whoever is holding the
+      // setup key either. The door issues a temporary one and the account has
+      // to replace it at its next sign-in, exactly as it would from inside.
+      const specialist = isManagementSpecialist(target.role) && !body.promote;
+      const pin = specialist ? generateTempPin() : String(body.pin || "");
+      if (!specialist) {
+        const problem = validatePin(pin);
+        if (problem) return json({ error: problem }, { status: 400 });
+      }
+
       await db
         .update(employees)
         .set({
           ...newPinRecord(pin),
           active: true,
+          mustChangePin: specialist,
+          pinUpdatedAt: new Date(),
+          failedPinAttempts: 0,
+          lockedUntil: null,
           ...(body.promote ? { role: "owner" } : {})
         })
         .where(eq(employees.id, id));
 
       console.log(`manager-setup: login code reissued for employee ${id}`);
+      await recordSecurityEvent({
+        event: SECURITY_EVENTS.pinReset,
+        employeeId: target.id,
+        employeeName: target.name,
+        employeeRole: body.promote ? "owner" : target.role,
+        actorName: "Recovery door",
+        actorRole: "setup_key",
+        detail: body.promote
+          ? "Code reissued and account promoted to Owner using the setup key"
+          : "Code reissued using the setup key",
+        outcome: "success",
+        req
+      });
+      if (body.promote && target.role !== "owner") {
+        await recordSecurityEvent({
+          event: SECURITY_EVENTS.roleChanged,
+          employeeId: target.id,
+          employeeName: target.name,
+          employeeRole: "owner",
+          actorName: "Recovery door",
+          actorRole: "setup_key",
+          detail: `Role changed from ${roleLabel(target.role)} to Owner`,
+          outcome: "success",
+          req
+        });
+      }
       return json({
         ok: true,
         member: { id: target.id, name: target.name },
+        ...(specialist ? { tempPin: pin, mustChangePin: true } : {}),
         reminder:
           "Remove MANAGER_SETUP_KEY from the site environment now that you can sign in."
       });
@@ -143,16 +185,42 @@ export default async (req: Request) => {
       return json({ error: "Choose a valid role" }, { status: 400 });
     }
 
+    const specialist = isManagementSpecialist(role);
+    const pin = specialist ? generateTempPin() : String(body.pin || "");
+    if (!specialist) {
+      const problem = validatePin(pin);
+      if (problem) return json({ error: problem }, { status: 400 });
+    }
+
     const [created] = await db
       .insert(employees)
-      .values({ name, role, active: true, ...newPinRecord(pin) })
+      .values({
+        name,
+        role,
+        active: true,
+        mustChangePin: specialist,
+        pinUpdatedAt: new Date(),
+        ...newPinRecord(pin)
+      })
       .returning({ id: employees.id, name: employees.name });
 
     console.log(`manager-setup: crew member ${created.id} created`);
+    await recordSecurityEvent({
+      event: SECURITY_EVENTS.accountCreated,
+      employeeId: created.id,
+      employeeName: created.name,
+      employeeRole: role,
+      actorName: "Recovery door",
+      actorRole: "setup_key",
+      detail: `Account created as ${roleLabel(role)} using the setup key`,
+      outcome: "success",
+      req
+    });
     return json(
       {
         ok: true,
         member: created,
+        ...(specialist ? { tempPin: pin, mustChangePin: true } : {}),
         reminder:
           "Remove MANAGER_SETUP_KEY from the site environment now that you can sign in."
       },
