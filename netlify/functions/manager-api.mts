@@ -23,11 +23,15 @@ import {
 } from "../../lib/manager-pin.js";
 import {
   CREW_ROLES,
+  type Permission,
+  can,
   canAdministerAccount,
   canManageCrew,
   clearedCookie,
+  defaultViewFor,
   isManagementSpecialist,
   isOwner,
+  navigationFor,
   permissionsFor,
   readSessionCookie,
   roleLabel
@@ -876,6 +880,24 @@ export default async (req: Request, context: Context) => {
     }
 
     // --- Session ---------------------------------------------------------
+    // Every check below reads the role off the row just loaded, never off the
+    // cookie or the request body. Hiding a tab in the browser is a courtesy;
+    // this is the thing that actually decides what a role can reach, so a
+    // hand-written request to a route the screen never offered is refused here.
+    const allows = (permission: Permission) => can(account.role, permission);
+    const denied = (what: string) =>
+      json(
+        { error: `Your role does not have access to ${what}.`, forbidden: true },
+        { status: 403 }
+      );
+
+    // A technician sees the work assigned to them and nothing else. The test is
+    // the operational-overview permission: an account that cannot see the board
+    // for the whole business has no business reading rows off it either.
+    // Applied as a SQL filter rather than by trimming the response, so somebody
+    // else's jobs are never read out of the database in the first place.
+    const ownJobsOnly = !allows("dashboard");
+
     if (path === "session" && method === "GET") {
       return json({
         employee: {
@@ -884,6 +906,8 @@ export default async (req: Request, context: Context) => {
           role: account.role,
           roleLabel: roleLabel(account.role),
           permissions: permissionsFor(account.role),
+          navigation: navigationFor(account.role),
+          defaultView: defaultViewFor(account.role),
           canManageCrew: canManageCrew(account.role),
           isOwner: isOwner(account.role),
           mustChangePin: Boolean(account.mustChangePin)
@@ -909,13 +933,26 @@ export default async (req: Request, context: Context) => {
     }
 
     // --- Dashboard -------------------------------------------------------
+    // Two audiences on one screen. Everybody entitled to the operational view
+    // gets the board — what is on today, what is still open, who is out. The
+    // money on it (pipeline, collected, outstanding, how many accounts are on
+    // file) is sales and financial reporting, so it is assembled only for a
+    // role holding that permission and is absent from the response otherwise
+    // rather than merely unrendered.
     if (path === "dashboard" && method === "GET") {
-      return json(await buildDashboard());
+      if (!allows("dashboard")) return denied("the dashboard");
+      return json(
+        await buildDashboard({
+          reports: allows("reports"),
+          leads: allows("leads"),
+          contacts: allows("customer_contacts")
+        })
+      );
     }
 
     // --- Custom charges ---------------------------------------------------
     if (path === "custom-charges" && method === "GET") {
-      if (!canManageCrew(account.role)) return forbidden;
+      if (!allows("charges")) return denied("invoicing and payments");
       const settings = cloverSettings();
       const rows = await db
         .select({
@@ -948,7 +985,7 @@ export default async (req: Request, context: Context) => {
     }
 
     if (path === "custom-charges" && method === "POST") {
-      if (!canManageCrew(account.role)) return forbidden;
+      if (!allows("charges")) return denied("invoicing and payments");
       const settings = cloverSettings();
       if (settings.missing.length) {
         return json(
@@ -1170,6 +1207,7 @@ export default async (req: Request, context: Context) => {
     // balance, the dashboard and the customer's receipt all agree.
     const jobPaymentsMatch = path.match(/^jobs\/(\d+)\/payments$/);
     if (jobPaymentsMatch && method === "POST") {
+      if (!allows("charges")) return denied("taking payments");
       const jobId = Number(jobPaymentsMatch[1]);
       const body = (await req.json().catch(() => ({}))) as {
         method?: string;
@@ -1367,9 +1405,13 @@ export default async (req: Request, context: Context) => {
     // read it back — or copy it into its own phone when no provider is set up.
     const confirmationMatch = path.match(/^jobs\/(\d+)\/confirmation$/);
     if (confirmationMatch && (method === "GET" || method === "POST")) {
+      if (!allows("jobs")) return denied("jobs");
       const jobId = Number(confirmationMatch[1]);
       const detail = await loadJob(jobId);
       if (!detail) return json({ error: "Job not found" }, { status: 404 });
+      if (ownJobsOnly && detail.job.assignedTo !== account.id) {
+        return denied("a job assigned to somebody else");
+      }
 
       const body =
         method === "POST"
@@ -1474,14 +1516,17 @@ export default async (req: Request, context: Context) => {
       // has, minus every field describing a login code: no code state, no
       // lockouts, no sign-in times, for any row. The trimming happens here
       // rather than on the screen, so those fields are absent from the response
-      // instead of merely unrendered.
+      // instead of merely unrendered. Contact columns go too unless the account
+      // is entitled to contact details, so the roster cannot be read as a
+      // phone list by a role that is not allowed one.
       if (!canManageCrew(account.role)) {
+        const contacts = allows("customer_contacts");
         return json({
           crew: rows.map((row) => ({
             id: row.id,
             name: row.name,
-            email: row.email,
-            phone: row.phone,
+            email: contacts ? row.email : null,
+            phone: contacts ? row.phone : null,
             role: row.role,
             roleLabel: roleLabel(row.role),
             active: row.active,
@@ -1926,7 +1971,7 @@ export default async (req: Request, context: Context) => {
     // and who changed a role, so the movement of access can be reviewed after
     // the fact by the one person entitled to review it.
     if (path === "security-log" && method === "GET") {
-      if (!isOwner(account.role)) {
+      if (!allows("security_log")) {
         return json(
           { error: "Only the owner can read the security log" },
           { status: 403 }
@@ -1972,6 +2017,10 @@ export default async (req: Request, context: Context) => {
 
     // --- Customers -------------------------------------------------------
     if (path === "customers" && method === "GET") {
+      // The customer database. Gated on its own permission rather than on
+      // "runs the office": an admin books callers in all day without ever being
+      // able to page through, search or export the list of everyone on file.
+      if (!allows("customers")) return denied("the customer database");
       // `q` powers the lookup box on the booking screen: an agent types part of
       // a name, a phone number as the caller says it, or a street, and gets the
       // matching account back without leaving the call.
@@ -2012,9 +2061,33 @@ export default async (req: Request, context: Context) => {
     }
 
     // --- One customer account --------------------------------------------
+    //
+    // Reaching a single account is not the same as reaching the database. An
+    // account with the customer permission may open any of them. Everybody else
+    // may only open one they are already working: a customer attached to a job
+    // on their board, which for a technician means a job assigned to them. That
+    // is what lets a crew member standing at the door fix a misheard street name
+    // without also handing the office floor a searchable contact list.
+    async function mayReachCustomer(customerId: number): Promise<boolean> {
+      if (allows("customers")) return true;
+      if (!allows("jobs")) return false;
+      const [linked] = await db
+        .select({ id: jobs.id })
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.customerId, customerId),
+            ownJobsOnly ? eq(jobs.assignedTo, account.id) : undefined
+          )
+        )
+        .limit(1);
+      return Boolean(linked);
+    }
+
     const customerMatch = path.match(/^customers\/(\d+)$/);
     if (customerMatch && method === "GET") {
       const id = Number(customerMatch[1]);
+      if (!(await mayReachCustomer(id))) return denied("that customer account");
       const [customer] = await db.select().from(customers).where(eq(customers.id, id));
       if (!customer) return json({ error: "That customer no longer exists" }, { status: 404 });
       const [count] = await db
@@ -2025,11 +2098,12 @@ export default async (req: Request, context: Context) => {
     }
 
     // Correcting what is on file. A wrong phone number or a misheard street name
-    // is the single most common thing a crew member finds at the door, so any
-    // signed-in crew member can fix it — and the job they were looking at when
-    // they did keeps a line in its history saying so.
+    // is the single most common thing a crew member finds at the door, so anyone
+    // who can already reach the account may fix it — and the job they were
+    // looking at when they did keeps a line in its history saying so.
     if (customerMatch && method === "PATCH") {
       const id = Number(customerMatch[1]);
+      if (!(await mayReachCustomer(id))) return denied("that customer account");
       const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
 
       const [existing] = await db.select().from(customers).where(eq(customers.id, id));
@@ -2108,7 +2182,7 @@ export default async (req: Request, context: Context) => {
     // on the server, in both preview and commit. The preview the office approves
     // is therefore produced by exactly the code that does the writing.
     if (path === "customers/import" && method === "POST") {
-      if (!canManageCrew(account.role)) return forbidden;
+      if (!allows("imports")) return denied("customer imports");
 
       const body = (await req.json().catch(() => ({}))) as {
         mode?: string;
@@ -2185,7 +2259,7 @@ export default async (req: Request, context: Context) => {
     // Asked once before a bulk run so a token without customer permissions is
     // reported clearly instead of failing several hundred rows one at a time.
     if (path === "customers/import/clover-check" && method === "GET") {
-      if (!canManageCrew(account.role)) return forbidden;
+      if (!allows("imports")) return denied("customer imports");
       const access = await checkCloverCustomerAccess();
       return json({
         ok: access.ok,
@@ -2202,6 +2276,7 @@ export default async (req: Request, context: Context) => {
     // change anything in DCA Pro Manager.
     const cloverSyncMatch = path.match(/^customers\/(\d+)\/clover-sync$/);
     if (cloverSyncMatch && method === "POST") {
+      if (!allows("imports")) return denied("the customer directory sync");
       const id = Number(cloverSyncMatch[1]);
       const [existing] = await db.select().from(customers).where(eq(customers.id, id));
       if (!existing) return json({ error: "That customer no longer exists" }, { status: 404 });
@@ -2218,6 +2293,7 @@ export default async (req: Request, context: Context) => {
     // Everything already on the calendar between two instants, so whoever is on
     // the phone can see what is free before offering a time.
     if (path === "schedule" && method === "GET") {
+      if (!allows("schedule")) return denied("the schedule");
       const from = new Date(url.searchParams.get("from") || "");
       const to = new Date(url.searchParams.get("to") || "");
       if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) {
@@ -2246,7 +2322,14 @@ export default async (req: Request, context: Context) => {
         .from(jobs)
         .innerJoin(customers, eq(jobs.customerId, customers.id))
         .leftJoin(assignee, eq(jobs.assignedTo, assignee.id))
-        .where(and(gte(jobs.scheduledFor, from), lt(jobs.scheduledFor, to)))
+        .where(
+          and(
+            gte(jobs.scheduledFor, from),
+            lt(jobs.scheduledFor, to),
+            // A technician's calendar is their own calendar.
+            ownJobsOnly ? eq(jobs.assignedTo, account.id) : undefined
+          )
+        )
         .orderBy(asc(jobs.scheduledFor));
 
       const crew = await db
@@ -2260,6 +2343,7 @@ export default async (req: Request, context: Context) => {
 
     // --- Book an appointment ---------------------------------------------
     if (path === "jobs" && method === "POST") {
+      if (!allows("book")) return denied("booking appointments");
       const body = (await req.json().catch(() => ({}))) as {
         customerId?: number;
         customer?: {
@@ -2463,6 +2547,7 @@ export default async (req: Request, context: Context) => {
 
     // --- Jobs list -------------------------------------------------------
     if (path === "jobs" && method === "GET") {
+      if (!allows("jobs")) return denied("the job board");
       const status = url.searchParams.get("status");
       const assignee = employees;
       const rows = await db
@@ -2488,7 +2573,14 @@ export default async (req: Request, context: Context) => {
         .from(jobs)
         .innerJoin(customers, eq(jobs.customerId, customers.id))
         .leftJoin(assignee, eq(jobs.assignedTo, assignee.id))
-        .where(status ? eq(jobs.status, status) : undefined)
+        .where(
+          and(
+            status ? eq(jobs.status, status) : undefined,
+            // A technician's board is their own work, filtered in SQL so the
+            // rest of the day's jobs are never read out of the database.
+            ownJobsOnly ? eq(jobs.assignedTo, account.id) : undefined
+          )
+        )
         .orderBy(desc(jobs.scheduledFor));
       return json({ jobs: rows });
     }
@@ -2496,14 +2588,19 @@ export default async (req: Request, context: Context) => {
     // --- Single job (with items + events) -------------------------------
     const jobMatch = path.match(/^jobs\/(\d+)$/);
     if (jobMatch && method === "GET") {
+      if (!allows("jobs")) return denied("the job board");
       const id = Number(jobMatch[1]);
       const job = await loadJob(id);
       if (!job) return json({ error: "Job not found" }, { status: 404 });
+      if (ownJobsOnly && job.job.assignedTo !== account.id) {
+        return denied("a job assigned to somebody else");
+      }
       return json(job);
     }
 
     // --- Update a job (status / assignment / notes) ---------------------
     if (jobMatch && method === "PATCH") {
+      if (!allows("jobs")) return denied("the job board");
       const id = Number(jobMatch[1]);
       const body = (await req.json().catch(() => ({}))) as {
         status?: string;
@@ -2516,6 +2613,20 @@ export default async (req: Request, context: Context) => {
 
       const [existing] = await db.select().from(jobs).where(eq(jobs.id, id));
       if (!existing) return json({ error: "Job not found" }, { status: 404 });
+      if (ownJobsOnly && existing.assignedTo !== account.id) {
+        return denied("a job assigned to somebody else");
+      }
+      // Moving an appointment or handing it to somebody else is office work, not
+      // field work: a technician updates the status of what they were given and
+      // writes on it, but does not rearrange the calendar or reassign a visit.
+      if (
+        ownJobsOnly &&
+        (body.assignedTo !== undefined ||
+          body.scheduledFor !== undefined ||
+          body.durationMinutes !== undefined)
+      ) {
+        return denied("rescheduling or reassigning work");
+      }
 
       const updates: Record<string, unknown> = {};
       const events: { kind: string; message: string }[] = [];
@@ -2637,6 +2748,9 @@ export default async (req: Request, context: Context) => {
     // can never disagree.
     const itemsMatch = path.match(/^jobs\/(\d+)\/items$/);
     if (itemsMatch && method === "PUT") {
+      // Repricing a ticket is an office decision, not something a crew member
+      // does from the doorstep.
+      if (!allows("book")) return denied("changing what a job is priced at");
       const id = Number(itemsMatch[1]);
       const body = (await req.json().catch(() => ({}))) as {
         items?: unknown;
@@ -2727,6 +2841,7 @@ export default async (req: Request, context: Context) => {
     // --- Add a note to a job --------------------------------------------
     const noteMatch = path.match(/^jobs\/(\d+)\/notes$/);
     if (noteMatch && method === "POST") {
+      if (!allows("jobs")) return denied("jobs");
       const id = Number(noteMatch[1]);
       const body = (await req.json().catch(() => ({}))) as { message?: string };
       const message = (body.message || "").trim();
@@ -2755,6 +2870,7 @@ export default async (req: Request, context: Context) => {
     // The vocabulary the console builds its filters from, so a source added in
     // lib/lead-intake.ts appears in the app without a second edit here.
     if (path === "leads/vocabulary" && method === "GET") {
+      if (!allows("leads")) return denied("the request queue");
       return json({ sources: LEAD_SOURCES, statuses: LEAD_STATUSES });
     }
 
@@ -2762,6 +2878,7 @@ export default async (req: Request, context: Context) => {
     // itself is never lost — Netlify keeps its own copy — so this is the queue
     // of imports to try again.
     if (path === "leads/failures" && method === "GET") {
+      if (!allows("leads")) return denied("the request queue");
       const rows = await db
         .select()
         .from(intakeFailures)
@@ -2785,7 +2902,7 @@ export default async (req: Request, context: Context) => {
 
     const failureRetryMatch = path.match(/^leads\/failures\/(\d+)\/retry$/);
     if (failureRetryMatch && method === "POST") {
-      if (!canManageCrew(account.role)) return forbidden;
+      if (!allows("leads")) return denied("the request queue");
       const id = Number(failureRetryMatch[1]);
       const [failure] = await db
         .select()
@@ -2822,6 +2939,7 @@ export default async (req: Request, context: Context) => {
     }
 
     if (path === "leads" && method === "GET") {
+      if (!allows("leads")) return denied("the request queue");
       const status = (url.searchParams.get("status") || "").trim();
       const source = (url.searchParams.get("source") || "").trim();
       const service = (url.searchParams.get("service") || "").trim();
@@ -2949,6 +3067,7 @@ export default async (req: Request, context: Context) => {
     // the office. Same table, same statuses, same conversion — only the source
     // is different, which is the whole point of the intake being shared.
     if (path === "leads" && method === "POST") {
+      if (!allows("leads")) return denied("the request queue");
       const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
       const source = String(body.source || "phone").trim();
       if (!LEAD_SOURCE_VALUES.includes(source)) {
@@ -2978,6 +3097,7 @@ export default async (req: Request, context: Context) => {
 
     const leadMatch = path.match(/^leads\/(\d+)$/);
     if (leadMatch && method === "GET") {
+      if (!allows("leads")) return denied("the request queue");
       const detail = await loadLead(Number(leadMatch[1]));
       if (!detail) return json({ error: "That request no longer exists" }, { status: 404 });
       return json(detail);
@@ -2987,6 +3107,7 @@ export default async (req: Request, context: Context) => {
     // what was submitted. The customer's own record is edited through the
     // customers endpoint, so one account is never described in two places.
     if (leadMatch && method === "PATCH") {
+      if (!allows("leads")) return denied("the request queue");
       const id = Number(leadMatch[1]);
       const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
       const [existing] = await db.select().from(leads).where(eq(leads.id, id));
@@ -3070,6 +3191,7 @@ export default async (req: Request, context: Context) => {
 
     const leadNoteMatch = path.match(/^leads\/(\d+)\/notes$/);
     if (leadNoteMatch && method === "POST") {
+      if (!allows("leads")) return denied("the request queue");
       const id = Number(leadNoteMatch[1]);
       const body = (await req.json().catch(() => ({}))) as { message?: string };
       const message = (body.message || "").trim().slice(0, 2000);
@@ -3092,6 +3214,8 @@ export default async (req: Request, context: Context) => {
     // ordinary job from the moment it exists.
     const convertMatch = path.match(/^leads\/(\d+)\/convert$/);
     if (convertMatch && method === "POST") {
+      if (!allows("leads")) return denied("the request queue");
+      if (!allows("book")) return denied("booking appointments");
       const id = Number(convertMatch[1]);
       const body = (await req.json().catch(() => ({}))) as {
         serviceType?: string;
@@ -3656,7 +3780,17 @@ function serviceAddress(row: {
     .join(", ");
 }
 
-async function buildDashboard() {
+// The dashboard, assembled for the role asking for it.
+//
+// `view` is not a display hint — it decides which queries run. A role without
+// the reporting permission never has the revenue figures summed, so they are
+// missing from the response rather than sent and hidden, and a role without the
+// contact permission never has phone numbers selected onto the map.
+async function buildDashboard(view: {
+  reports: boolean;
+  leads: boolean;
+  contacts: boolean;
+}) {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const startOfTomorrow = new Date(startOfToday);
@@ -3682,23 +3816,61 @@ async function buildDashboard() {
       )
     );
 
-  const [pipeline] = await db
-    .select({
-      value: sql<number>`cast(coalesce(sum(${jobs.priceCents}), 0) as int)`
-    })
-    .from(jobs)
-    .where(sql`${jobs.status} not in ('completed','cancelled')`);
+  // The money on the board. Summed only when the account asking is entitled to
+  // sales and financial reporting; left unread otherwise.
+  const money = view.reports
+    ? await (async () => {
+        const [pipeline] = await db
+          .select({
+            value: sql<number>`cast(coalesce(sum(${jobs.priceCents}), 0) as int)`
+          })
+          .from(jobs)
+          .where(sql`${jobs.status} not in ('completed','cancelled')`);
 
-  const [completedValue] = await db
-    .select({
-      value: sql<number>`cast(coalesce(sum(${jobs.priceCents}), 0) as int)`
-    })
-    .from(jobs)
-    .where(eq(jobs.status, "completed"));
+        const [completedValue] = await db
+          .select({
+            value: sql<number>`cast(coalesce(sum(${jobs.priceCents}), 0) as int)`
+          })
+          .from(jobs)
+          .where(eq(jobs.status, "completed"));
 
-  const [customerCount] = await db
-    .select({ count: sql<number>`cast(count(*) as int)` })
-    .from(customers);
+        const [customerCount] = await db
+          .select({ count: sql<number>`cast(count(*) as int)` })
+          .from(customers);
+
+        const [paid] = await db
+          .select({
+            value: sql<number>`cast(coalesce(sum(${payments.amountCents}), 0) as int)`
+          })
+          .from(payments)
+          .where(eq(payments.status, "paid"));
+
+        // What the office is still owed: everything booked and not cancelled,
+        // less everything collected against those same jobs by any method.
+        const [billed] = await db
+          .select({
+            value: sql<number>`cast(coalesce(sum(${jobs.priceCents}), 0) as int)`
+          })
+          .from(jobs)
+          .where(ne(jobs.status, "cancelled"));
+
+        const [collected] = await db
+          .select({
+            value: sql<number>`cast(coalesce(sum(${payments.amountCents}), 0) as int)`
+          })
+          .from(payments)
+          .innerJoin(jobs, eq(payments.jobId, jobs.id))
+          .where(and(eq(payments.status, "paid"), ne(jobs.status, "cancelled")));
+
+        return {
+          pipelineCents: pipeline?.value || 0,
+          completedValueCents: completedValue?.value || 0,
+          paidCents: paid?.value || 0,
+          outstandingCents: Math.max(0, (billed?.value || 0) - (collected?.value || 0)),
+          customers: customerCount?.count || 0
+        };
+      })()
+    : null;
 
   const [crewCount] = await db
     .select({ count: sql<number>`cast(count(*) as int)` })
@@ -3732,7 +3904,9 @@ async function buildDashboard() {
     serviceType: row.serviceType,
     status: row.status,
     scheduledFor: row.scheduledFor,
-    priceCents: row.priceCents,
+    // What a visit is worth is a sales figure, so it travels with the rest of
+    // the reporting rather than with the operational board.
+    priceCents: view.reports ? row.priceCents : null,
     customerName: row.customerName,
     assignedName: row.assignedName,
     serviceAddress: serviceAddress(row)
@@ -3770,9 +3944,11 @@ async function buildDashboard() {
       serviceType: row.serviceType,
       status: row.status,
       scheduledFor: row.scheduledFor,
-      priceCents: row.priceCents,
+      priceCents: view.reports ? row.priceCents : null,
       customerName: row.customerName,
-      customerPhone: row.customerPhone,
+      // A pin on a map is where the crew is going. The number to ring on the
+      // way there is contact information, and only goes to a role holding it.
+      customerPhone: view.contacts ? row.customerPhone : null,
       assignedName: row.assignedName,
       serviceAddress: serviceAddress(row)
     }))
@@ -3790,97 +3966,84 @@ async function buildDashboard() {
     .orderBy(desc(jobEvents.createdAt))
     .limit(10);
 
-  const [paid] = await db
-    .select({
-      value: sql<number>`cast(coalesce(sum(${payments.amountCents}), 0) as int)`
-    })
-    .from(payments)
-    .where(eq(payments.status, "paid"));
-
-  // What the office is still owed: everything booked and not cancelled, less
-  // everything collected against those same jobs by any method.
-  const [billed] = await db
-    .select({
-      value: sql<number>`cast(coalesce(sum(${jobs.priceCents}), 0) as int)`
-    })
-    .from(jobs)
-    .where(ne(jobs.status, "cancelled"));
-
-  const [collected] = await db
-    .select({
-      value: sql<number>`cast(coalesce(sum(${payments.amountCents}), 0) as int)`
-    })
-    .from(payments)
-    .innerJoin(jobs, eq(payments.jobId, jobs.id))
-    .where(and(eq(payments.status, "paid"), ne(jobs.status, "cancelled")));
-
   // --- The intake counters ------------------------------------------------
   // What came in today, how much of it the website produced, and how far the
-  // office has got with the rest.
-  const [newLeadsToday] = await db
-    .select({ count: sql<number>`cast(count(*) as int)` })
-    .from(leads)
-    .where(and(gte(leads.submittedAt, startOfToday), lt(leads.submittedAt, startOfTomorrow)));
+  // office has got with the rest. Every one of these rows names a caller, so
+  // the whole block belongs to the roles allowed the request queue.
+  const intake = view.leads
+    ? await (async () => {
+        const [newLeadsToday] = await db
+          .select({ count: sql<number>`cast(count(*) as int)` })
+          .from(leads)
+          .where(and(gte(leads.submittedAt, startOfToday), lt(leads.submittedAt, startOfTomorrow)));
 
-  const [websiteLeads] = await db
-    .select({ count: sql<number>`cast(count(*) as int)` })
-    .from(leads)
-    .where(eq(leads.source, "website"));
+        const [websiteLeads] = await db
+          .select({ count: sql<number>`cast(count(*) as int)` })
+          .from(leads)
+          .where(eq(leads.source, "website"));
 
-  const leadStatusRows = await db
-    .select({ status: leads.status, count: sql<number>`cast(count(*) as int)` })
-    .from(leads)
-    .groupBy(leads.status);
-  const leadsByStatus: Record<string, number> = {};
-  for (const row of leadStatusRows) leadsByStatus[row.status] = row.count;
+        const leadStatusRows = await db
+          .select({ status: leads.status, count: sql<number>`cast(count(*) as int)` })
+          .from(leads)
+          .groupBy(leads.status);
+        const leadsByStatus: Record<string, number> = {};
+        for (const row of leadStatusRows) leadsByStatus[row.status] = row.count;
 
-  const [openIntakeFailures] = await db
-    .select({ count: sql<number>`cast(count(*) as int)` })
-    .from(intakeFailures)
-    .where(eq(intakeFailures.status, "open"));
+        const [openIntakeFailures] = await db
+          .select({ count: sql<number>`cast(count(*) as int)` })
+          .from(intakeFailures)
+          .where(eq(intakeFailures.status, "open"));
 
-  // The newest requests nobody has touched yet, so the dashboard shows work to
-  // pick up rather than only work already booked.
-  const newLeads = await db
-    .select({
-      id: leads.id,
-      customerName: leads.customerName,
-      phone: leads.phone,
-      service: leads.service,
-      promotionCode: leads.promotionCode,
-      totalCents: leads.totalCents,
-      source: leads.source,
-      status: leads.status,
-      submittedAt: leads.submittedAt
-    })
-    .from(leads)
-    .where(sql`${leads.status} in ('new','contacted')`)
-    .orderBy(desc(leads.submittedAt))
-    .limit(6);
+        // The newest requests nobody has touched yet, so the dashboard shows
+        // work to pick up rather than only work already booked.
+        const newLeads = await db
+          .select({
+            id: leads.id,
+            customerName: leads.customerName,
+            phone: leads.phone,
+            service: leads.service,
+            promotionCode: leads.promotionCode,
+            totalCents: leads.totalCents,
+            source: leads.source,
+            status: leads.status,
+            submittedAt: leads.submittedAt
+          })
+          .from(leads)
+          .where(sql`${leads.status} in ('new','contacted')`)
+          .orderBy(desc(leads.submittedAt))
+          .limit(6);
+
+        return {
+          leadStats: {
+            newToday: newLeadsToday?.count || 0,
+            website: websiteLeads?.count || 0,
+            scheduled: leadsByStatus.scheduled || 0,
+            completed: leadsByStatus.completed || 0,
+            open:
+              (leadsByStatus.new || 0) +
+              (leadsByStatus.contacted || 0) +
+              (leadsByStatus.estimate_sent || 0),
+            failedImports: openIntakeFailures?.count || 0
+          },
+          newLeads: newLeads.map((row) => ({
+            ...row,
+            sourceLabel: leadSourceLabel(row.source),
+            statusLabel: leadStatusLabel(row.status)
+          }))
+        };
+      })()
+    : null;
 
   return {
+    // The counts everyone entitled to the board can see, and — only when the
+    // reporting permission is held — the money alongside them.
     stats: {
       jobsToday: today?.count || 0,
-      pipelineCents: pipeline?.value || 0,
-      completedValueCents: completedValue?.value || 0,
-      paidCents: paid?.value || 0,
-      outstandingCents: Math.max(0, (billed?.value || 0) - (collected?.value || 0)),
-      customers: customerCount?.count || 0,
-      activeCrew: crewCount?.count || 0
+      activeCrew: crewCount?.count || 0,
+      ...(money || {})
     },
-    leadStats: {
-      newToday: newLeadsToday?.count || 0,
-      website: websiteLeads?.count || 0,
-      scheduled: leadsByStatus.scheduled || 0,
-      completed: leadsByStatus.completed || 0,
-      open: (leadsByStatus.new || 0) + (leadsByStatus.contacted || 0) + (leadsByStatus.estimate_sent || 0),
-      failedImports: openIntakeFailures?.count || 0
-    },
-    newLeads: newLeads.map((row) => ({
-      ...row,
-      sourceLabel: leadSourceLabel(row.source),
-      statusLabel: leadStatusLabel(row.status)
-    })),
+    reports: view.reports,
+    ...(intake || {}),
     byStatus,
     upcoming,
     mapJobs,
