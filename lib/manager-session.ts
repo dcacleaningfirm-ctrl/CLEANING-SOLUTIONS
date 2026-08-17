@@ -87,7 +87,10 @@ export const CREW_ROLES = [
 // What each role is called on screen. The stored value stays machine-readable
 // so it can be compared without worrying about spacing or capitalisation.
 export const ROLE_LABELS: Record<string, string> = {
-  owner: "Owner",
+  // "Owner / Super Admin" rather than plain "Owner", so the login screen and
+  // the crew list both say plainly which account holds the security controls.
+  // The stored role is still "owner"; only the wording on screen changed.
+  owner: "Owner / Super Admin",
   manager: "Manager",
   admin: "Admin",
   management_specialist: "Management Specialist",
