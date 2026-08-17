@@ -68,11 +68,6 @@ export interface SessionPayload {
   exp: number;
 }
 
-// Roles allowed to administer the crew list: add a member, change a role,
-// deactivate someone, or issue a new login code for someone else. Everyone else
-// can still change their own code.
-const ADMIN_ROLES = ["owner", "admin", "manager"];
-
 export const ROLE_OWNER = "owner";
 export const ROLE_MANAGEMENT_SPECIALIST = "management_specialist";
 
@@ -106,10 +101,6 @@ export function roleLabel(role: string | undefined): string {
   return ROLE_LABELS[key] || key;
 }
 
-export function canManageCrew(role: string | undefined): boolean {
-  return ADMIN_ROLES.includes(normalizeRole(role));
-}
-
 // The Owner / Super Admin. Deliberately narrower than canManageCrew: an admin
 // or a manager runs the day-to-day crew list, but only the owner may touch a
 // Management Specialist account or its login code.
@@ -126,57 +117,153 @@ export function isManagementSpecialist(role: string | undefined): boolean {
 // login screen can only ever unlock whatever its own account is entitled to —
 // an admin's code cannot produce a Management Specialist session, and a
 // Management Specialist's code cannot produce an admin one.
+//
+// The list is deliberately finer-grained than the tabs on screen. "Look at the
+// customer database" and "book the caller in" used to be the same permission,
+// which meant an account allowed to take a booking could also page through
+// every account on file. They are separate entries now so one can be granted
+// without the other.
 export const PERMISSIONS = {
+  // Day-to-day operational picture: what is on the board, what is running late.
   dashboard: "dashboard",
+  // Money and trend figures: pipeline value, collected, outstanding, how sales
+  // are moving. Sensitive business reporting, kept apart from the board above.
+  reports: "reports",
+  // Take a booking from a caller — the basic service-request function.
   book: "book",
-  leads: "leads",
+  // The calendar: move an appointment, see who is booked when.
+  schedule: "schedule",
+  // The job board and everything hanging off a job.
   jobs: "jobs",
+  // Maps and routing for the day's work.
+  routing: "routing",
+  // The inbound request queue. Every lead carries the caller's contact
+  // details, so this is a customer contact list by another name.
+  leads: "leads",
+  // Promotions and campaign material.
+  marketing: "marketing",
+  // The customer database: browse, search, correct an account.
   customers: "customers",
-  crew: "crew",
-  charges: "charges",
+  // Phone numbers, emails and addresses held against those accounts.
+  customerContacts: "customer_contacts",
+  // Follow-up tools: chase a quote, work an account that has gone quiet.
+  followups: "followups",
+  // Bulk customer import and the Clover customer directory — writing to the
+  // customer database wholesale.
   imports: "imports",
+  // Invoicing and taking payment.
+  charges: "charges",
+  // The crew list: add a member, change a role, issue a login code.
+  crew: "crew",
+  // The security audit log.
   securityLog: "security_log"
 } as const;
 
 export type Permission = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
 
-const FIELD_PERMISSIONS: Permission[] = [
+// A technician sees the work they have been given and how to get to it, and
+// nothing about the business around it: no dashboard, no lead queue, no
+// customer database, no reporting. The job rows they are shown are narrowed
+// again on the server to the ones assigned to them.
+export const TECHNICIAN_PERMISSIONS: Permission[] = ["jobs", "schedule", "routing"];
+
+// Admin (and Manager, which is the same job under an older name) runs the
+// office floor: answer the phone, book the visit, work the calendar, send the
+// crew out, invoice it and take the money. Explicitly not the customer
+// database, the contact list, the lead queue or any sales reporting.
+export const ADMIN_PERMISSIONS: Permission[] = [
+  ...TECHNICIAN_PERMISSIONS,
   "dashboard",
   "book",
-  "leads",
-  "jobs",
-  "customers"
+  "charges",
+  "crew"
 ];
 
-// The office floor: everything needed to answer the phone, price a visit, work
-// the lead list and put a job on the calendar. Field crew reach the same
-// screens today, so this is the shared non-administrative set; narrowing what a
-// technician sees would be a separate decision from adding this role.
-const OFFICE_PERMISSIONS: Permission[] = [...FIELD_PERMISSIONS];
-
-const ADMIN_PERMISSIONS: Permission[] = [
-  ...OFFICE_PERMISSIONS,
-  "crew",
-  "charges",
+// The Management Specialist: the commercial side of the business. Customers and
+// their contact details, leads, marketing, follow-ups, scheduling and booking,
+// operational management information and the approved sales and management
+// reports. No security controls of any kind — no crew list, no login codes, no
+// audit log — which is what keeps the role safe to hand to somebody who is not
+// the owner.
+export const MANAGEMENT_SPECIALIST_PERMISSIONS: Permission[] = [
+  "dashboard",
+  "reports",
+  "book",
+  "schedule",
+  "jobs",
+  "routing",
+  "leads",
+  "marketing",
+  "customers",
+  "customer_contacts",
+  "followups",
   "imports"
 ];
 
+// Held by the owner alone. Everything here either creates access or reads the
+// record of it.
+export const OWNER_ONLY_PERMISSIONS: Permission[] = ["crew", "charges", "security_log"];
+
+// The owner is the union of every other role plus the owner-only controls,
+// computed rather than typed out. Adding a permission to the Management
+// Specialist set therefore grants it to the owner in the same edit — the
+// owner cannot fall behind the role they supervise.
+export const OWNER_PERMISSIONS: Permission[] = Array.from(
+  new Set<Permission>([
+    ...MANAGEMENT_SPECIALIST_PERMISSIONS,
+    ...ADMIN_PERMISSIONS,
+    ...TECHNICIAN_PERMISSIONS,
+    ...OWNER_ONLY_PERMISSIONS
+  ])
+);
+
 const ROLE_PERMISSIONS: Record<string, Permission[]> = {
-  owner: [...ADMIN_PERMISSIONS, "security_log"],
+  owner: OWNER_PERMISSIONS,
   admin: ADMIN_PERMISSIONS,
   manager: ADMIN_PERMISSIONS,
-  // A Management Specialist gets the office floor and nothing else: no crew
-  // list, no login codes, no custom charges, no bulk customer import.
-  management_specialist: OFFICE_PERMISSIONS,
-  technician: FIELD_PERMISSIONS
+  management_specialist: MANAGEMENT_SPECIALIST_PERMISSIONS,
+  technician: TECHNICIAN_PERMISSIONS
 };
 
 export function permissionsFor(role: string | undefined): Permission[] {
-  return ROLE_PERMISSIONS[normalizeRole(role)] || FIELD_PERMISSIONS;
+  // An unrecognised role gets the narrowest set there is, never a default that
+  // happens to be generous.
+  return ROLE_PERMISSIONS[normalizeRole(role)] || TECHNICIAN_PERMISSIONS;
 }
 
 export function can(role: string | undefined, permission: Permission): boolean {
   return permissionsFor(role).includes(permission);
+}
+
+// Running the crew list is a permission like any other, so there is one place
+// that decides it rather than a second list of role names that could drift.
+export function canManageCrew(role: string | undefined): boolean {
+  return can(role, "crew");
+}
+
+// The navigation. Each section of the app names the permission that opens it,
+// so a role that cannot reach a screen is not shown its tab — and the same
+// table is what the API checks, so hiding the tab is never the only thing
+// standing between a role and the data behind it.
+export const NAV_SECTIONS: { view: string; label: string; permission: Permission }[] = [
+  { view: "dashboard", label: "Dashboard", permission: "dashboard" },
+  { view: "book", label: "Book", permission: "book" },
+  { view: "leads", label: "Leads", permission: "leads" },
+  { view: "jobs", label: "Jobs", permission: "jobs" },
+  { view: "customers", label: "Customers", permission: "customers" },
+  { view: "charges", label: "Custom charge", permission: "charges" },
+  { view: "crew", label: "Crew", permission: "crew" }
+];
+
+export function navigationFor(role: string | undefined): string[] {
+  return NAV_SECTIONS.filter((s) => can(role, s.permission)).map((s) => s.view);
+}
+
+// Where an account lands when it signs in: the first section it is allowed to
+// open. A technician has no dashboard, so sending everyone to the dashboard
+// would put an empty screen in front of them.
+export function defaultViewFor(role: string | undefined): string {
+  return navigationFor(role)[0] || "jobs";
 }
 
 // Who may create a given account, change its role, turn its access off, or

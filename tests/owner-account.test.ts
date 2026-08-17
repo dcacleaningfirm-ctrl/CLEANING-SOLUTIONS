@@ -169,27 +169,13 @@ test("only the owner holds the security log", () => {
   }
 });
 
-test("existing role restrictions are unchanged by adding the owner", () => {
-  // A Management Specialist keeps the office floor and nothing more, and a
-  // technician keeps the field set. Adding an owner must not have widened
-  // either, and must not have widened admin or manager beyond what they had.
-  assert.deepEqual(permissionsFor(ROLE_MANAGEMENT_SPECIALIST).sort(), [
-    "book",
-    "customers",
-    "dashboard",
-    "jobs",
-    "leads"
-  ]);
-  assert.deepEqual(permissionsFor("technician").sort(), [
-    "book",
-    "customers",
-    "dashboard",
-    "jobs",
-    "leads"
-  ]);
-  for (const role of ["admin", "manager"]) {
-    assert.ok(!permissionsFor(role).includes("security_log"));
+test("no role but the owner holds an owner-only control", () => {
+  // The security controls that make the owner the owner. Adding or widening a
+  // role must never have handed one of these to somebody else.
+  for (const role of ["admin", "manager", ROLE_MANAGEMENT_SPECIALIST, "technician"]) {
+    assert.ok(!permissionsFor(role).includes("security_log"), `${role} reaches the security log`);
     assert.ok(!canAdministerAccount(role, ROLE_MANAGEMENT_SPECIALIST));
+    assert.ok(!canAdministerAccount(role, ROLE_OWNER));
   }
 });
 

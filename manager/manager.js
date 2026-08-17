@@ -27,6 +27,12 @@
     // come from the server; the screens only use them to decide which controls
     // are worth drawing, since the server refuses the rest regardless.
     isOwner: false,
+    // What this account may reach, as the server settled it at sign-in. The
+    // screens read this to decide which tabs and controls are worth drawing;
+    // the API applies the same table to every request, so a control that
+    // slipped through would still be refused.
+    permissions: [],
+    navigation: [],
     crewRoles: null,
     cloverScript: null,
     chargeClover: null,
@@ -93,6 +99,38 @@
 
   function isSpecialistRole(role) {
     return String(role || "").trim().toLowerCase() === "management_specialist";
+  }
+
+  // Which section of the app each tab opens, and the permission that opens it.
+  // Kept in step with NAV_SECTIONS in lib/manager-session.ts — the server sends
+  // the allowed list with the session, and this is the fallback for a response
+  // that predates it.
+  var NAV_SECTIONS = [
+    { view: "dashboard", permission: "dashboard" },
+    { view: "book", permission: "book" },
+    { view: "leads", permission: "leads" },
+    { view: "jobs", permission: "jobs" },
+    { view: "customers", permission: "customers" },
+    { view: "charges", permission: "charges" },
+    { view: "crew", permission: "crew" }
+  ];
+
+  function hasPerm(permission) {
+    return state.permissions.indexOf(permission) !== -1;
+  }
+
+  // Hide every tab this account cannot open, and make sure whatever is on
+  // screen is still one of them. Called at sign-in rather than on each render,
+  // because the answer only changes when the account does.
+  function applyNavigation() {
+    var allowed = state.navigation.length
+      ? state.navigation
+      : NAV_SECTIONS.filter(function (s) { return hasPerm(s.permission); })
+          .map(function (s) { return s.view; });
+    state.navigation = allowed;
+    document.querySelectorAll("#tabs .tab").forEach(function (tab) {
+      tab.hidden = allowed.indexOf(tab.dataset.view) === -1;
+    });
   }
 
   // ---------- helpers ----------
@@ -439,9 +477,16 @@
     state.ticket = null;
     state.crewRoles = null;
     state.isOwner = false;
+    // Whatever the last account was allowed to reach goes with them. Until the
+    // next session says otherwise this app can reach nothing, so no screen
+    // built for one role is left standing in front of another.
+    state.permissions = [];
+    state.navigation = [];
+    state.canManage = false;
     forcingPinChange = false;
     document.getElementById("view-customers").innerHTML = "";
     document.getElementById("view-crew").innerHTML = "";
+    document.getElementById("view-dashboard").innerHTML = "";
     var err = document.getElementById("login-error");
     err.hidden = true;
     var sel = document.getElementById("login-employee");
@@ -504,6 +549,12 @@
 
   // ---------- views ----------
   function switchView(name) {
+    // A tab this account cannot open is never drawn, so asking for one — by a
+    // stale ?view= link, a home-screen shortcut, or a tab left over from the
+    // last account to use this phone — lands on the first one it can.
+    if (state.navigation.length && state.navigation.indexOf(name) === -1) {
+      name = state.navigation[0];
+    }
     document.querySelectorAll(".tab").forEach(function (t) {
       t.classList.toggle("active", t.dataset.view === name);
     });
@@ -524,20 +575,26 @@
     host.innerHTML = '<div class="loading">Loading…</div>';
     api("dashboard").then(function (d) {
       var s = d.stats;
-      var leadStats = d.leadStats || { newToday: 0, website: 0, scheduled: 0, completed: 0, open: 0, failedImports: 0 };
+      // The request counters and the money are sent only to the roles entitled
+      // to them, so each block is drawn only when its figures actually arrived
+      // rather than being padded out with zeroes that would read as real.
+      var leadStats = d.leadStats;
+      var showMoney = d.reports !== false && s.pipelineCents !== undefined;
       var statuses = STATUS_ORDER.filter(function (k) { return d.byStatus[k]; }).map(function (k) {
         return statusPill(k) + ' <span class="mono">' + d.byStatus[k] + "</span>";
       });
       host.innerHTML =
         // What came in, before what is already on the books: a request nobody
         // has picked up is the most perishable thing on this screen.
-        '<div class="stat-grid lead-stats">' +
-        stat("New leads today", leadStats.newToday) +
-        stat("Website leads", leadStats.website) +
-        stat("Scheduled", leadStats.scheduled) +
-        stat("Completed", leadStats.completed) +
-        "</div>" +
-        (leadStats.failedImports
+        (leadStats
+          ? '<div class="stat-grid lead-stats">' +
+            stat("New leads today", leadStats.newToday) +
+            stat("Website leads", leadStats.website) +
+            stat("Scheduled", leadStats.scheduled) +
+            stat("Completed", leadStats.completed) +
+            "</div>"
+          : "") +
+        (leadStats && leadStats.failedImports
           ? '<div class="card intake-alert"><strong>' + leadStats.failedImports +
             (leadStats.failedImports === 1 ? " website submission" : " website submissions") +
             " could not be imported.</strong> The submissions are still stored safely in Netlify. " +
@@ -545,20 +602,27 @@
           : "") +
         '<div class="stat-grid">' +
         stat("Jobs today", s.jobsToday) +
-        stat("Open pipeline", fmtMoney(s.pipelineCents)) +
-        stat("Completed value", fmtMoney(s.completedValueCents)) +
-        stat("Payments collected", fmtMoney(s.paidCents)) +
-        stat("Outstanding balance", fmtMoney(s.outstandingCents || 0)) +
-        stat("Customers", s.customers) +
+        (showMoney
+          ? stat("Open pipeline", fmtMoney(s.pipelineCents)) +
+            stat("Completed value", fmtMoney(s.completedValueCents)) +
+            stat("Payments collected", fmtMoney(s.paidCents)) +
+            stat("Outstanding balance", fmtMoney(s.outstandingCents || 0)) +
+            stat("Customers", s.customers)
+          : "") +
         stat("Active crew", s.activeCrew) +
         "</div>" +
-        '<div class="card"><div class="row-between"><h3 class="section-title">New requests</h3>' +
-        '<button class="btn btn-ghost btn-sm" data-goto="leads">See all requests</button></div>' +
-        newLeadsTable(d.newLeads || []) +
-        "</div>" +
+        (leadStats
+          ? '<div class="card"><div class="row-between"><h3 class="section-title">New requests</h3>' +
+            '<button class="btn btn-ghost btn-sm" data-goto="leads">See all requests</button></div>' +
+            newLeadsTable(d.newLeads || []) +
+            "</div>"
+          : "") +
         '<div class="grid-2" style="margin-top:18px">' +
         '<div class="card"><div class="row-between"><h3 class="section-title">Upcoming jobs</h3>' +
-        '<button class="btn btn-primary btn-sm" data-goto="book">Book appointment</button></div>' +
+        (hasPerm("book")
+          ? '<button class="btn btn-primary btn-sm" data-goto="book">Book appointment</button>'
+          : "") +
+        "</div>" +
         upcomingTable(d.upcoming) +
         "</div>" +
         '<div class="card"><h3 class="section-title">Job pipeline</h3><div class="chips">' +
@@ -592,14 +656,20 @@
   function stat(label, value) {
     return '<div class="stat"><div class="label">' + esc(label) + '</div><div class="value">' + value + "</div></div>";
   }
+  // The value column is only there when the account was sent values: for a role
+  // without sales reporting the server sends no price, and a column of dashes
+  // would be worse than no column.
   function upcomingTable(rows) {
     if (!rows.length) return '<p class="empty">Nothing scheduled.</p>';
+    var money = rows.some(function (j) { return j.priceCents !== null && j.priceCents !== undefined; });
     return (
-      '<table><thead><tr><th>Service</th><th>Customer</th><th>When</th><th>Crew</th><th class="right">Value</th></tr></thead><tbody>' +
+      '<table><thead><tr><th>Service</th><th>Customer</th><th>When</th><th>Crew</th>' +
+      (money ? '<th class="right">Value</th>' : "") + "</tr></thead><tbody>" +
       rows.map(function (j) {
         return '<tr class="clickable" data-job="' + j.id + '"><td>' + esc(j.serviceType) + " " + statusPill(j.status) +
           "</td><td>" + esc(j.customerName) + "</td><td class=\"muted\">" + fmtDate(j.scheduledFor) +
-          "</td><td>" + assigneeCell(j.assignedName) + '</td><td class="right mono">' + fmtMoney(j.priceCents) + "</td></tr>";
+          "</td><td>" + assigneeCell(j.assignedName) + "</td>" +
+          (money ? '<td class="right mono">' + fmtMoney(j.priceCents || 0) + "</td>" : "") + "</tr>";
       }).join("") +
       "</tbody></table>"
     );
@@ -1660,7 +1730,7 @@
     var card = document.querySelector("#view-customers .customer-search");
     if (!card) return;
     var btn = document.getElementById("cu-import");
-    if (!state.canManage) {
+    if (!hasPerm("imports")) {
       if (btn) btn.parentNode.removeChild(btn);
       return;
     }
@@ -3110,8 +3180,13 @@
       '<form id="booking-form" autocomplete="off">' +
 
       '<section class="booking-step"><h3 class="step-title"><span>1</span>Who is calling</h3>' +
-      '<div class="lookup"><input id="bk-search" type="search" placeholder="Search by name, phone, email or street…" ' +
-      'autocomplete="off" maxlength="80" /><div id="bk-results" class="lookup-results" hidden></div></div>' +
+      // Looking a caller up searches the customer database, so the box is only
+      // offered to a role entitled to it. Everyone else takes the details down
+      // as the caller gives them, which is what the fields below are for.
+      (hasPerm("customers")
+        ? '<div class="lookup"><input id="bk-search" type="search" placeholder="Search by name, phone, email or street…" ' +
+          'autocomplete="off" maxlength="80" /><div id="bk-results" class="lookup-results" hidden></div></div>'
+        : "") +
       '<div id="bk-customer"></div>' +
       '<div class="booking-fields">' +
       '<label class="field"><span>Name</span><input id="bk-name" maxlength="120" required placeholder="Customer name" /></label>' +
@@ -3202,18 +3277,33 @@
       ev.preventDefault();
       submitBooking(false);
     });
-    document.getElementById("bk-search").addEventListener("input", function () {
-      var term = this.value.trim();
-      clearTimeout(state.booking.searchTimer);
-      if (term.length < 2) {
-        hideLookup();
-        return;
-      }
-      // One request per pause in typing, not one per keystroke.
-      state.booking.searchTimer = setTimeout(function () {
-        searchCustomers(term);
-      }, 250);
-    });
+    // The lookup box is absent for a role without the customer database, so
+    // everything that drives it is wired only when it is actually on screen.
+    var search = document.getElementById("bk-search");
+    if (search) {
+      search.addEventListener("input", function () {
+        var term = this.value.trim();
+        clearTimeout(state.booking.searchTimer);
+        if (term.length < 2) {
+          hideLookup();
+          return;
+        }
+        // One request per pause in typing, not one per keystroke.
+        state.booking.searchTimer = setTimeout(function () {
+          searchCustomers(term);
+        }, 250);
+      });
+      search.addEventListener("blur", function () {
+        setTimeout(hideLookup, 150);
+      });
+      document.getElementById("bk-results").addEventListener("mousedown", function (ev) {
+        // mousedown, not click: the blur above would close the list first.
+        var hit = ev.target.closest("[data-pick-customer]");
+        if (!hit) return;
+        ev.preventDefault();
+        pickCustomer(JSON.parse(hit.dataset.pickCustomer));
+      });
+    }
     document.getElementById("bk-catalog").addEventListener("change", function () {
       if (!this.value) return;
       addCatalogItem(this.value);
@@ -3244,16 +3334,6 @@
       if (!remove) return;
       state.booking.items.splice(Number(remove.dataset.itemRemove), 1);
       renderBookingItems();
-    });
-    document.getElementById("bk-results").addEventListener("mousedown", function (ev) {
-      // mousedown, not click: the blur below would close the list first.
-      var hit = ev.target.closest("[data-pick-customer]");
-      if (!hit) return;
-      ev.preventDefault();
-      pickCustomer(JSON.parse(hit.dataset.pickCustomer));
-    });
-    document.getElementById("bk-search").addEventListener("blur", function () {
-      setTimeout(hideLookup, 150);
     });
 
     // An address typed into the booking form is where the crew is being sent, so
@@ -3310,7 +3390,7 @@
 
   function pickCustomer(customer) {
     state.booking.customer = customer;
-    document.getElementById("bk-search").value = "";
+    setValue("bk-search", "");
     hideLookup();
     setValue("bk-name", customer.name);
     setValue("bk-phone", customer.phone);
@@ -4531,12 +4611,14 @@
     document.getElementById("app").hidden = false;
   }
 
-  // Home-screen shortcuts in the manifest open the app straight on a tab.
+  // Home-screen shortcuts in the manifest open the app straight on a tab. A
+  // shortcut to a section this account is not entitled to falls back to the
+  // first one it is — a technician tapping "Dashboard" gets their job list.
   function initialView() {
-    var allowed = ["dashboard", "book", "leads", "jobs", "customers", "crew"];
-    if (state.canManage) allowed.push("charges");
+    var allowed = state.navigation;
     var want = new URLSearchParams(location.search).get("view");
-    return allowed.indexOf(want) === -1 ? "dashboard" : want;
+    if (want && allowed.indexOf(want) !== -1) return want;
+    return allowed[0] || "jobs";
   }
 
   // Whether an account may administer the office: bring a customer file in,
@@ -4562,10 +4644,13 @@
         // screen believing an office account could not manage anything.
         state.canManage = accountCanManage(d.employee);
         state.isOwner = Boolean(d.employee.isOwner);
+        state.permissions = d.employee.permissions || [];
+        state.navigation = d.employee.navigation || [];
         document.getElementById("who").textContent =
           d.employee.name + " · " + (d.employee.roleLabel || roleLabel(d.employee.role));
-        var chargeTab = document.querySelector('[data-view="charges"]');
-        if (chargeTab) chargeTab.hidden = !state.canManage;
+        // Every tab this role cannot open comes off the bar before the app is
+        // shown, so nothing flashes up and then disappears.
+        applyNavigation();
         showApp();
         // A temporary code gets no further than this. The dialog goes up before
         // any screen is drawn, and the API would refuse those screens anyway.
