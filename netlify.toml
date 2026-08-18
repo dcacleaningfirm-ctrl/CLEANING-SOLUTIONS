@@ -15,6 +15,12 @@ NPM_CONFIG_FETCH_TIMEOUT = "600000"
 [build.processing.html]
 pretty_urls = true
 
+[functions]
+node_bundler = "esbuild"
+
+[functions."submission-created"]
+external_node_modules = ["@netlify/database", "drizzle-orm"]
+
 # @netlify/plugin-lighthouse used to be declared here. It only produced a
 # build-time audit report — it contributed nothing to the deployed site — while
 # dragging Lighthouse and a headless-Chrome tree into that same plugins install,
