@@ -5,7 +5,7 @@
  * steps, the add-ons page and the promotion page at once.
  */
 window.DCA_PRICING = Object.freeze({
-  version: "2026-07-30",
+  version: "2026-08-18",
   currency: "USD",
   services: Object.freeze({
     carpetRoom: Object.freeze({ label: "Carpet cleaning — per room", price: 46.58 }),
@@ -190,6 +190,66 @@ window.DCA_PRICING = Object.freeze({
         "Homes with more than one air handler are estimated per system.",
         "Applies to residential addresses inside the published service area and cannot be combined with another offer.",
         "Mention the code when you request the estimate. The promotional rate is confirmed with the rest of the scope before work begins."
+      ])
+    }),
+    Object.freeze({
+      code: "MOVE249",
+      kind: "move",
+      name: "Essential Clean",
+      price: 249.00,
+      summary: "Standard turnover cleaning for an empty home or apartment.",
+      includes: Object.freeze([
+        "Kitchen surfaces, counters and sinks",
+        "Exterior appliance cleaning",
+        "Bathroom cleaning and sanitizing",
+        "Dusting, vacuuming and floors",
+        "General surface cleaning",
+        "Baseboard spot cleaning"
+      ]),
+      terms: Object.freeze([
+        "The $249.00 figure is a starting price and planning estimate for an empty home or apartment needing standard turnover cleaning.",
+        "Final pricing depends on property size, condition, requested services and inspection or scope confirmation.",
+        "Applies to residential addresses inside the published service area and cannot be combined with another offer."
+      ])
+    }),
+    Object.freeze({
+      code: "MOVE399",
+      kind: "move",
+      name: "Deep Clean",
+      price: 399.00,
+      summary: "Detailed turnover cleaning for properties needing extra attention.",
+      includes: Object.freeze([
+        "Everything in Essential Clean",
+        "Detailed baseboards, doors and frames",
+        "Cabinet interiors",
+        "Appliance interiors",
+        "Heavier buildup cleaning",
+        "Detailed kitchen and bathroom cleaning"
+      ]),
+      terms: Object.freeze([
+        "The $399.00 figure is a starting price and planning estimate for an empty home or apartment needing detailed turnover cleaning.",
+        "Final pricing depends on property size, condition, requested services and inspection or scope confirmation.",
+        "Applies to residential addresses inside the published service area and cannot be combined with another offer."
+      ])
+    }),
+    Object.freeze({
+      code: "MOVE599",
+      kind: "move",
+      name: "Complete Turnover",
+      price: 599.00,
+      summary: "Whole-property turnover cleaning with professional carpet extraction.",
+      includes: Object.freeze([
+        "Everything in Deep Clean",
+        "Professional carpet hot-water extraction",
+        "Carpet deodorizer",
+        "Closet cleaning",
+        "Detailed floor edges and corners",
+        "Final ready-for-occupancy cleaning"
+      ]),
+      terms: Object.freeze([
+        "The $599.00 figure is a starting price and planning estimate for an empty home or apartment needing complete turnover cleaning.",
+        "Final pricing depends on property size, condition, requested services and inspection or scope confirmation.",
+        "Applies to residential addresses inside the published service area and cannot be combined with another offer."
       ])
     })
   ])

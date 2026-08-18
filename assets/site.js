@@ -784,7 +784,9 @@
     if (codeField && codeField.options) {
       var selectedCode = codeField.value;
       codeField.innerHTML = "";
-      pricing.specials.forEach(function (listed) {
+      pricing.specials.filter(function (listed) {
+        return listed.kind !== "move";
+      }).forEach(function (listed) {
         var option = document.createElement("option");
         option.value = listed.code;
         option.textContent = listed.code + " — " + listed.name + " · " + formatPrice(listed.price);
@@ -1048,6 +1050,117 @@
     setStatus("");
   }
 
+  /* --------------------------------------------- move-cleaning promotions */
+
+  function setupMovePromotionForm() {
+    var form = document.querySelector("[data-move-promotion-form]");
+    if (!form || !pricing) return;
+
+    var panel = document.querySelector("[data-move-promotion-panel]");
+    var confirmation = document.querySelector("[data-move-promotion-confirmation]");
+    var status = form.querySelector("[data-move-promotion-status]");
+    var button = form.querySelector("button[type='submit']");
+    var submitting = false;
+
+    var requestedCode = new URLSearchParams(window.location.search).get("code");
+    if (requestedCode) {
+      var requestedOption = form.querySelector(
+        "input[name='promotion_code'][value='" + requestedCode.toUpperCase().replace(/[^A-Z0-9]/g, "") + "']"
+      );
+      if (requestedOption) requestedOption.checked = true;
+    }
+
+    var dateInput = form.elements.preferred_date;
+    if (dateInput) {
+      var today = new Date();
+      dateInput.min = today.getFullYear()
+        + "-" + String(today.getMonth() + 1).padStart(2, "0")
+        + "-" + String(today.getDate()).padStart(2, "0");
+    }
+
+    function selectedOffer() {
+      var selected = form.querySelector("input[name='promotion_code']:checked");
+      return selected ? special(selected.value) : null;
+    }
+
+    function setHidden(name, value) {
+      var field = form.elements[name];
+      if (field) field.value = value;
+    }
+
+    function setStatus(message) {
+      if (!status) return;
+      status.textContent = message || "";
+      status.hidden = !message;
+    }
+
+    function sync() {
+      var offer = selectedOffer();
+      if (!offer) return;
+      var formatted = formatPrice(offer.price);
+      var breakdown = offer.name + " (" + offer.code + ") — starting planning estimate: " + formatted;
+
+      setHidden("promotion_name", offer.name);
+      setHidden("promotion_quantity", "1");
+      setHidden("promotion_quantity_label", "Cleaning package");
+      setHidden("planning_estimate", formatted);
+      setHidden("estimate_breakdown", breakdown);
+      setHidden("pricing_version", pricing.version);
+
+      document.querySelectorAll("[data-move-selected-name]").forEach(function (element) {
+        element.textContent = offer.name;
+      });
+      document.querySelectorAll("[data-move-selected-code]").forEach(function (element) {
+        element.textContent = offer.code;
+      });
+      document.querySelectorAll("[data-move-selected-price]").forEach(function (element) {
+        element.textContent = formatted;
+      });
+    }
+
+    form.addEventListener("input", sync);
+    form.addEventListener("change", sync);
+    form.addEventListener("invalid", function (event) {
+      setStatus("Please complete the highlighted fields, then send again.");
+      if (event.target === firstInvalidControl(form) && isVisible(event.target)) {
+        event.target.scrollIntoView({ block: "center" });
+      }
+    }, true);
+
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      if (submitting || !form.reportValidity()) return;
+
+      sync();
+      submitting = true;
+      setStatus("Sending your request…");
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Sending…";
+      }
+
+      netlifySubmit(form).then(function () {
+        setStatus("");
+        if (panel) panel.hidden = true;
+        if (confirmation) {
+          confirmation.hidden = false;
+          confirmation.scrollIntoView({ block: "start" });
+        } else {
+          window.location.href = form.action || "/thank-you";
+        }
+      }).catch(function () {
+        submitting = false;
+        setStatus("We could not send the request. Please try again or call (404) 716-2720.");
+        if (button) {
+          button.disabled = false;
+          button.textContent = "Request my planning estimate";
+        }
+      });
+    });
+
+    sync();
+  }
+
   /* -------------------------------------------------------------- interface */
 
   function setupNavigation() {
@@ -1101,5 +1214,6 @@
   setupStepForm();
   setupReviewForm();
   setupQuoteForm();
+  setupMovePromotionForm();
   setupSummaryOnly();
 })();

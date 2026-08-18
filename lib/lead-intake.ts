@@ -188,6 +188,10 @@ const WEBSITE_QUANTITIES: Array<[string, string]> = [
   ["sofas", "Sofas"],
   ["sectionals", "Sectionals"],
   ["move_packages", "Move packages"],
+  ["bedrooms", "Bedrooms"],
+  ["bathrooms", "Bathrooms"],
+  ["approximate_square_footage", "Approx. square feet"],
+  ["carpeted_areas", "Carpeted areas"],
   ["promotion_quantity", "Promotion quantity"]
 ];
 
@@ -235,6 +239,10 @@ export function quickEstimateAdapter(
   const promotionName = meaningful(data.promotion_name, 200);
   const promotionCode = meaningful(data.promotion_code, 60);
   const breakdown = meaningful(data.estimate_breakdown, 2000);
+  const selectedAddOns = meaningful(
+    data.selected_add_ons ?? data.add_ons ?? data.addons ?? data["add-ons"],
+    300
+  );
 
   const quantities: Record<string, number> = {};
   for (const [field, label] of WEBSITE_QUANTITIES) {
@@ -261,12 +269,21 @@ export function quickEstimateAdapter(
 
   // Everything the customer told us that is not already a column, kept as the
   // note the office reads first.
+  const propertyDetails = [
+    meaningful(data.move_type, 40) ? `Move service: ${meaningful(data.move_type, 40)}` : null,
+    meaningful(data.property_condition, 40)
+      ? `Property condition: ${meaningful(data.property_condition, 40)}`
+      : null
+  ]
+    .filter(Boolean)
+    .join("\n");
+
   const notes = [
+    propertyDetails || null,
     longText(data.job_description, 3000),
+    longText(data.customer_notes, 2000),
     meaningful(data.notes, 1000),
-    meaningful(data.selected_add_ons, 300)
-      ? `Add-ons: ${meaningful(data.selected_add_ons, 300)}`
-      : null,
+    selectedAddOns ? `Add-ons: ${selectedAddOns}` : null,
     meaningful(data.contact_method) ? `Best contact: ${meaningful(data.contact_method)}` : null
   ]
     .filter(Boolean)
