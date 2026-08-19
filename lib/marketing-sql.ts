@@ -41,6 +41,12 @@ export const SMS_ELIGIBLE_SQL: SQL = sql`(${HAS_MOBILE_SQL} and ${customers.smsC
 // unsubscribe, and nothing on the suppression list.
 export const EMAIL_ELIGIBLE_SQL: SQL = sql`(${HAS_EMAIL_SQL} and ${customers.emailConsentStatus} <> 'denied' and ${customers.emailOptedOutAt} is null and ${NOT_EMAIL_SUPPRESSED})`;
 
+// Has a number worth texting, and nobody has asked them yet. This is the
+// "Not Asked" state the SMS consent control writes, and it is deliberately not
+// "everybody who is not textable": an account that said no, or that opted out,
+// is not awaiting anything and must not reappear in this bucket.
+export const AWAITING_SMS_CONSENT_SQL: SQL = sql`(${HAS_MOBILE_SQL} and ${customers.smsConsentStatus} = 'unknown' and ${customers.smsOptedOutAt} is null)`;
+
 export const OPTED_OUT_SQL: SQL = sql`(${customers.smsOptedOutAt} is not null or ${customers.emailOptedOutAt} is not null or ${customers.smsConsentStatus} = 'denied' or ${customers.emailConsentStatus} = 'denied' or not ${NOT_SMS_SUPPRESSED} or not ${NOT_EMAIL_SUPPRESSED})`;
 
 // The last time this household actually had work done — a completed visit, or
@@ -68,6 +74,85 @@ export function serviceSegmentSql(value: string): SQL | null {
   return sql`(exists (select 1 from "jobs" j where j."customer_id" = ${customers.id} and ${jobMatch}) or exists (select 1 from "leads" l where l."customer_id" = ${customers.id} and ${leadMatch}) or ${ownMatch})`;
 }
 
+// The last time this household had work done, counting the service history as
+// well as the calendar. A house cleaned for years before this app existed has
+// no jobs row at all, only a service note, and "twelve months since service"
+// has to be true of that house too. greatest() ignores nulls, so an account
+// with only one of the two still gets an answer.
+export const LAST_SERVICE_ANY_SQL: SQL = sql`greatest(${LAST_SERVICE_SQL}, (select max(n."service_date"::timestamp) from "service_notes" n where n."customer_id" = ${customers.id} and n."service_date" ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'))`;
+
+// Whether a service note on this account describes a given kind of work. The
+// detail columns are the reliable signal — a note with anything written in
+// air_duct_detail is a duct visit however the summary line was worded — and the
+// summary is searched as well for notes typed in a hurry.
+function noteSaysSql(column: string, patterns: readonly string[]): SQL {
+  const filled = sql`coalesce(btrim(n.${sql.raw(`"${column}"`)}), '') <> ''`;
+  const summary = anyIlike(sql`coalesce(n."service_performed", '')`, patterns);
+  return sql`exists (select 1 from "service_notes" n where n."customer_id" = ${customers.id} and (${filled} or ${summary}))`;
+}
+
+// Work of a kind that has no entry in SERVICE_SEGMENTS, matched the same way
+// serviceSegmentSql does it: the jobs booked, the requests sent in, and the
+// service written on the account when it was imported.
+function bookedWorkSql(patterns: readonly string[]): SQL {
+  const jobMatch = anyIlike(sql`coalesce(j."service_type", '')`, patterns);
+  const leadMatch = anyIlike(sql`coalesce(l."service", '') || ' ' || coalesce(l."service_detail", '')`, patterns);
+  const ownMatch = anyIlike(sql`coalesce(${customers.service}, '')`, patterns);
+  return sql`(exists (select 1 from "jobs" j where j."customer_id" = ${customers.id} and ${jobMatch}) or exists (select 1 from "leads" l where l."customer_id" = ${customers.id} and ${leadMatch}) or ${ownMatch})`;
+}
+
+const CARPET_PATTERNS = ["%carpet%", "%stair%"];
+const DUCT_PATTERNS = ["%duct%", "%vent%", "%hvac%"];
+const UPHOLSTERY_PATTERNS = ["%upholster%", "%sofa%", "%couch%", "%furniture%", "%mattress%"];
+const MOVE_PATTERNS = ["%move%", "%turnover%", "%move-in%", "%move out%"];
+const PET_PATTERNS = ["%pet%", "%enzyme%", "%odor%", "%odour%", "%urine%"];
+
+// "Has had carpet cleaning", "has never had ducts done", "has not been seen in
+// a year" — each of the segments the Customer Marketing screen offers, as one
+// condition against the customers table. Returns null for a name this file does
+// not know, so an unexpected value narrows nothing rather than matching
+// everybody by accident.
+export function customerSegmentSql(value: string): SQL | null {
+  const carpet = sql`(${noteSaysSql("carpet_detail", CARPET_PATTERNS)} or ${serviceSegmentSql("carpet")!})`;
+  const duct = sql`(${noteSaysSql("air_duct_detail", DUCT_PATTERNS)} or ${serviceSegmentSql("air_duct")!})`;
+
+  switch (value) {
+    case "marketing_eligible":
+      return sql`(${SMS_ELIGIBLE_SQL} or ${EMAIL_ELIGIBLE_SQL})`;
+    case "textable_now":
+      // Consented, with a textable number, not opted out and not suppressed —
+      // the same condition the sender queues from, so what the office counts
+      // here is exactly who would receive a text.
+      return SMS_ELIGIBLE_SQL;
+    case "awaiting_text_consent":
+      return AWAITING_SMS_CONSENT_SQL;
+    case "past_carpet":
+      return carpet;
+    case "past_air_duct":
+      return duct;
+    case "past_upholstery":
+      return sql`(${noteSaysSql("upholstery_detail", UPHOLSTERY_PATTERNS)} or ${serviceSegmentSql("upholstery")!})`;
+    case "past_move":
+      return sql`(${noteSaysSql("move_detail", MOVE_PATTERNS)} or ${bookedWorkSql(MOVE_PATTERNS)})`;
+    case "past_pet_treatment":
+      return sql`(${noteSaysSql("pet_treatment_detail", PET_PATTERNS)} or ${bookedWorkSql(PET_PATTERNS)})`;
+    case "due_6_months":
+      return sql`(${LAST_SERVICE_ANY_SQL} is not null and ${LAST_SERVICE_ANY_SQL} < (now() - interval '6 months'))`;
+    case "due_12_months":
+      return sql`(${LAST_SERVICE_ANY_SQL} is not null and ${LAST_SERVICE_ANY_SQL} < (now() - interval '12 months'))`;
+    case "no_air_duct":
+      return sql`(not ${duct})`;
+    case "no_carpet":
+      return sql`(not ${carpet})`;
+    case "previous_promotion":
+      // A promotion the office recorded on the visit, a code the customer
+      // brought in with a request, or an offer we have already sent them.
+      return sql`(exists (select 1 from "service_notes" n where n."customer_id" = ${customers.id} and coalesce(btrim(n."promotion_code"), '') <> '') or exists (select 1 from "leads" l where l."customer_id" = ${customers.id} and coalesce(btrim(l."promotion_code"), '') <> '') or exists (select 1 from "marketing_contacts" mc where mc."customer_id" = ${customers.id} and coalesce(btrim(mc."promotion_code"), '') <> ''))`;
+    default:
+      return null;
+  }
+}
+
 // Everything the filter asks for, as one condition against the customers table.
 // Returns null when the filter asks for nothing, which means "everybody".
 export function audienceConditions(filter: AudienceFilter): SQL | null {
@@ -84,6 +169,14 @@ export function audienceConditions(filter: AudienceFilter): SQL | null {
 
   const segment = serviceSegmentSql(filter.service);
   if (segment) parts.push(segment);
+
+  // Customer marketing segments narrow the audience further, and they combine
+  // with AND: choosing "past carpet" and "12+ months since service" asks for
+  // the households that are both.
+  for (const name of filter.segments) {
+    const condition = customerSegmentSql(name);
+    if (condition) parts.push(condition);
+  }
 
   if (filter.zips.length) {
     parts.push(

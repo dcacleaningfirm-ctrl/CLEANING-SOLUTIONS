@@ -65,8 +65,16 @@ export const customers = pgTable(
     smsConsentStatus: text("sms_consent_status").notNull().default("unknown"),
     // Where the agreement came from, in words the office could defend: "Booking
     // form 12 Aug 2026", "Signed work order #1841", "Asked on the phone".
+    // The five recorded sources are Website Form, Booking Form, Written, Verbal
+    // and Other; free text recorded before that list existed is left alone.
     smsConsentSource: text("sms_consent_source"),
     smsConsentAt: timestamp("sms_consent_at"),
+    // Which member of staff recorded it, kept on the account as well as in the
+    // consent trail so the record itself answers "who wrote this down". Null
+    // when the customer did it themselves, by ticking the box on a form or
+    // texting STOP.
+    smsConsentBy: integer("sms_consent_by").references(() => employees.id),
+    smsConsentByName: text("sms_consent_by_name"),
     // Set the moment a STOP arrives, and never cleared by anything except the
     // customer starting again themselves. Its presence overrides consent.
     smsOptedOutAt: timestamp("sms_opted_out_at"),
@@ -99,7 +107,7 @@ export const marketingConsentEvents = pgTable(
     customerId: integer("customer_id").references(() => customers.id),
     // sms | email
     channel: text().notNull(),
-    // granted | opted_out | opted_in | denied
+    // granted | opted_out | opted_in | denied | not_asked
     action: text().notNull(),
     // The status the account was left in: granted | denied | unknown
     status: text().notNull(),
@@ -559,7 +567,7 @@ export const leadEvents = pgTable(
       .notNull()
       .references(() => leads.id),
     employeeId: integer("employee_id").references(() => employees.id),
-    // imported | status | note | converted | customer
+    // imported | status | note | converted | customer | consent
     kind: text().notNull().default("note"),
     message: text().notNull(),
     createdAt: timestamp("created_at").defaultNow()
@@ -591,4 +599,205 @@ export const intakeFailures = pgTable(
     createdAt: timestamp("created_at").defaultNow()
   },
   (table) => [index("intake_failures_status_idx").on(table.status)]
+);
+
+// --- Service history ------------------------------------------------------
+// What was actually done at a house, written by whoever did it or by the
+// office afterwards. A job is the appointment; this is the record of the work,
+// which is why it is a table of its own rather than more columns on jobs:
+//
+//  * the office holds history for houses cleaned long before this app existed,
+//    so a note has to be able to stand without a job to hang on,
+//  * one visit can be described in several passes — the crew leaves the detail,
+//    the office adds the invoice reference later,
+//  * and marketing reads this table to decide who has had ducts done and who
+//    has not, which needs the detail per service and not per appointment.
+//
+// Nothing here is ever deleted. A correction is an edit with its own trail in
+// service_note_events, so what the customer was told stays readable.
+export const serviceNotes = pgTable(
+  "service_notes",
+  {
+    id: serial().primaryKey(),
+    customerId: integer("customer_id")
+      .notNull()
+      .references(() => customers.id),
+    // The appointment this describes, when there is one. Null for work done
+    // before the app, or for a visit nobody put on the calendar.
+    jobId: integer("job_id").references(() => jobs.id),
+
+    // The day the work happened, as a plain date — a crew member writing up
+    // last Thursday's visit should not have to invent a time of day, and the
+    // month a house was last cleaned is what marketing counts by.
+    serviceDate: text("service_date").notNull(),
+    // What was done, in the office's own words ("Carpet cleaning — 3 rooms and
+    // a hallway"). Free text on purpose; the searchable classification is
+    // carried by the detail columns below.
+    servicePerformed: text("service_performed").notNull(),
+
+    // Who did it. The employee row when it was one of the crew, and the name
+    // as text as well so a note still reads correctly after somebody leaves.
+    technicianId: integer("technician_id").references(() => employees.id),
+    technicianName: text("technician_name"),
+
+    // What the customer paid for this visit, in cents. Null when the figure is
+    // not known — an imported note often has the work but not the money. Only
+    // served to roles that may see money at all.
+    amountCents: integer("amount_cents"),
+
+    // --- What was cleaned -------------------------------------------------
+    // Each of these is the detail for one kind of work. A filled column is
+    // what makes a customer a past carpet customer or a past duct customer, so
+    // they are separate columns rather than one blob.
+    roomsCleaned: text("rooms_cleaned"),
+    carpetDetail: text("carpet_detail"),
+    upholsteryDetail: text("upholstery_detail"),
+    airDuctDetail: text("air_duct_detail"),
+    moveDetail: text("move_detail"),
+    petTreatmentDetail: text("pet_treatment_detail"),
+    stainNotes: text("stain_notes"),
+    chemicalsUsed: text("chemicals_used"),
+
+    // --- What to remember next time ---------------------------------------
+    customerRequests: text("customer_requests"),
+    technicianNotes: text("technician_notes"),
+    recommendedMaintenance: text("recommended_maintenance"),
+    // The date the house should be seen again, as a plain date. What the
+    // follow-up segments count from.
+    nextServiceDate: text("next_service_date"),
+
+    // The promotion this visit was booked on, if any. Kept as the published
+    // code and name so it lines up with the promotion pages and with leads.
+    promotionCode: text("promotion_code"),
+    promotionName: text("promotion_name"),
+    // The office's own reference for the paperwork — an invoice or receipt
+    // number — when there is one.
+    invoiceRef: text("invoice_ref"),
+
+    // --- Audit ------------------------------------------------------------
+    createdBy: integer("created_by").references(() => employees.id),
+    createdByName: text("created_by_name"),
+    updatedBy: integer("updated_by").references(() => employees.id),
+    updatedByName: text("updated_by_name"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow()
+  },
+  (table) => [
+    index("service_notes_customer_idx").on(table.customerId),
+    index("service_notes_job_idx").on(table.jobId),
+    index("service_notes_date_idx").on(table.serviceDate),
+    index("service_notes_next_idx").on(table.nextServiceDate)
+  ]
+);
+
+// The trail on a service note: who wrote it, who changed it, and what changed.
+// Append-only, so an edit never hides what the note said before.
+export const serviceNoteEvents = pgTable(
+  "service_note_events",
+  {
+    id: serial().primaryKey(),
+    serviceNoteId: integer("service_note_id")
+      .notNull()
+      .references(() => serviceNotes.id),
+    customerId: integer("customer_id")
+      .notNull()
+      .references(() => customers.id),
+    employeeId: integer("employee_id").references(() => employees.id),
+    employeeName: text("employee_name"),
+    // created | updated
+    kind: text().notNull().default("created"),
+    message: text().notNull(),
+    // The fields this edit touched and what they held before, so a correction
+    // can be read rather than guessed at.
+    detail: jsonb(),
+    createdAt: timestamp("created_at").defaultNow()
+  },
+  (table) => [
+    index("service_note_events_note_idx").on(table.serviceNoteId),
+    index("service_note_events_customer_idx").on(table.customerId)
+  ]
+);
+
+// One row per time a customer was contacted about a promotion, whoever sent it
+// and however it went out — a campaign text, a campaign email, or a call from
+// the office line. campaign_recipients already records what the sending engine
+// did with an address; this table is the customer-facing history the office
+// reads on an account: what we offered them, when, and what came of it.
+//
+// The unique index on (campaign_id, customer_id, channel) is what stops the
+// same household being sent the same campaign twice on the same channel. It
+// only binds rows that belong to a campaign — an ad-hoc call is not a campaign
+// send and is deliberately left unconstrained.
+export const marketingContacts = pgTable(
+  "marketing_contacts",
+  {
+    id: serial().primaryKey(),
+    customerId: integer("customer_id")
+      .notNull()
+      .references(() => customers.id),
+    // The campaign this contact belongs to. Null for a one-off approach.
+    campaignId: integer("campaign_id").references(() => campaigns.id),
+    // The send this row describes, when the campaign engine made one, so the
+    // delivery detail can be followed through to the message itself.
+    recipientId: integer("recipient_id").references(() => campaignRecipients.id),
+
+    // What was offered. The published promotion code, its name and the page
+    // the customer was pointed at — the existing promotion pages, never a copy
+    // of one, so a submitted request goes through the normal lead pipeline.
+    promotionCode: text("promotion_code"),
+    promotionName: text("promotion_name"),
+    promotionUrl: text("promotion_url"),
+
+    // sms | email | call | voicemail | other
+    channel: text().notNull().default("sms"),
+    // outbound | inbound
+    direction: text().notNull().default("outbound"),
+    // Which system carried it, when one did.
+    provider: text(),
+    // The number or address it was sent from — DCA's business line for a call
+    // or text made by hand. Stored as data only; nothing here dials anything.
+    fromLine: text("from_line"),
+    // The number or address it went to.
+    address: text(),
+
+    // Which lead source this contact belongs to, kept so a contact that came
+    // out of a directory listing stays identifiable as that listing even when
+    // the call itself arrived on another DCA number. Matches leads.source
+    // ("website", "goodzer", "google_business", "phone", "manual").
+    leadSource: text("lead_source"),
+    // The other system's own identifier for the call or message, for activity
+    // that is reconciled from outside this app later.
+    externalRef: text("external_ref"),
+
+    // queued | sent | delivered | failed | logged
+    deliveryStatus: text("delivery_status").notNull().default("logged"),
+    // What the customer said back: interested | not_interested | booked |
+    // no_answer | opted_out | other. Null until somebody knows.
+    response: text(),
+    responseDetail: text("response_detail"),
+
+    // What it turned into, when it turned into anything.
+    leadId: integer("lead_id").references(() => leads.id),
+    jobId: integer("job_id").references(() => jobs.id),
+    revenueCents: integer("revenue_cents"),
+
+    note: text(),
+    contactedAt: timestamp("contacted_at").defaultNow(),
+    createdBy: integer("created_by").references(() => employees.id),
+    createdByName: text("created_by_name"),
+    updatedBy: integer("updated_by").references(() => employees.id),
+    updatedByName: text("updated_by_name"),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow()
+  },
+  (table) => [
+    index("marketing_contacts_customer_idx").on(table.customerId),
+    index("marketing_contacts_campaign_idx").on(table.campaignId),
+    index("marketing_contacts_contacted_idx").on(table.contactedAt),
+    uniqueIndex("marketing_contacts_once_idx").on(
+      table.campaignId,
+      table.customerId,
+      table.channel
+    )
+  ]
 );

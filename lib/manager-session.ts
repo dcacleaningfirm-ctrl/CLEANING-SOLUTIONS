@@ -142,6 +142,12 @@ export const PERMISSIONS = {
   leads: "leads",
   // Promotions and campaign material.
   marketing: "marketing",
+  // The Customer Marketing Center: segmenting the customer database by what
+  // people have had done, attaching a promotion to a campaign, and reading the
+  // marketing history. Held apart from `marketing` because this one reads the
+  // whole customer list and the trends in it, which is management information
+  // rather than promotional material.
+  customerMarketing: "customer_marketing",
   // The customer database: browse, search, correct an account.
   customers: "customers",
   // Phone numbers, emails and addresses held against those accounts.
@@ -194,6 +200,7 @@ export const MANAGEMENT_SPECIALIST_PERMISSIONS: Permission[] = [
   "routing",
   "leads",
   "marketing",
+  "customer_marketing",
   "customers",
   "customer_contacts",
   "followups",
