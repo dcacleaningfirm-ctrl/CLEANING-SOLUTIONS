@@ -26,6 +26,7 @@ import {
   leads
 } from "../db/schema.js";
 import { emailKey, phoneKey, displayPhone } from "./customer-import.js";
+import { recordConsentFromForm } from "./marketing-store.js";
 import { splitName } from "./clover-customers.js";
 import { looksLikeEmail, normalizePhone } from "./notify.js";
 
@@ -95,6 +96,13 @@ export interface DraftLead {
   requestedTime?: string | null;
   customerNotes?: string | null;
 
+  // The optional promotional-text box on the website forms. Absent or false
+  // means the customer did not tick it, which is the only honest reading of a
+  // checkbox that browsers do not submit when it is left alone. Never inferred
+  // from anything else on the request.
+  smsMarketingConsent?: boolean;
+  smsMarketingConsentSource?: "Website Form" | "Booking Form" | null;
+
   submittedAt?: Date | null;
   raw?: Record<string, unknown> | null;
 }
@@ -129,6 +137,15 @@ const PLACEHOLDERS = new Set([
   "—",
   "-"
 ]);
+
+// A ticked checkbox, and nothing else. Netlify Forms sends the value attribute
+// ("Yes") when a box is ticked and omits the field entirely when it is not, so
+// anything unrecognised is read as "not ticked" rather than guessed at.
+function ticked(value: unknown): boolean {
+  if (value === true) return true;
+  const text = String(value ?? "").trim().toLowerCase();
+  return text === "yes" || text === "true" || text === "on" || text === "1";
+}
 
 function meaningful(value: unknown, max = 400): string | null {
   const clean = text(value, max);
@@ -319,6 +336,11 @@ export function quickEstimateAdapter(
     requestedTime: meaningful(data.preferred_time, 80),
     customerNotes: notes || null,
 
+    smsMarketingConsent: ticked(data.sms_marketing_consent),
+    // Every form that carries this box is a booking or request form, so that is
+    // what the consent record says it came from.
+    smsMarketingConsentSource: "Booking Form",
+
     submittedAt: meta.submittedAt || new Date(),
     raw: data as Record<string, unknown>
   };
@@ -386,6 +408,9 @@ export function genericAdapter(
     requestedDate: dateText(body.requestedDate),
     requestedTime: text(body.requestedTime, 80),
     customerNotes: longText(body.customerNotes ?? body.notes, 4000),
+
+    smsMarketingConsent: ticked(body.smsMarketingConsent ?? body.sms_marketing_consent),
+    smsMarketingConsentSource: "Website Form",
 
     submittedAt: meta.submittedAt || new Date(),
     raw: body
@@ -601,6 +626,30 @@ export async function ingestLead(draft: DraftLead): Promise<IngestResult> {
         ? `Imported from ${leadSourceLabel(source)} and added to an existing customer`
         : `Imported from ${leadSourceLabel(source)} with no contact details to file it under`
   });
+
+  // The optional promotional-text box, if the customer ticked it. Deliberately
+  // last, and deliberately wrapped: a fault here must not cost the office the
+  // request itself, which is the whole reason this pipeline exists. An untouched
+  // box records nothing at all — a customer who did not ask for promotions stays
+  // in Awaiting text consent.
+  if (customer && draft.smsMarketingConsent) {
+    try {
+      const consent = await recordConsentFromForm({
+        customerId: customer.id,
+        source: draft.smsMarketingConsentSource || "Website Form",
+        detail: `Ticked on the ${draft.formName || leadSourceLabel(source)} form`
+      });
+      await db.insert(leadEvents).values({
+        leadId: lead.id,
+        kind: "consent",
+        message: consent.recorded
+          ? "Customer ticked the optional promotional text box, and consent to text was recorded"
+          : `Customer ticked the optional promotional text box, but nothing was changed: ${consent.reason}`
+      });
+    } catch (error) {
+      console.error(`lead intake: marketing consent not recorded for lead ${lead.id}`, error);
+    }
+  }
 
   return { lead, customer: customer || null, customerCreated, alreadyImported: false };
 }

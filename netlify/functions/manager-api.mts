@@ -92,6 +92,18 @@ import {
   retryIntakeFailure
 } from "../../lib/lead-intake.js";
 import { handleMarketingRoute } from "../../lib/marketing-routes.js";
+import {
+  SERVICE_NOTE_FIELDS,
+  createServiceNote,
+  listServiceNotes,
+  noteBelongsTo,
+  readServiceNoteInput,
+  serviceNoteById,
+  serviceNoteHistory,
+  updateServiceNote
+} from "../../lib/service-notes.js";
+import { customerMarketingProfile } from "../../lib/customer-marketing.js";
+import { PROMOTIONS, promotionByCode } from "../../lib/promotions.js";
 
 // Read + write API for the DCA Pro Manager app. Login lives in a separate
 // function (manager-login); everything here requires a valid session cookie.
@@ -2194,6 +2206,200 @@ export default async (req: Request, context: Context) => {
 
       console.log(`customer ${id} updated by employee ${account.id}`);
       return json({ customer: updated, changed });
+    }
+
+    // --- Service history and notes ---------------------------------------
+    //
+    // What was actually done at the house. Who may read and write it follows the
+    // same rule as the account itself: management reaches any customer's
+    // history, and a crew member reaches the history of a household they are
+    // working — a job on their own board — so the person who did the work is the
+    // person who can write it up, without that handing them the customer
+    // database.
+    //
+    // Money is separate again. What the house was charged is a management figure,
+    // so it is left out of the response entirely for a role without reporting
+    // access rather than sent down and hidden in the browser.
+    const notesMatch = path.match(/^customers\/(\d+)\/service-notes$/);
+    if (notesMatch && method === "GET") {
+      const id = Number(notesMatch[1]);
+      if (!(await mayReachCustomer(id))) return denied("that customer account");
+      const showMoney = allows("reports");
+      // The appointments a note can be attached to, so a write-up hangs off the
+      // visit it describes. Narrowed to a technician's own jobs the same way the
+      // job board is, so this cannot become a way to read somebody else's work.
+      const attachable = await db
+        .select({
+          id: jobs.id,
+          serviceType: jobs.serviceType,
+          status: jobs.status,
+          scheduledFor: jobs.scheduledFor,
+          completedAt: jobs.completedAt
+        })
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.customerId, id),
+            ownJobsOnly ? eq(jobs.assignedTo, account.id) : undefined
+          )
+        )
+        .orderBy(desc(jobs.scheduledFor))
+        .limit(50);
+      return json({
+        notes: await listServiceNotes(id, { money: showMoney }),
+        jobs: attachable,
+        // The trail of who wrote and who changed what, for the roles that
+        // supervise the work rather than do it.
+        history: allows("customers") ? await serviceNoteHistory(id) : [],
+        fields: SERVICE_NOTE_FIELDS,
+        promotions: PROMOTIONS,
+        canRecordAmount: showMoney,
+        canEditAny: allows("customers")
+      });
+    }
+
+    if (notesMatch && method === "POST") {
+      const id = Number(notesMatch[1]);
+      if (!(await mayReachCustomer(id))) return denied("that customer account");
+
+      const [customer] = await db
+        .select({ id: customers.id })
+        .from(customers)
+        .where(eq(customers.id, id))
+        .limit(1);
+      if (!customer) return json({ error: "That customer no longer exists" }, { status: 404 });
+
+      const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const parsed = readServiceNoteInput(body);
+      if (!parsed.values) return json({ error: parsed.error }, { status: 400 });
+      const values = parsed.values;
+
+      // A figure only lands on the note if the person writing it is allowed to
+      // record money at all.
+      if (!allows("reports")) delete values.amountCents;
+
+      // A promotion on a note has to be one the site is actually advertising, so
+      // the marketing segments can count them and nothing here invents an offer.
+      if (values.promotionCode) {
+        const promotion = promotionByCode(values.promotionCode);
+        if (!promotion) {
+          return json(
+            { error: "That promotion code is not one the site is advertising." },
+            { status: 400 }
+          );
+        }
+        values.promotionCode = promotion.code;
+        if (!values.promotionName) values.promotionName = promotion.name;
+      }
+
+      // The job this describes must belong to the same household, or the note
+      // would read as history for the wrong customer.
+      if (values.jobId) {
+        const [job] = await db
+          .select({ id: jobs.id, customerId: jobs.customerId })
+          .from(jobs)
+          .where(eq(jobs.id, Number(values.jobId)))
+          .limit(1);
+        if (!job || job.customerId !== id) {
+          return json({ error: "That job is not on this customer's account" }, { status: 400 });
+        }
+      }
+
+      // A crew member writing up their own visit is the technician on it unless
+      // the office says otherwise, and only the office may name somebody else.
+      if (!allows("customers")) {
+        values.technicianId = account.id;
+        values.technicianName = account.name;
+      } else if (values.technicianId) {
+        const [member] = await db
+          .select({ id: employees.id, name: employees.name })
+          .from(employees)
+          .where(eq(employees.id, Number(values.technicianId)))
+          .limit(1);
+        if (!member) return json({ error: "That crew member is not on the list" }, { status: 400 });
+        values.technicianName = values.technicianName || member.name;
+      }
+
+      const row = await createServiceNote(id, values, { id: account.id, name: account.name });
+
+      // The account has had something happen on it, which is what the office
+      // sorts a quiet customer list by.
+      await db
+        .update(customers)
+        .set({ lastActivityAt: new Date() })
+        .where(eq(customers.id, id));
+
+      console.log(`service note ${row.id} added to customer ${id} by employee ${account.id}`);
+      return json({ note: allows("reports") ? row : { ...row, amountCents: undefined } });
+    }
+
+    // Editing a note keeps the note. The row is updated, the previous values are
+    // written to the trail, and the note stays on the customer it was written
+    // for — the id in the path is checked against the note's own customer, so a
+    // note can never be moved onto another household by a hand-made request.
+    const serviceNoteMatch = path.match(/^customers\/(\d+)\/service-notes\/(\d+)$/);
+    if (serviceNoteMatch && method === "PATCH") {
+      const id = Number(serviceNoteMatch[1]);
+      const noteId = Number(serviceNoteMatch[2]);
+      if (!(await mayReachCustomer(id))) return denied("that customer account");
+
+      const existing = await serviceNoteById(noteId);
+      if (!noteBelongsTo(existing, id)) {
+        return json({ error: "That service note is not on this customer" }, { status: 404 });
+      }
+
+      // Management may correct any note. Everybody else may correct one they
+      // wrote themselves, which covers the crew member who mistyped a room count
+      // without letting one technician rewrite another's account of a visit.
+      const mine = Number(existing!.createdBy) === account.id;
+      if (!allows("customers") && !mine) {
+        return denied("service notes written by somebody else");
+      }
+
+      const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const parsed = readServiceNoteInput({ serviceDate: existing!.serviceDate, ...body });
+      if (!parsed.values) return json({ error: parsed.error }, { status: 400 });
+      const values = parsed.values;
+      if (!allows("reports")) delete values.amountCents;
+      delete values.jobId;
+      delete values.technicianId;
+
+      if (values.promotionCode) {
+        const promotion = promotionByCode(values.promotionCode);
+        if (!promotion) {
+          return json(
+            { error: "That promotion code is not one the site is advertising." },
+            { status: 400 }
+          );
+        }
+        values.promotionCode = promotion.code;
+        if (!values.promotionName) values.promotionName = promotion.name;
+      }
+
+      const result = await updateServiceNote(existing as Record<string, unknown>, values, {
+        id: account.id,
+        name: account.name
+      });
+      const note = result.row as Record<string, unknown>;
+      if (!allows("reports")) delete note.amountCents;
+      return json({ note, changed: result.changedFields });
+    }
+
+    // --- The marketing view of one customer ------------------------------
+    //
+    // Last service, how much work they have had, what offer they came in on,
+    // when they are due again, whether they may be contacted, and what has
+    // already been sent to them. Management information about a household, so it
+    // is gated on the Customer Marketing permission rather than on being able to
+    // open the account: a crew member at the door needs the address and the job,
+    // not the account's spend and marketing history.
+    const profileMatch = path.match(/^customers\/(\d+)\/marketing$/);
+    if (profileMatch && method === "GET") {
+      const id = Number(profileMatch[1]);
+      if (!allows("customer_marketing")) return denied("customer marketing information");
+      const profile = await customerMarketingProfile(id, { money: allows("reports") });
+      if (!profile) return json({ error: "That customer no longer exists" }, { status: 404 });
+      return json({ marketing: profile });
     }
 
     // --- Bulk import from a spreadsheet ----------------------------------

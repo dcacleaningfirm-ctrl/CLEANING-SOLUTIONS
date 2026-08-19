@@ -22,6 +22,8 @@ import {
   CONSENT_GRANTED,
   CONSENT_UNKNOWN,
   attributionWindowDays,
+  describeSmsConsent,
+  looksTextable,
   type AudienceFilter,
   type MarketingChannel
 } from "./marketing.js";
@@ -152,7 +154,9 @@ export interface ConsentInput {
   // granted — they agreed, and `source` says how we know.
   // opted_out — they asked to stop.
   // denied — they were asked and said no.
-  action: "granted" | "opted_out" | "denied";
+  // not_asked — the record is being set back to "nobody has asked yet". It
+  //   clears a recorded agreement; it never clears an opt-out.
+  action: "granted" | "opted_out" | "denied" | "not_asked";
   source?: string | null;
   detail?: string | null;
   actorEmployeeId?: number | null;
@@ -170,7 +174,9 @@ export async function recordConsent(input: ConsentInput) {
     .select({
       id: customers.id,
       phone: customers.phone,
-      email: customers.email
+      email: customers.email,
+      smsOptedOutAt: customers.smsOptedOutAt,
+      emailOptedOutAt: customers.emailOptedOutAt
     })
     .from(customers)
     .where(eq(customers.id, input.customerId));
@@ -178,33 +184,47 @@ export async function recordConsent(input: ConsentInput) {
 
   const now = new Date();
   const granted = input.action === "granted";
-  const status = granted ? CONSENT_GRANTED : CONSENT_DENIED;
+  // "Not Asked" puts the record back where every account starts, which is not a
+  // decision against us — it is the absence of one.
+  const notAsked = input.action === "not_asked";
+  const status = granted ? CONSENT_GRANTED : notAsked ? CONSENT_UNKNOWN : CONSENT_DENIED;
   const address =
     input.channel === "sms"
       ? normalizePhone(existing.phone || "")
       : (existing.email || "").trim().toLowerCase() || null;
 
+  // Whether an opt-out already on the account is being kept. Setting a record
+  // back to "Not Asked" must never quietly make a customer who opted out
+  // reachable again: only a fresh recorded agreement can do that.
+  const optedOutRetained = notAsked
+    ? Boolean(input.channel === "sms" ? existing.smsOptedOutAt : existing.emailOptedOutAt)
+    : false;
+
   const updates: Record<string, unknown> =
     input.channel === "sms"
       ? {
           smsConsentStatus: status,
-          smsConsentSource: granted ? input.source || null : input.source || null,
+          smsConsentSource: notAsked ? null : input.source || null,
           smsConsentAt: granted ? now : null,
-          smsOptedOutAt: granted ? null : now
+          // Left exactly as it was when the record is set back to Not Asked.
+          ...(notAsked ? {} : { smsOptedOutAt: granted ? null : now }),
+          smsConsentBy: input.actorEmployeeId || null,
+          smsConsentByName: input.actorName || null
         }
       : {
           emailConsentStatus: status,
-          emailConsentSource: input.source || null,
+          emailConsentSource: notAsked ? null : input.source || null,
           emailConsentAt: granted ? now : null,
-          emailOptedOutAt: granted ? null : now
+          ...(notAsked ? {} : { emailOptedOutAt: granted ? null : now })
         };
 
   await db.update(customers).set(updates).where(eq(customers.id, input.customerId));
 
   // The suppression list is keyed by the number or address rather than by
   // account, so an opt-out survives the same person being imported again
-  // tomorrow under a new customer row.
-  if (address) {
+  // tomorrow under a new customer row. Not Asked touches neither side of it:
+  // clearing a suppression is a decision, and nobody made one.
+  if (address && !notAsked) {
     if (granted) {
       await releaseSuppression(input.channel, address);
     } else {
@@ -232,7 +252,109 @@ export async function recordConsent(input: ConsentInput) {
     userAgent: input.userAgent ? String(input.userAgent).slice(0, 300) : null
   });
 
-  return { ok: true as const, status, address };
+  return { ok: true as const, status, address, optedOutRetained };
+}
+
+// What one account's SMS marketing consent record says, with the bucket it
+// falls into worked out here rather than in the browser. The console draws what
+// this returns, so "Textable now" on the customer profile and "Textable now" in
+// the audience count can never drift apart into two different definitions.
+export async function smsConsentSnapshot(customerId: number) {
+  const [row] = await db
+    .select({
+      id: customers.id,
+      phone: customers.phone,
+      smsConsentStatus: customers.smsConsentStatus,
+      smsConsentSource: customers.smsConsentSource,
+      smsConsentAt: customers.smsConsentAt,
+      smsConsentBy: customers.smsConsentBy,
+      smsConsentByName: customers.smsConsentByName,
+      smsOptedOutAt: customers.smsOptedOutAt
+    })
+    .from(customers)
+    .where(eq(customers.id, customerId));
+  if (!row) return null;
+
+  const described = describeSmsConsent(row);
+  const address = normalizePhone(row.phone || "");
+  // The suppression list is keyed by the number, not the account, so a customer
+  // can be suppressed without this account ever having recorded an opt-out —
+  // which is exactly what it is for. The profile has to say so.
+  const suppressed = address ? await isSuppressed("sms", address) : false;
+
+  return {
+    choice: described.choice,
+    label: described.label,
+    bucket: described.bucket,
+    status: row.smsConsentStatus,
+    source: row.smsConsentSource,
+    recordedAt: row.smsConsentAt,
+    recordedById: row.smsConsentBy,
+    recordedByName: row.smsConsentByName,
+    optedOutAt: row.smsOptedOutAt,
+    hasMobile: looksTextable(row.phone),
+    suppressed,
+    // The single answer the sender would give for this account today.
+    textable: described.textable && !suppressed
+  };
+}
+
+// A customer ticking the optional promotional-text box on a website form. The
+// tick is the agreement, so it is recorded with the form as its source and no
+// member of staff attached to it — but only when there is nothing already on
+// record, because a form filled in at 11pm must never overwrite an agreement the
+// office recorded, and must never bring somebody back who has opted out.
+//
+// Returns why it did nothing when it does nothing, so intake can write that into
+// the request's own history instead of silently discarding it.
+export async function recordConsentFromForm(input: {
+  customerId: number;
+  source: "Website Form" | "Booking Form";
+  detail?: string | null;
+  ip?: string | null;
+  userAgent?: string | null;
+}): Promise<{ recorded: boolean; reason?: string }> {
+  const [row] = await db
+    .select({
+      id: customers.id,
+      phone: customers.phone,
+      smsConsentStatus: customers.smsConsentStatus,
+      smsOptedOutAt: customers.smsOptedOutAt
+    })
+    .from(customers)
+    .where(eq(customers.id, input.customerId));
+  if (!row) return { recorded: false, reason: "that customer no longer exists" };
+
+  if (row.smsOptedOutAt || row.smsConsentStatus === CONSENT_DENIED) {
+    return { recorded: false, reason: "the account has opted out of promotional texts" };
+  }
+  if (row.smsConsentStatus === CONSENT_GRANTED) {
+    return { recorded: false, reason: "consent was already on record" };
+  }
+  if (!looksTextable(row.phone)) {
+    return { recorded: false, reason: "there is no mobile number on the account that a text could reach" };
+  }
+
+  const address = normalizePhone(row.phone || "");
+  // Keyed on the number rather than the account, so a number somebody stopped
+  // texts to stays stopped even when a new request arrives under a new record.
+  if (address && (await isSuppressed("sms", address))) {
+    return { recorded: false, reason: "the number is on the promotional text suppression list" };
+  }
+
+  const result = await recordConsent({
+    customerId: input.customerId,
+    channel: "sms",
+    action: "granted",
+    source: input.source,
+    detail: input.detail || null,
+    // Nobody in the office recorded this one: the customer ticked the box.
+    actorEmployeeId: null,
+    actorName: null,
+    ip: input.ip || null,
+    userAgent: input.userAgent || null
+  });
+  return result.ok ? { recorded: true } : { recorded: false, reason: result.error };
 }
 
 export async function consentHistory(customerId: number, limit = 25) {

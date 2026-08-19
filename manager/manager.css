@@ -907,6 +907,7 @@ tbody tr.clickable:hover { background: var(--surface-2); }
 
 .feed-item .dot.imported { background: var(--sky); }
 .feed-item .dot.converted { background: var(--green); }
+.feed-item .dot.consent { background: var(--brand); }
 
 /* Login codes and the security log
    ------------------------------------------------------------------------ */
@@ -988,4 +989,107 @@ tbody tr.clickable:hover { background: var(--surface-2); }
   font-weight: 600;
   color: var(--text);
   margin: 12px 0 0;
+}
+
+/* ---------- Customer profile: service history and marketing ---------- */
+
+/* The service-note form carries a lot of fields, so its dialog is allowed to be
+   wider than the code prompts the shared modal was built for. Still a single
+   column on a phone, because that is where a note is usually written. */
+.modal-card.wide { max-width: 640px; }
+
+/* The history heading and its Add button on one line, wrapping on a narrow
+   screen rather than crushing the button. */
+.service-history .section-head,
+.customer-marketing .section-head,
+.sms-consent .section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.service-note {
+  border-top: 1px solid var(--border);
+  padding: 14px 0 4px;
+}
+.service-note:first-of-type { border-top: 0; }
+.service-note .kv { margin: 10px 0 8px; }
+.service-note .hint { margin: 0 0 4px; }
+
+.service-note-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.service-note-head strong { font-size: 0.95rem; letter-spacing: -0.01em; }
+.service-note-head > span { color: var(--text); font-size: 0.88rem; }
+.service-note-head .mono { color: var(--brand); font-weight: 700; }
+.service-note-head .btn { margin-left: auto; }
+
+.service-note-meta { color: var(--muted); font-size: 0.78rem; margin-top: 4px; }
+
+/* Who wrote and who changed each note. Folded away by default: it is there to
+   be checked, not read every time. */
+.service-note-trail { margin-top: 16px; }
+.service-note-trail summary { color: var(--muted); font-size: 0.8rem; cursor: pointer; }
+.service-note-trail ul { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 0.78rem; }
+.service-note-trail li { padding: 2px 0; }
+
+/* ---------- Customer marketing segments ---------- */
+
+.segment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+  margin: 14px 0 4px;
+}
+
+/* One tick box per segment, sized to be tapped. The count sits on the right of
+   the label so the office can see how large a segment is before choosing it. */
+.segment {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 10px;
+  padding: 11px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.segment:hover { border-color: var(--brand); }
+.segment.chosen { border-color: var(--brand); background: var(--brand-soft); }
+.segment input { width: 17px; height: 17px; margin-top: 1px; accent-color: var(--brand); }
+.segment > span { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
+.segment strong { font-weight: 600; letter-spacing: -0.01em; }
+.segment .mono { color: var(--brand); font-weight: 700; text-align: right; }
+.segment .muted { grid-column: 1 / -1; font-size: 0.76rem; line-height: 1.35; }
+
+/* Texting the audience by hand from an iPhone. One household on screen at a
+   time, so the card is deliberately quiet: who, what number, what it says, and
+   the three buttons that matter. The brand edge is there to make it obvious this
+   is a run in progress and not another summary panel. */
+.manual-sms { border-left: 3px solid var(--brand); }
+.manual-sms-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.manual-sms-head .section-title { margin: 0; }
+.manual-sms .kv { margin: 12px 0; }
+.manual-sms textarea { font-size: 0.9rem; line-height: 1.45; }
+/* The message and the number should be reachable in one tap on a handset, so
+   these keep the doorstep sizing rather than shrinking to a toolbar. */
+.manual-sms-actions { margin: 10px 0 6px; }
+.manual-sms-actions .muted { align-self: center; font-size: 0.82rem; }
+
+@media (max-width: 680px) {
+  .segment-grid { grid-template-columns: 1fr; }
+  .service-note-head .btn { margin-left: 0; }
 }

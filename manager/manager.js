@@ -46,8 +46,11 @@
     job: null,
     pay: null,
     ticket: null,
-    // Customers tab: the search term in force and its debounce timer.
+    // Customers tab: the search term in force and its debounce timer, and the
+    // account open in the drawer with its service history and marketing
+    // snapshot alongside it.
     customerSearch: "",
+    customerProfile: null,
     customerTimer: null,
     // Leads tab: the filters in force, the request open in the drawer, the
     // debounce timer behind the search box, and the source/status vocabulary
@@ -292,6 +295,10 @@
   function closeModal() {
     document.getElementById("modal").hidden = true;
     document.getElementById("modal-form").innerHTML = "";
+    // A form that asked for the wide dialog leaves it narrow again for the next
+    // thing that opens, which is usually a short code prompt.
+    var card = document.querySelector("#modal .modal-card");
+    if (card) card.classList.remove("wide");
     modalSubmit = null;
     // Dismissing the forced code change (Escape, or the backdrop) does not
     // grant anything — every screen still comes back 403 — but the flag has to
@@ -1684,7 +1691,8 @@
         '<div class="card customer-search"><label class="field"><span>Find a customer</span>' +
         '<input id="cu-search" type="search" maxlength="80" placeholder="Name, phone, email or street…" value="' +
         esc(term) + '" /></label>' +
-        '<p class="hint">Tap a number to call, or Text to open a message. Edit fixes what is on file.</p></div>' +
+        '<p class="hint">Tap a number to call, or Text to open a message. Profile shows the service ' +
+        'history and what has been offered; Edit fixes what is on file.</p></div>' +
         '<div id="cu-list"><div class="loading">Loading…</div></div>';
 
       document.getElementById("cu-search").addEventListener("input", function () {
@@ -1708,7 +1716,7 @@
     api("customers" + (term ? "?q=" + encodeURIComponent(term) : "")).then(function (d) {
       list.innerHTML = d.customers.length
         ? '<div class="card"><table><thead><tr><th>Name</th><th>Contact</th><th>Location</th>' +
-          '<th>Clover</th><th class="right">Jobs</th><th class="right">Edit</th></tr></thead><tbody>' +
+          '<th>Clover</th><th class="right">Jobs</th><th class="right">Open</th></tr></thead><tbody>' +
           d.customers.map(function (c) {
             var dial = telDigits(c.phone);
             var contact =
@@ -1719,8 +1727,9 @@
             var loc = [c.city, c.state].filter(Boolean).map(esc).join(", ") || '<span class="muted">—</span>';
             return "<tr><td>" + esc(c.name) + "</td><td>" + contact + '</td><td class="muted">' +
               loc + "</td><td>" + cloverCell(c) + '</td><td class="right mono">' + c.jobCount + "</td>" +
-              '<td class="right"><button type="button" class="btn btn-ghost btn-sm" data-edit-customer="' +
-              c.id + '">Edit</button></td></tr>';
+              '<td class="right"><button type="button" class="btn btn-ghost btn-sm" data-customer-profile="' +
+              c.id + '">Profile</button> <button type="button" class="btn btn-ghost btn-sm" ' +
+              'data-edit-customer="' + c.id + '">Edit</button></td></tr>';
           }).join("") +
           "</tbody></table></div>"
         : '<div class="card"><p class="empty">' +
@@ -1874,6 +1883,904 @@
         return "<span>" + esc(row[0]) + "</span><strong>" + esc(row[1]) + "</strong>";
       }).join("") +
       "</div>";
+  }
+
+  // ---------- customer profile: service history and marketing ----------
+  //
+  // The account as the office needs to see it: who they are, what has been done
+  // at the house, what they were charged, what they were offered and when they
+  // are due again. It opens in the same drawer jobs and leads use, so nothing new
+  // has to be learned to read it.
+  //
+  // What appears here is decided by the server. A crew member opening a customer
+  // they are working sees the visits and can write one up; the spend, the trends
+  // and the marketing history are simply absent from the response for a role that
+  // may not see them, rather than sent down and hidden.
+  function openCustomerProfile(customerId) {
+    var drawer = document.getElementById("drawer");
+    var panel = document.getElementById("drawer-panel");
+    drawer.hidden = false;
+    panel.innerHTML = '<div class="loading">Loading…</div>';
+    // The drawer is shared. Clear what the last thing opened left behind.
+    state.job = null;
+    state.pay = null;
+    state.ticket = null;
+    state.lead = null;
+    Promise.all([
+      api("customers/" + customerId),
+      api("customers/" + customerId + "/service-notes"),
+      hasPerm("customer_marketing")
+        ? api("customers/" + customerId + "/marketing").catch(function () { return null; })
+        : Promise.resolve(null),
+      state.crew.length
+        ? Promise.resolve({ crew: state.crew })
+        : api("crew").catch(function () { return { crew: [] }; }),
+      // The SMS marketing consent record and its trail. Only fetched for the
+      // roles that may record it; a crew member writing up a visit never asks
+      // for it, and the server would refuse if they did.
+      hasPerm("marketing")
+        ? api("marketing/consent/" + customerId).catch(function () { return null; })
+        : Promise.resolve(null)
+    ])
+      .then(function (results) {
+        state.crew = (results[3] && results[3].crew) || state.crew;
+        state.customerProfile = {
+          customer: results[0].customer,
+          history: results[1],
+          marketing: results[2] ? results[2].marketing : null,
+          consent: results[4] || null
+        };
+        renderCustomerProfile();
+      })
+      .catch(function (e) {
+        panel.innerHTML =
+          '<button class="drawer-close" data-close>×</button><p class="empty">' +
+          esc(e.message || "That customer could not be opened.") + "</p>";
+      });
+  }
+
+  function renderCustomerProfile() {
+    var data = state.customerProfile;
+    if (!data) return;
+    var c = data.customer;
+    var history = data.history || {};
+    var notes = history.notes || [];
+    var m = data.marketing;
+    var panel = document.getElementById("drawer-panel");
+    var place = [c.address, c.city, c.state, c.zip].filter(Boolean).join(", ");
+
+    panel.innerHTML =
+      '<button class="drawer-close" data-close>×</button>' +
+      "<h2>" + esc(c.name) + "</h2>" +
+      '<div class="lead-badges">' +
+      '<span class="pill source">' + c.jobCount + (c.jobCount === 1 ? " job" : " jobs") + "</span>" +
+      '<span class="pill scheduled">' + notes.length +
+      (notes.length === 1 ? " service note" : " service notes") + "</span>" +
+      (m ? marketingPill(m) : "") +
+      "</div>" +
+      '<dl class="kv">' +
+      "<dt>Phone</dt><dd>" + phoneText(c.phone) + "</dd>" +
+      (c.altPhone ? "<dt>Other number</dt><dd>" + phoneText(c.altPhone) + "</dd>" : "") +
+      "<dt>Email</dt><dd>" + emailText(c.email) + "</dd>" +
+      "<dt>Address</dt><dd>" + esc(place || "—") + "</dd>" +
+      "</dl>" +
+      contactActions({ id: c.id, phone: c.phone, email: c.email }, null) +
+      smsConsentHtml(c, data.consent) +
+      customerMarketingHtml(m) +
+      serviceHistoryHtml(c, history) +
+      customerContactHistoryHtml(m);
+  }
+
+  // ---------- SMS marketing consent ----------
+  //
+  // The whole control, in one place: what the record says now, how we know, who
+  // wrote it down, and the button that changes it. Drawn only for the roles the
+  // server lets record consent — for everybody else the section is simply not
+  // here, and the server refuses the route besides.
+
+  // A consent record has to be defensible years later, so this one carries the
+  // year that fmtDate leaves off.
+  function fmtStamp(iso) {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleString("en-US", {
+      month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit"
+    });
+  }
+
+  function consentPill(consent) {
+    if (!consent) return "";
+    if (consent.choice === "opted_out") return '<span class="pill cancelled">Opted Out</span>';
+    if (consent.choice === "granted") {
+      return consent.textable
+        ? '<span class="pill completed">Consented</span>'
+        : '<span class="pill">Consented, no mobile</span>';
+    }
+    return '<span class="pill">Not Asked</span>';
+  }
+
+  function smsConsentHtml(c, data) {
+    if (!data || !data.consent) return "";
+    var consent = data.consent;
+    var rows = [];
+    rows.push(["Consent", consentPill(consent)]);
+    rows.push(["Audience bucket", esc(consent.bucket)]);
+    rows.push(["Consent source", consent.source ? esc(consent.source) : "—"]);
+    rows.push(["Recorded", consent.recordedAt ? esc(fmtStamp(consent.recordedAt)) : "—"]);
+    rows.push([
+      "Recorded by",
+      consent.recordedByName ? esc(consent.recordedByName) : consent.recordedAt ? "The customer" : "—"
+    ]);
+    if (consent.optedOutAt) {
+      rows.push(["Opted out", esc(fmtStamp(consent.optedOutAt))]);
+    }
+    if (!consent.hasMobile) {
+      rows.push(["Mobile number", '<span class="muted">Nothing on file that a text could reach</span>']);
+    }
+    if (consent.suppressed) {
+      rows.push([
+        "Suppression list",
+        '<span class="muted">This number is suppressed, so no promotional text can go to it.</span>'
+      ]);
+    }
+
+    // The button that starts a text appears only for an account recorded as
+    // Consented that also has a number a text could reach. Not Asked and Opted
+    // Out never see it — there is nothing to press, not a message that gets
+    // refused after the fact.
+    var canText = consent.choice === "granted" && consent.textable;
+
+    return '<div class="card sms-consent">' +
+      '<div class="section-head"><h3>SMS marketing consent</h3>' +
+      '<div class="contact-bar">' +
+      (canText
+        ? '<button type="button" class="btn btn-primary btn-sm" data-manual-text="' + c.id +
+          '" data-name="' + esc(c.name) + '" data-phone="' + esc(c.phone || "") +
+          '">Text from iPhone</button>'
+        : "") +
+      '<button type="button" class="btn btn-ghost btn-sm" data-sms-consent="' + c.id +
+      '" data-name="' + esc(c.name) + '">Record consent</button></div></div>' +
+      '<dl class="kv">' +
+      rows.map(function (r) { return "<dt>" + r[0] + "</dt><dd>" + r[1] + "</dd>"; }).join("") +
+      "</dl>" +
+      '<p class="hint">Promotional texts go only to accounts recorded as Consented. Not Asked stays in ' +
+      "Awaiting text consent and is never texted, and an account that opted out never re-enters a " +
+      "promotional SMS audience.</p>" +
+      smsConsentTrailHtml(data.history) +
+      "</div>";
+  }
+
+  function smsConsentTrailHtml(history) {
+    var events = (history || []).filter(function (e) { return e.channel === "sms"; });
+    if (!events.length) return "";
+    return '<details class="service-note-trail"><summary>Consent trail (' + events.length + ")</summary>" +
+      events.map(function (e) {
+        return "<p>" + esc(fmtStamp(e.createdAt)) + " — " + esc(consentActionLabel(e.action)) +
+          (e.source ? ", " + esc(e.source) : "") +
+          (e.detail ? ". " + esc(e.detail) : "") +
+          '<br /><span class="muted">' + esc(e.actorName || "The customer") + "</span></p>";
+      }).join("") +
+      "</details>";
+  }
+
+  function consentActionLabel(action) {
+    if (action === "granted") return "Consented";
+    if (action === "not_asked") return "Set back to Not Asked";
+    if (action === "opted_out") return "Opted out";
+    if (action === "denied") return "Said no";
+    if (action === "opted_in") return "Opted back in";
+    return action;
+  }
+
+  // ---------- texting by hand from an iPhone ----------
+  //
+  // Automated texting is not switched on yet, so a promotional text is sent the
+  // way the office already sends everything else: a person, a handset, one
+  // customer at a time. What this app does is prepare the message and hand the
+  // phone an sms: link. What it never does is say a message was sent because a
+  // composer opened — the record is written when somebody comes back and says
+  // they pressed Send, and not before.
+  var MANUAL_SMS_METHOD = "manual_iphone_sms";
+
+  // iOS reads the message body after an ampersand. A question mark there, which
+  // is what the standard says, leaves the composer empty on an iPhone.
+  function smsComposeHref(phone, message) {
+    var dial = telDigits(phone);
+    if (!dial) return "";
+    var digits = dial.replace(/[^0-9]/g, "");
+    if (digits.length < 10) return "";
+    var address = "+1" + digits.slice(-10);
+    var body = String(message || "").trim();
+    return body ? "sms:" + address + "&body=" + encodeURIComponent(body) : "sms:" + address;
+  }
+
+  function looksLikeIphone() {
+    return /iPhone|iPad|iPod/i.test(navigator.userAgent || "");
+  }
+
+  // The three buttons that appear wherever a prepared message does: the link that
+  // opens Messages, and the two that put the message and the number on the
+  // clipboard so the text can be finished on a phone that is not this one.
+  function manualTextButtons(ids, href) {
+    return (
+      '<div class="contact-bar manual-sms-actions">' +
+      (href
+        ? '<a class="btn btn-primary btn-sm" id="' + ids.open + '" href="' + esc(href) + '">Text from iPhone</a>'
+        : '<span class="muted">No mobile number a text could reach.</span>') +
+      '<button type="button" class="btn btn-ghost btn-sm" id="' + ids.copyMessage +
+      '">Copy message</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="' + ids.copyPhone +
+      '">Copy phone number</button>' +
+      "</div>"
+    );
+  }
+
+  // Said the same way everywhere, because it is the one thing about this feature
+  // that could be misread.
+  function manualTextHint() {
+    return (
+      '<p class="hint">' +
+      (looksLikeIphone()
+        ? "Text from iPhone opens the Messages app with the message ready. "
+        : "On a desktop the Messages app will not open — copy the message and the number and finish the text on the iPhone. ") +
+      "Read it, then press Send yourself. Nothing is recorded until you press " +
+      "<strong>Mark sent</strong>, and opening Messages on its own records nothing.</p>"
+    );
+  }
+
+  function manualSmsPill(contact) {
+    return contact && contact.provider === MANUAL_SMS_METHOD
+      ? ' <span class="pill">by hand</span>'
+      : "";
+  }
+
+  // One customer, from their own profile. The promotion is chosen here, the
+  // message comes back from the server already personalised, and Mark sent is
+  // the dialog's own submit — so the record is a deliberate act.
+  function openManualTextForm(customerId, name, phone) {
+    var cm = growState().customerMarketing;
+    var promotions = (cm && cm.promotions) || [];
+
+    function draw(list) {
+      openModal(
+        "Text " + name + " from an iPhone",
+        '<label class="field"><span>Promotion to offer</span><select id="mt-promo">' +
+          '<option value="">Choose one of the live promotions…</option>' +
+          list
+            .map(function (promotion) {
+              return (
+                '<option value="' + esc(promotion.code) + '">' +
+                esc(promotion.code + " · " + promotion.name + " · $" + promotion.price) +
+                "</option>"
+              );
+            })
+            .join("") +
+          "</select></label>" +
+          '<dl class="kv"><dt>Mobile number</dt><dd class="mono">' + phoneText(phone) +
+          "</dd></dl>" +
+          '<label class="field"><span>Message</span>' +
+          '<textarea id="mt-message" rows="5" placeholder="Choose a promotion and the message is prepared here."></textarea></label>' +
+          '<div id="mt-actions"></div>' +
+          manualTextHint(),
+        function () {
+          var message = area_value("mt-message");
+          if (!message) throw new Error("There is no message to record as sent");
+          return api("marketing/customer-marketing/manual-sms/sent", {
+            method: "POST",
+            body: {
+              customerId: customerId,
+              promotionCode: val("mt-promo"),
+              message: message
+            }
+          }).then(function () {
+            openCustomerProfile(customerId);
+            return "Recorded as texted to " + name + ".";
+          });
+        }
+      );
+      widenModal();
+      var submit = document.getElementById("modal-submit");
+      if (submit) {
+        submit.textContent = "Mark sent";
+        submit.disabled = true;
+      }
+      document.getElementById("mt-promo").addEventListener("change", function () {
+        prepareManualText(customerId, phone, this.value);
+      });
+    }
+
+    if (promotions.length) return draw(promotions);
+    api("marketing/customer-marketing")
+      .then(function (d) {
+        growState().customerMarketing = d;
+        draw(d.promotions || []);
+      })
+      .catch(function (e) {
+        toast(e.message || "The promotions could not be loaded.");
+      });
+  }
+
+  // Asking the server for the wording. It personalises the message and checks the
+  // consent record again, so a customer who opted out since this screen was drawn
+  // gets no message prepared for them at all.
+  function prepareManualText(customerId, phone, promotionCode) {
+    var actions = document.getElementById("mt-actions");
+    var box = document.getElementById("mt-message");
+    var submit = document.getElementById("modal-submit");
+    if (!promotionCode) {
+      if (box) box.value = "";
+      if (actions) actions.innerHTML = "";
+      if (submit) submit.disabled = true;
+      return;
+    }
+    if (actions) actions.innerHTML = '<div class="loading">Preparing…</div>';
+    api("marketing/customer-marketing/manual-sms/message", {
+      method: "POST",
+      body: { customerId: customerId, promotionCode: promotionCode }
+    })
+      .then(function (d) {
+        if (box) box.value = d.message || "";
+        if (submit) submit.disabled = !d.message;
+        if (!actions) return;
+        actions.innerHTML = manualTextButtons(
+          { open: "mt-open", copyMessage: "mt-copy-message", copyPhone: "mt-copy-phone" },
+          d.smsHref || smsComposeHref(phone, d.message)
+        );
+        wireManualTextButtons({
+          open: "mt-open",
+          copyMessage: "mt-copy-message",
+          copyPhone: "mt-copy-phone",
+          box: "mt-message",
+          message: function () { return area_value("mt-message"); },
+          phone: phone
+        });
+      })
+      .catch(function (e) {
+        if (actions) actions.innerHTML = "";
+        if (submit) submit.disabled = true;
+        modalError(e.message || "That message could not be prepared.");
+      });
+  }
+
+  // The copy buttons, and keeping the sms: link in step with an edited message —
+  // whatever the office actually reads on screen is what the handset opens with.
+  function wireManualTextButtons(opts) {
+    var open = document.getElementById(opts.open);
+    var copyMessage = document.getElementById(opts.copyMessage);
+    var copyPhone = document.getElementById(opts.copyPhone);
+    if (copyMessage) {
+      copyMessage.addEventListener("click", function () {
+        copyText(opts.message(), "Message");
+      });
+    }
+    if (copyPhone) {
+      copyPhone.addEventListener("click", function () {
+        copyText(telDigits(opts.phone), "Phone number");
+      });
+    }
+    if (open) {
+      // The link and the box are kept in step as the message is edited, so what
+      // the handset opens with is what is on screen — not the wording the server
+      // first prepared. Refreshed on the way out as well, because a phone that
+      // hands the tap straight to Messages may never fire an input event.
+      var refresh = function () {
+        open.setAttribute("href", smsComposeHref(opts.phone, opts.message()));
+      };
+      var box = opts.box ? document.getElementById(opts.box) : null;
+      if (box) box.addEventListener("input", refresh);
+      open.addEventListener("click", refresh);
+    }
+  }
+
+  // The three-way control. The choices and the five sources come from the
+  // server's own vocabulary, so this dialog cannot offer a decision or a source
+  // the database does not recognise.
+  function openSmsConsentForm(customerId, name, data) {
+    var choices = (data && data.smsConsentChoices) || [
+      { value: "granted", label: "Consented" },
+      { value: "not_asked", label: "Not Asked" },
+      { value: "opted_out", label: "Opted Out" }
+    ];
+    var sources = (data && data.consentSources) || ["Website Form", "Booking Form", "Written", "Verbal", "Other"];
+    var current = (data && data.consent && data.consent.choice) || "not_asked";
+    var optedOut = Boolean(data && data.consent && data.consent.optedOutAt);
+
+    openModal(
+      "SMS marketing consent — " + name,
+      '<label class="field"><span>Consent</span><select id="sc-choice">' +
+      choices.map(function (ch) {
+        return '<option value="' + esc(ch.value) + '"' + (ch.value === current ? " selected" : "") +
+          ">" + esc(ch.label) + "</option>";
+      }).join("") +
+      "</select></label>" +
+      '<label class="field"><span>Consent source</span><select id="sc-source">' +
+      sources.map(function (src) { return '<option value="' + esc(src) + '">' + esc(src) + "</option>"; }).join("") +
+      "</select></label>" +
+      '<label class="field"><span>Anything worth recording <span class="field-optional">optional</span></span>' +
+      '<input id="sc-detail" type="text" maxlength="300" placeholder="Signed work order #1841, or who asked and when" /></label>' +
+      '<p class="hint">Consented means they agreed to promotional texts, and the account becomes textable as ' +
+      "soon as it has a valid mobile number. Not Asked leaves them in Awaiting text consent. Opted Out " +
+      "removes them from every promotional SMS audience for good." +
+      (optedOut
+        ? " This account already opted out: that stands until they agree again, whatever else is recorded here."
+        : "") +
+      "</p>",
+      function () {
+        var choice = val("sc-choice");
+        return api("marketing/consent", {
+          method: "POST",
+          body: {
+            customerId: customerId,
+            channel: "sms",
+            action: choice,
+            // Not Asked is the absence of an agreement, so it carries no source.
+            source: choice === "not_asked" ? "" : val("sc-source"),
+            detail: val("sc-detail")
+          }
+        }).then(function (d) {
+          openCustomerProfile(customerId);
+          return d.optedOutRetained
+            ? "Recorded. The earlier opt-out still stands."
+            : "Recorded.";
+        });
+      }
+    );
+  }
+
+  function marketingPill(m) {
+    if (!m || !m.eligibility) return "";
+    if (m.eligibility.optedOut) return '<span class="pill cancelled">Opted out</span>';
+    return m.eligibility.marketable
+      ? '<span class="pill completed">Can be marketed to</span>'
+      : '<span class="pill">No marketing consent yet</span>';
+  }
+
+  // The marketing snapshot: what they last had done, how much work they have had,
+  // what offer brought them in, when they are due again.
+  function customerMarketingHtml(m) {
+    if (!m) return "";
+    var rows = [];
+    rows.push(["Last service", m.lastService || "None recorded"]);
+    rows.push([
+      "Last service date",
+      m.lastServiceDate ? fmtDate(m.lastServiceDate) : m.lastServiceAt ? fmtDate(m.lastServiceAt) : "—"
+    ]);
+    rows.push(["Completed jobs", String(m.completedJobCount || 0)]);
+    if (m.totalSpendCents !== undefined) {
+      rows.push(["Total spend", fmtMoney(m.totalSpendCents)]);
+    }
+    rows.push([
+      "Last promotion",
+      m.lastPromotion
+        ? [m.lastPromotion.code, m.lastPromotion.name].filter(Boolean).join(" · ")
+        : "None recorded"
+    ]);
+    rows.push([
+      "Next recommended service",
+      m.nextServiceDate ? fmtDate(m.nextServiceDate) : "Not set"
+    ]);
+    rows.push([
+      "Marketing eligibility",
+      m.eligibility.optedOut
+        ? "Opted out — do not contact"
+        : (m.eligibility.sms ? "Text" : "") +
+          (m.eligibility.sms && m.eligibility.email ? " and " : "") +
+          (m.eligibility.email ? "Email" : "") ||
+          "Not reachable yet — no consent on file"
+    ]);
+    if (m.preferredContactMethod) {
+      rows.push(["Preferred contact", m.preferredContactMethod]);
+    }
+    rows.push([
+      "Previous marketing contacts",
+      String(m.contactCount || 0) +
+        (m.lastContactedAt ? " · last " + fmtDate(m.lastContactedAt) : "")
+    ]);
+
+    return (
+      '<div class="card customer-marketing"><h3 class="section-title">Marketing</h3>' +
+      '<dl class="kv">' +
+      rows
+        .map(function (row) {
+          return "<dt>" + esc(row[0]) + "</dt><dd>" + esc(String(row[1])) + "</dd>";
+        })
+        .join("") +
+      "</dl>" +
+      (hasPerm("customer_marketing")
+        ? '<button type="button" class="btn btn-ghost btn-sm" data-log-contact>Log a contact</button>'
+        : "") +
+      "</div>"
+    );
+  }
+
+  // Service History & Notes. Newest visit first, because the question in the van
+  // is always "what did we do last time".
+  function serviceHistoryHtml(c, history) {
+    var notes = history.notes || [];
+    return (
+      '<div class="card service-history"><div class="section-head">' +
+      '<h3 class="section-title">Service history &amp; notes</h3>' +
+      '<button type="button" class="btn btn-primary btn-sm" data-add-note="' + c.id +
+      '">Add service note</button></div>' +
+      (notes.length
+        ? notes.map(function (note) { return serviceNoteHtml(note, history); }).join("")
+        : '<p class="empty">Nothing has been written up for this customer yet.</p>') +
+      serviceNoteTrailHtml(history)
+    );
+  }
+
+  function serviceNoteHtml(note, history) {
+    var lines = [
+      ["Rooms / areas", note.roomsCleaned],
+      ["Carpet", note.carpetDetail],
+      ["Upholstery / furniture", note.upholsteryDetail],
+      ["Air ducts / HVAC", note.airDuctDetail],
+      ["Move-in / move-out", note.moveDetail],
+      ["Pet odor / enzyme", note.petTreatmentDetail],
+      ["Stains and problem areas", note.stainNotes],
+      ["Chemicals / treatments", note.chemicalsUsed],
+      ["Customer requests", note.customerRequests],
+      ["Technician notes", note.technicianNotes],
+      ["Recommended maintenance", note.recommendedMaintenance]
+    ].filter(function (row) { return row[1]; });
+
+    var mayEdit = history.canEditAny || (state.me && note.createdBy === state.me.id);
+
+    return (
+      '<div class="service-note">' +
+      '<div class="service-note-head"><strong>' + esc(fmtDate(note.serviceDate)) + "</strong>" +
+      "<span>" + esc(note.servicePerformed) + "</span>" +
+      (note.amountCents !== undefined && note.amountCents !== null
+        ? '<span class="mono">' + fmtMoney(note.amountCents) + "</span>"
+        : "") +
+      (mayEdit
+        ? '<button type="button" class="btn btn-ghost btn-xs" data-edit-note="' + note.id +
+          '">Edit</button>'
+        : "") +
+      "</div>" +
+      '<div class="service-note-meta">' +
+      [
+        note.technicianName ? "Technician: " + esc(note.technicianName) : "",
+        note.jobId ? "Job #" + note.jobId : "",
+        note.invoiceRef ? "Ref " + esc(note.invoiceRef) : "",
+        note.promotionCode
+          ? "Promotion " + esc([note.promotionCode, note.promotionName].filter(Boolean).join(" · "))
+          : "",
+        note.nextServiceDate ? "Next service due " + esc(fmtDate(note.nextServiceDate)) : ""
+      ]
+        .filter(Boolean)
+        .join(" · ") +
+      "</div>" +
+      (lines.length
+        ? '<dl class="kv">' +
+          lines
+            .map(function (row) {
+              return "<dt>" + esc(row[0]) + "</dt><dd>" + esc(row[1]) + "</dd>";
+            })
+            .join("") +
+          "</dl>"
+        : "") +
+      '<p class="hint">Written by ' + esc(note.createdByName || "—") + " " +
+      esc(timeAgo(note.createdAt)) +
+      (note.updatedByName
+        ? " · edited by " + esc(note.updatedByName) + " " + esc(timeAgo(note.updatedAt))
+        : "") +
+      "</p></div>"
+    );
+  }
+
+  // The trail behind the history, for the roles that supervise the work: who
+  // wrote what and who changed it. An edit never hides what a note said before.
+  function serviceNoteTrailHtml(history) {
+    var trail = history.history || [];
+    if (!trail.length) return "</div>";
+    return (
+      '<details class="service-note-trail"><summary>Who wrote and changed these notes</summary><ul>' +
+      trail
+        .map(function (event) {
+          return "<li>" + esc(event.message) + " · " + esc(timeAgo(event.createdAt)) + "</li>";
+        })
+        .join("") +
+      "</ul></details></div>"
+    );
+  }
+
+  // What has already been sent to this household, so nobody offers them the same
+  // promotion twice in a fortnight.
+  function customerContactHistoryHtml(m) {
+    if (!m || !m.contacts) return "";
+    if (!m.contacts.length) {
+      return (
+        '<div class="card"><h3 class="section-title">Marketing history</h3>' +
+        '<p class="empty">This customer has not been contacted about a promotion yet.</p></div>'
+      );
+    }
+    return (
+      '<div class="card"><h3 class="section-title">Marketing history</h3>' +
+      "<table><thead><tr><th>When</th><th>Campaign</th><th>Promotion</th><th>How</th>" +
+      "<th>Result</th></tr></thead><tbody>" +
+      m.contacts
+        .map(function (contact) {
+          return (
+            "<tr><td>" + esc(fmtDate(contact.contactedAt)) + "</td>" +
+            "<td>" + esc(contact.campaignName || "One-off") + "</td>" +
+            '<td class="muted">' + esc(contact.promotionCode || "—") + "</td>" +
+            "<td>" + esc(contact.channel) +
+            (contact.deliveryStatus && contact.deliveryStatus !== "logged"
+              ? ' <span class="muted">' + esc(contact.deliveryStatus) + "</span>"
+              : "") + manualSmsPill(contact) +
+            "</td><td>" +
+            esc(contact.response || "—") +
+            (contact.leadId ? ' <span class="pill new">Lead</span>' : "") +
+            (contact.jobId ? ' <span class="pill completed">Booked</span>' : "") +
+            "</td></tr>"
+          );
+        })
+        .join("") +
+      "</tbody></table></div>"
+    );
+  }
+
+  // --- Writing a service note ------------------------------------------------
+  //
+  // One form for both adding and correcting. Only the date and what was done are
+  // required: a crew member should be able to leave something useful in twenty
+  // seconds, and the office can fill in the rest afterwards.
+  function openServiceNoteForm(customerId, note) {
+    var data = state.customerProfile || {};
+    var history = data.history || {};
+    var editing = note || null;
+    var today = new Date().toISOString().slice(0, 10);
+
+    var jobOptions =
+      '<option value="">Not linked to a job</option>' +
+      (history.jobs || [])
+        .map(function (job) {
+          var label =
+            "#" + job.id + " · " + (job.serviceType || "Visit") +
+            (job.scheduledFor ? " · " + fmtDate(job.scheduledFor) : "");
+          return (
+            '<option value="' + job.id + '"' +
+            (editing && editing.jobId === job.id ? " selected" : "") + ">" + esc(label) + "</option>"
+          );
+        })
+        .join("");
+
+    var techOptions =
+      '<option value="">Not recorded</option>' +
+      state.crew
+        .map(function (member) {
+          return (
+            '<option value="' + member.id + '"' +
+            (editing && editing.technicianId === member.id ? " selected" : "") + ">" +
+            esc(member.name) + "</option>"
+          );
+        })
+        .join("");
+
+    var promoOptions =
+      '<option value="">No promotion</option>' +
+      (history.promotions || [])
+        .map(function (promotion) {
+          return (
+            '<option value="' + esc(promotion.code) + '"' +
+            (editing && editing.promotionCode === promotion.code ? " selected" : "") + ">" +
+            esc(promotion.code + " · " + promotion.name) + "</option>"
+          );
+        })
+        .join("");
+
+    function area(id, label, value, rows) {
+      return (
+        '<label class="field"><span>' + esc(label) + "</span><textarea id=\"" + id +
+        '" rows="' + (rows || 2) + '">' + esc(value || "") + "</textarea></label>"
+      );
+    }
+
+    widenModal();
+    openModal(
+      editing ? "Edit the " + fmtDate(editing.serviceDate) + " service note" : "Add a service note",
+      '<div class="booking-fields">' +
+        '<label class="field"><span>Service date</span><input id="sn-date" type="date" required value="' +
+        esc(editing ? editing.serviceDate : today) + '" /></label>' +
+        '<label class="field"><span>Service performed</span><input id="sn-service" maxlength="300" required value="' +
+        esc(editing ? editing.servicePerformed : "") + '" /></label>' +
+        (editing
+          ? ""
+          : '<label class="field"><span>Job</span><select id="sn-job">' + jobOptions + "</select></label>") +
+        (editing
+          ? ""
+          : '<label class="field"><span>Technician</span><select id="sn-tech">' + techOptions +
+            "</select></label>") +
+        (history.canRecordAmount
+          ? '<label class="field"><span>Amount charged</span><input id="sn-amount" type="number" min="0" step="0.01" value="' +
+            (editing && editing.amountCents != null ? (editing.amountCents / 100).toFixed(2) : "") +
+            '" /></label>'
+          : "") +
+        '<label class="field"><span>Promotion used</span><select id="sn-promo">' + promoOptions +
+        "</select></label>" +
+        '<label class="field"><span>Next recommended service</span><input id="sn-next" type="date" value="' +
+        esc(editing && editing.nextServiceDate ? editing.nextServiceDate : "") + '" /></label>' +
+        '<label class="field"><span>Job / invoice reference</span><input id="sn-invoice" maxlength="80" value="' +
+        esc(editing && editing.invoiceRef ? editing.invoiceRef : "") + '" /></label>' +
+        "</div>" +
+        area("sn-rooms", "Rooms / areas cleaned", editing && editing.roomsCleaned) +
+        area("sn-carpet", "Carpet cleaning details", editing && editing.carpetDetail) +
+        area("sn-uph", "Upholstery / furniture details", editing && editing.upholsteryDetail) +
+        area("sn-duct", "Air duct / HVAC details", editing && editing.airDuctDetail) +
+        area("sn-move", "Move-in / move-out details", editing && editing.moveDetail) +
+        area("sn-pet", "Pet odor / enzyme treatment", editing && editing.petTreatmentDetail) +
+        area("sn-stains", "Stains and problem areas", editing && editing.stainNotes) +
+        area("sn-chem", "Chemicals / treatments used", editing && editing.chemicalsUsed) +
+        area("sn-requests", "Customer requests and preferences", editing && editing.customerRequests) +
+        area("sn-tnotes", "Technician notes", editing && editing.technicianNotes, 3) +
+        area("sn-maint", "Recommended future maintenance", editing && editing.recommendedMaintenance),
+      function () {
+        var payload = {
+          serviceDate: val("sn-date"),
+          servicePerformed: val("sn-service"),
+          nextServiceDate: val("sn-next"),
+          promotionCode: val("sn-promo"),
+          invoiceRef: val("sn-invoice"),
+          roomsCleaned: area_value("sn-rooms"),
+          carpetDetail: area_value("sn-carpet"),
+          upholsteryDetail: area_value("sn-uph"),
+          airDuctDetail: area_value("sn-duct"),
+          moveDetail: area_value("sn-move"),
+          petTreatmentDetail: area_value("sn-pet"),
+          stainNotes: area_value("sn-stains"),
+          chemicalsUsed: area_value("sn-chem"),
+          customerRequests: area_value("sn-requests"),
+          technicianNotes: area_value("sn-tnotes"),
+          recommendedMaintenance: area_value("sn-maint")
+        };
+        if (!payload.serviceDate) { modalError("Give the date the work was done"); return; }
+        if (!payload.servicePerformed) { modalError("Say what was done"); return; }
+        if (history.canRecordAmount) {
+          var amount = val("sn-amount");
+          payload.amountCents = amount === "" ? null : Math.round(Number(amount) * 100);
+        }
+        if (!editing) {
+          var job = val("sn-job");
+          if (job) payload.jobId = Number(job);
+          var tech = val("sn-tech");
+          if (tech) {
+            payload.technicianId = Number(tech);
+            var member = state.crew.filter(function (x) { return x.id === Number(tech); })[0];
+            if (member) payload.technicianName = member.name;
+          }
+        }
+
+        var request = editing
+          ? api("customers/" + customerId + "/service-notes/" + editing.id, {
+              method: "PATCH",
+              body: payload
+            })
+          : api("customers/" + customerId + "/service-notes", { method: "POST", body: payload });
+
+        request
+          .then(function () {
+            closeModal();
+            toast(editing ? "Service note updated." : "Service note added.");
+            openCustomerProfile(customerId);
+          })
+          .catch(function (e) {
+            modalError(e.message || "That note could not be saved.");
+          });
+      }
+    );
+  }
+
+  // The shared dialog is sized for a login code. A service note is a page of
+  // fields, so it asks for the wider one; closeModal puts it back.
+  function widenModal() {
+    var card = document.querySelector("#modal .modal-card");
+    if (card) card.classList.add("wide");
+  }
+
+  function area_value(id) {
+    var field = document.getElementById(id);
+    return field ? field.value.trim() : "";
+  }
+
+  // Recording a call or a text the office made by hand — from the business line,
+  // or from somebody's own handset. Nothing here places the call; this is the
+  // record of one, and it is what keeps the marketing history true even for the
+  // contacts no campaign made.
+  function openContactLogForm(customerId, customerName) {
+    var data = state.grow && state.grow.customerMarketing ? state.grow.customerMarketing : null;
+    var channels = (data && data.contactChannels) || [
+      { value: "call", label: "Phone call" },
+      { value: "sms", label: "Text message" },
+      { value: "email", label: "Email" },
+      { value: "voicemail", label: "Voicemail" }
+    ];
+    var responses = (data && data.contactResponses) || [
+      { value: "interested", label: "Interested" },
+      { value: "booked", label: "Booked" },
+      { value: "not_interested", label: "Not interested" },
+      { value: "no_answer", label: "No answer" }
+    ];
+    var promotions = (data && data.promotions) || [];
+    var campaigns = (state.grow && state.grow.data && state.grow.data.campaigns) || [];
+    var line = (data && data.businessVoiceLine) || "";
+    var today = new Date().toISOString().slice(0, 10);
+
+    openModal(
+      "Log a contact" + (customerName ? " with " + customerName : ""),
+      '<div class="booking-fields">' +
+        '<label class="field"><span>How</span><select id="mc-channel">' +
+        channels
+          .map(function (c) {
+            return '<option value="' + esc(c.value) + '"' + (c.value === "call" ? " selected" : "") +
+              ">" + esc(c.label) + "</option>";
+          })
+          .join("") +
+        "</select></label>" +
+        '<label class="field"><span>Date</span><input id="mc-date" type="date" value="' + today +
+        '" /></label>' +
+        '<label class="field"><span>Promotion offered</span><select id="mc-promo">' +
+        '<option value="">None</option>' +
+        promotions
+          .map(function (p) {
+            return '<option value="' + esc(p.code) + '">' + esc(p.code + " · " + p.name) + "</option>";
+          })
+          .join("") +
+        "</select></label>" +
+        '<label class="field"><span>Campaign</span><select id="mc-campaign">' +
+        '<option value="">Not part of a campaign</option>' +
+        campaigns
+          .map(function (c) {
+            return '<option value="' + c.id + '">' + esc(c.name) + "</option>";
+          })
+          .join("") +
+        "</select></label>" +
+        '<label class="field"><span>What they said</span><select id="mc-response">' +
+        '<option value="">Not known yet</option>' +
+        responses
+          .map(function (r) {
+            return '<option value="' + esc(r.value) + '">' + esc(r.label) + "</option>";
+          })
+          .join("") +
+        "</select></label>" +
+        '<label class="field"><span>From which number or address</span><input id="mc-from" maxlength="40" value="' +
+        esc(line) + '" /></label>' +
+        "</div>" +
+        '<label class="field"><span>Notes</span><textarea id="mc-note" rows="2"></textarea></label>' +
+        '<p class="hint">Google Voice activity is not read automatically. This is the office’s own ' +
+        "record of the contact, kept so a customer is not offered the same promotion twice.</p>",
+      function () {
+        var payload = {
+          customerId: customerId,
+          channel: val("mc-channel"),
+          direction: "outbound",
+          contactedOn: val("mc-date") || undefined,
+          promotionCode: val("mc-promo"),
+          response: val("mc-response"),
+          fromLine: val("mc-from"),
+          note: area_value("mc-note"),
+          leadSource: "manual"
+        };
+        var campaignId = val("mc-campaign");
+        if (campaignId) payload.campaignId = Number(campaignId);
+        api("marketing/contacts", { method: "POST", body: payload })
+          .then(function () {
+            closeModal();
+            toast("Contact logged.");
+            if (state.customerProfile && state.customerProfile.customer.id === customerId) {
+              openCustomerProfile(customerId);
+            } else {
+              refreshCustomerMarketing();
+            }
+          })
+          .catch(function (e) {
+            modalError(
+              e.status === 409
+                ? "This customer has already been logged for that campaign on that channel."
+                : e.message || "That contact could not be logged."
+            );
+          });
+      }
+    );
   }
 
   // ---------- bringing in a customer list ----------
@@ -2389,6 +3296,7 @@
 
   var GROW_TABS = [
     { key: "audience", label: "Audience" },
+    { key: "customers", label: "Customer marketing" },
     { key: "campaigns", label: "Campaigns" },
     { key: "consent", label: "Consent" }
   ];
@@ -2412,7 +3320,26 @@
         preview: [],
         countTimer: null,
         editing: null,
-        consent: { q: "", needs: "", rows: [], timer: null }
+        consent: { q: "", needs: "", rows: [], timer: null, vocab: null },
+        // Customer marketing: the segments ticked, the channel asked for, the
+        // promotion chosen, and what the server last counted for that
+        // combination. The segments are held as a list of names and sent as a
+        // list, because the server is what turns them into a query.
+        customerMarketing: null,
+        // The hand-worked texting run: the campaign it is recorded against, the
+        // households still to reach, and which one is on screen. Held here and
+        // not in the DOM so switching tabs and coming back does not lose the
+        // place in the list.
+        manual: null,
+        cm: {
+          segments: [],
+          channel: "any",
+          promotionCode: "",
+          counts: null,
+          preview: [],
+          label: "",
+          timer: null
+        }
       };
     }
     return state.grow;
@@ -2439,7 +3366,12 @@
       growReadiness(g.data.providers) +
       growStats(g.data.stats) +
       '<div class="chips grow-tabs">' +
-      GROW_TABS.map(function (t) {
+      GROW_TABS.filter(function (t) {
+        // Customer marketing reads the customer database, so it is only worth
+        // drawing for the roles the server will answer. Everything on it is
+        // refused at the API for anybody else regardless.
+        return t.key !== "customers" || hasPerm("customer_marketing");
+      }).map(function (t) {
         return '<button type="button" class="chip' + (g.tab === t.key ? " active" : "") +
           '" data-grow-tab="' + t.key + '">' + esc(t.label) + "</button>";
       }).join("") +
@@ -2453,6 +3385,7 @@
     var g = growState();
     var panel = document.getElementById("grow-panel");
     if (!panel) return;
+    if (g.tab === "customers") return renderGrowCustomers(panel);
     if (g.tab === "campaigns") return renderGrowCampaigns(panel);
     if (g.tab === "consent") return renderGrowConsent(panel);
     return renderGrowAudience(panel);
@@ -2635,6 +3568,441 @@
         counts.innerHTML = '<div class="card"><p class="empty">' +
           esc(e.message || "That audience could not be counted.") + "</p></div>";
       });
+  }
+
+  // --- Customer marketing ---------------------------------------------------
+  //
+  // Marketing to the households already on file, chosen by what has been done at
+  // them. The segments come from the server with a count on each, they combine
+  // with AND, and the number on screen is produced by the same conditions the
+  // sender queues from — so the figure the office approves is the figure that
+  // receives the promotion.
+  //
+  // Nothing here writes a promotion. The campaign is built around one of the
+  // pages the site is already advertising and points at that page, so a customer
+  // who follows the link submits the ordinary form and arrives as an ordinary
+  // verified lead.
+  function renderGrowCustomers(panel) {
+    var g = growState();
+    if (!g.customerMarketing) {
+      panel.innerHTML = '<div class="loading">Loading…</div>';
+      api("marketing/customer-marketing")
+        .then(function (d) {
+          g.customerMarketing = d;
+          renderGrowPanel();
+        })
+        .catch(function (e) {
+          panel.innerHTML = '<div class="card"><p class="empty">' +
+            esc(e.message || "Customer marketing could not be loaded.") + "</p></div>";
+        });
+      return;
+    }
+
+    var cm = g.customerMarketing;
+    var chosen = g.cm.segments;
+
+    panel.innerHTML =
+      '<div class="card grow-filters">' +
+      '<h3 class="section-title">Who to reach</h3>' +
+      '<div class="segment-grid">' +
+      (cm.segments || [])
+        .map(function (segment) {
+          return (
+            '<label class="segment' + (chosen.indexOf(segment.value) !== -1 ? " chosen" : "") + '">' +
+            '<input type="checkbox" data-cm-segment="' + esc(segment.value) + '"' +
+            (chosen.indexOf(segment.value) !== -1 ? " checked" : "") + " />" +
+            "<span><strong>" + esc(segment.label) + '</strong><span class="mono">' +
+            String(segment.count) + "</span>" +
+            '<span class="muted">' + esc(segment.detail || "") + "</span></span></label>"
+          );
+        })
+        .join("") +
+      "</div>" +
+      '<div class="grow-grid">' +
+      '<label class="field"><span>Reachable by</span><select id="cm-channel">' +
+      growOption("any", "Text or email", g.cm.channel) +
+      growOption("sms", "Text message only", g.cm.channel) +
+      growOption("email", "Email only", g.cm.channel) +
+      growOption("both", "Both text and email", g.cm.channel) +
+      "</select></label>" +
+      "</div>" +
+      '<p class="hint">Tick as many as apply — they combine, so “past carpet cleaning” and “12+ months since ' +
+      "service” asks for the households that are both. " + String(cm.marketableTotal || 0) +
+      " customers on file may lawfully be contacted at all; somebody who has opted out is never counted.</p>" +
+      "</div>" +
+      '<div id="cm-counts"></div>' +
+      '<div id="cm-manual"></div>' +
+      '<div id="cm-preview"></div>' +
+      customerMarketingHistoryHtml(cm.contacts || []);
+
+    var channel = document.getElementById("cm-channel");
+    if (channel) {
+      channel.addEventListener("change", function () {
+        g.cm.channel = this.value || "any";
+        loadCustomerMarketingCount();
+      });
+    }
+
+    loadCustomerMarketingCount();
+    renderManualSmsRunner();
+  }
+
+  // The filter as the marketing API wants it: the ordinary audience shape with
+  // the ticked segments alongside it, so one engine counts and sends.
+  function customerAudiencePayload() {
+    var cm = growState().cm;
+    return {
+      channel: cm.channel || "any",
+      segments: cm.segments.slice()
+    };
+  }
+
+  function loadCustomerMarketingCount() {
+    var g = growState();
+    var host = document.getElementById("cm-counts");
+    var preview = document.getElementById("cm-preview");
+    if (!host) return;
+    host.innerHTML = '<div class="loading">Counting…</div>';
+    api("marketing/customer-marketing/count", {
+      method: "POST",
+      body: { audience: customerAudiencePayload() }
+    })
+      .then(function (d) {
+        g.cm.counts = d.counts;
+        g.cm.preview = d.preview || [];
+        g.cm.label = d.label || "";
+        var promotions = (g.customerMarketing && g.customerMarketing.promotions) || [];
+        host.innerHTML =
+          '<div class="stat-grid">' +
+          stat("Customers matching", d.matching) +
+          stat("Can be texted", d.counts.sms) +
+          stat("Can be emailed", d.counts.email) +
+          stat("Both", d.counts.both) +
+          "</div>" +
+          '<div class="card grow-actions"><p class="hint">' + esc(d.label) + "</p>" +
+          '<div class="grow-grid">' +
+          '<label class="field"><span>Promotion to offer</span><select id="cm-promo">' +
+          '<option value="">Choose one of the live promotions…</option>' +
+          promotions
+            .map(function (promotion) {
+              return (
+                '<option value="' + esc(promotion.code) + '"' +
+                (g.cm.promotionCode === promotion.code ? " selected" : "") + ">" +
+                esc(promotion.code + " · " + promotion.name + " · $" + promotion.price) + "</option>"
+              );
+            })
+            .join("") +
+          "</select></label>" +
+          "</div>" +
+          '<div class="contact-bar">' +
+          '<button type="button" class="btn btn-primary btn-sm" data-cm-campaign' +
+          (d.matching ? "" : " disabled") + ">Build a campaign for these " +
+          String(d.matching) + (d.matching === 1 ? " customer" : " customers") + "</button>" +
+          '<button type="button" class="btn btn-ghost btn-sm" data-cm-manual' +
+          (d.counts.sms ? "" : " disabled") + ">Text " + String(d.counts.sms) +
+          " by hand from an iPhone</button>" +
+          "</div>" +
+          '<p class="hint">The campaign points at the promotion page the site is already serving. Its wording, ' +
+          "test send and schedule are settled on the Campaigns tab before anything goes out. Automated texting " +
+          "is not switched on yet, so texts go out by hand: that button walks the list one household at a " +
+          "time and opens each message in the iPhone's own Messages app for somebody to read and send.</p></div>";
+        var promo = document.getElementById("cm-promo");
+        if (promo) {
+          promo.addEventListener("change", function () { g.cm.promotionCode = this.value; });
+        }
+        preview.innerHTML = d.preview && d.preview.length
+          ? '<div class="card"><h3 class="section-title">A sample of these customers</h3>' +
+            "<table><thead><tr><th>Name</th><th>Where</th><th>Contact</th><th>Reachable by</th>" +
+            "<th>Last service</th></tr></thead><tbody>" +
+            d.preview
+              .map(function (r) {
+                var reach = [];
+                if (r.smsEligible) reach.push('<span class="pill completed">Text</span>');
+                if (r.emailEligible) reach.push('<span class="pill scheduled">Email</span>');
+                return (
+                  '<tr class="clickable" data-customer-profile="' + r.id + '"><td>' + esc(r.name) +
+                  '</td><td class="muted">' +
+                  esc([r.city, r.zip].filter(Boolean).join(" ") || "—") + '</td><td class="muted mono">' +
+                  esc([r.phoneHint, r.emailHint].filter(Boolean).join(" · ") || "—") + "</td><td>" +
+                  (reach.join(" ") || '<span class="muted">—</span>') + '</td><td class="muted">' +
+                  (r.lastServiceAt ? esc(fmtDate(r.lastServiceAt)) : "Never") + "</td></tr>"
+                );
+              })
+              .join("") +
+            "</tbody></table>" +
+            '<p class="hint">Numbers and addresses are shown as a hint only, so this list cannot be used as ' +
+            "an export. Open a customer to see their file.</p></div>"
+          : '<div class="card"><p class="empty">No customer matches that combination.</p></div>';
+      })
+      .catch(function (e) {
+        host.innerHTML = '<div class="card"><p class="empty">' +
+          esc(e.message || "Those customers could not be counted.") + "</p></div>";
+      });
+  }
+
+  function toggleCustomerSegment(value, on) {
+    var cm = growState().cm;
+    var at = cm.segments.indexOf(value);
+    if (on && at === -1) cm.segments.push(value);
+    if (!on && at !== -1) cm.segments.splice(at, 1);
+    var label = document.querySelector('[data-cm-segment="' + value + '"]');
+    if (label && label.parentNode) {
+      label.parentNode.className = "segment" + (on ? " chosen" : "");
+    }
+    clearTimeout(cm.timer);
+    cm.timer = setTimeout(loadCustomerMarketingCount, 250);
+  }
+
+  // Everything the office has already said to a customer about a promotion, in
+  // one place, so nobody is offered the same thing twice in a fortnight.
+  function customerMarketingHistoryHtml(contacts) {
+    if (!contacts.length) {
+      return '<div class="card"><h3 class="section-title">Marketing history</h3>' +
+        '<p class="empty">No customer has been contacted about a promotion yet.</p></div>';
+    }
+    return (
+      '<div class="card"><h3 class="section-title">Marketing history</h3>' +
+      "<table><thead><tr><th>When</th><th>Customer</th><th>Campaign</th><th>Promotion</th>" +
+      "<th>How</th><th>Result</th></tr></thead><tbody>" +
+      contacts
+        .map(function (contact) {
+          return (
+            '<tr class="clickable" data-customer-profile="' + contact.customerId + '"><td>' +
+            esc(fmtDate(contact.contactedAt)) + "</td><td>" +
+            esc(contact.customerName || "—") + "</td><td>" +
+            esc(contact.campaignName || "One-off") + '</td><td class="muted mono">' +
+            esc(contact.promotionCode || "—") + "</td><td>" + esc(contact.channel) +
+            (contact.deliveryStatus && contact.deliveryStatus !== "logged"
+              ? ' <span class="muted">' + esc(contact.deliveryStatus) + "</span>"
+              : "") + manualSmsPill(contact) +
+            "</td><td>" + esc(contact.response || "—") +
+            (contact.leadId ? ' <span class="pill new">Lead</span>' : "") +
+            (contact.jobId ? ' <span class="pill completed">Booked</span>' : "") +
+            (contact.revenueCents ? ' <span class="mono">' + fmtMoney(contact.revenueCents) + "</span>" : "") +
+            "</td></tr>"
+          );
+        })
+        .join("") +
+      "</tbody></table></div>"
+    );
+  }
+
+  // Reload the tab's data after something was logged elsewhere in the app.
+  function refreshCustomerMarketing() {
+    var g = state.grow;
+    if (!g) return;
+    g.customerMarketing = null;
+    if (g.tab === "customers" && document.getElementById("grow-panel")) renderGrowPanel();
+  }
+
+  // Turn the chosen segments and promotion into a draft campaign, then hand it
+  // to the ordinary campaign builder to be written and sent.
+  function buildCustomerCampaign() {
+    var g = growState();
+    if (!g.cm.promotionCode) {
+      toast("Choose which promotion to offer first.");
+      return;
+    }
+    var promotion = (g.customerMarketing.promotions || []).filter(function (p) {
+      return p.code === g.cm.promotionCode;
+    })[0];
+    api("marketing/customer-marketing/campaign", {
+      method: "POST",
+      body: {
+        promotionCode: g.cm.promotionCode,
+        audience: customerAudiencePayload(),
+        name: (promotion ? promotion.name : g.cm.promotionCode) + " — " + (g.cm.label || "customers")
+      }
+    })
+      .then(function (d) {
+        toast("Draft campaign built for " + d.counts.total + " customers.");
+        // The overview is now out of date — it has one more campaign in it.
+        g.data = null;
+        g.customerMarketing = null;
+        openCampaign(d.campaign.id);
+      })
+      .catch(function (e) {
+        toast(e.message || "That campaign could not be built.");
+      });
+  }
+
+  // --- Texting the audience by hand ----------------------------------------
+  //
+  // The same audience, worked one household at a time from an iPhone. The server
+  // prepares every message and hands back the list; this screen shows one of them
+  // at a time and opens the handset's Messages app on request. Whoever is holding
+  // the phone reads the message, presses Send in Messages, and then presses Mark
+  // sent here. Those are two separate acts and this app only ever records the
+  // second one — an opened composer proves nothing about what was sent.
+  function startManualSmsRun() {
+    var g = growState();
+    if (!g.cm.promotionCode) {
+      toast("Choose which promotion to offer first.");
+      return;
+    }
+    var host = document.getElementById("cm-manual");
+    if (host) host.innerHTML = '<div class="card"><div class="loading">Preparing the messages…</div></div>';
+    api("marketing/customer-marketing/manual-sms", {
+      method: "POST",
+      body: {
+        promotionCode: g.cm.promotionCode,
+        audience: customerAudiencePayload(),
+        campaignId: g.manual && g.manual.campaign ? g.manual.campaign.id : null
+      }
+    })
+      .then(function (d) {
+        g.manual = {
+          campaign: d.campaign,
+          promotion: d.promotion,
+          method: d.method,
+          methodLabel: d.methodLabel,
+          audienceLabel: d.audienceLabel,
+          queue: d.queue || [],
+          at: 0,
+          recorded: (d.progress && d.progress.sent) || 0,
+          skipped: 0,
+          total: (d.queue || []).length
+        };
+        renderManualSmsRunner();
+        var card = document.getElementById("cm-manual");
+        if (card && card.scrollIntoView) card.scrollIntoView({ block: "nearest" });
+      })
+      .catch(function (e) {
+        g.manual = null;
+        renderManualSmsRunner();
+        toast(e.message || "That texting run could not be prepared.");
+      });
+  }
+
+  // One household on screen: who they are, the number the text will go to, the
+  // promotion being offered, and the message as it will read. The message stays
+  // editable, because the person sending it is the one answerable for it.
+  function renderManualSmsRunner() {
+    var host = document.getElementById("cm-manual");
+    if (!host) return;
+    var run = growState().manual;
+    if (!run) {
+      host.innerHTML = "";
+      return;
+    }
+
+    var done = String(run.recorded) + " recorded";
+    if (run.skipped) done += " · " + String(run.skipped) + " skipped";
+
+    if (run.at >= run.queue.length) {
+      host.innerHTML =
+        '<div class="card"><h3 class="section-title">Texting by hand — finished</h3>' +
+        "<p>" + esc(run.audienceLabel || "This audience") + " has been worked through. " +
+        esc(done) + ".</p>" +
+        '<p class="hint">Every text recorded here is on the customer\u2019s file and in the marketing ' +
+        "history, marked as sent by hand. Skipped households were not written anywhere and will " +
+        "come back the next time this run is started.</p>" +
+        '<div class="contact-bar">' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-manual-restart>Look for more to text</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-manual-close>Close</button>' +
+        "</div></div>";
+      return;
+    }
+
+    var person = run.queue[run.at];
+    host.innerHTML =
+      '<div class="card manual-sms">' +
+      '<div class="manual-sms-head"><h3 class="section-title">Texting by hand from an iPhone</h3>' +
+      '<span class="muted mono">Customer ' + String(run.at + 1) + " of " + String(run.queue.length) +
+      " · " + esc(done) + "</span></div>" +
+      '<dl class="kv">' +
+      "<dt>Customer</dt><dd><strong>" + esc(person.name) + "</strong>" +
+      (person.city ? ' <span class="muted">' + esc(person.city) + "</span>" : "") + "</dd>" +
+      "<dt>Mobile number</dt><dd>" + phoneText(person.phone) + "</dd>" +
+      "<dt>Promotion</dt><dd>" + esc(run.promotion.name) + ' <span class="mono muted">' +
+      esc(run.promotion.code) + "</span></dd>" +
+      "<dt>Recorded against</dt><dd>" +
+      esc(run.campaign ? run.campaign.name : "No campaign — the customer's file only") + "</dd>" +
+      "</dl>" +
+      '<label class="field"><span>Message</span>' +
+      '<textarea id="manual-message" rows="5">' + esc(person.message) + "</textarea></label>" +
+      manualTextButtons(
+        { open: "manual-open", copyMessage: "manual-copy-message", copyPhone: "manual-copy-phone" },
+        smsComposeHref(person.phone, person.message)
+      ) +
+      manualTextHint() +
+      '<div class="contact-bar">' +
+      '<button type="button" class="btn btn-primary btn-sm" data-manual-sent>Mark sent</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-manual-skip>Skip</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-manual-close>Stop for now</button>' +
+      "</div></div>";
+
+    wireManualTextButtons({
+      open: "manual-open",
+      copyMessage: "manual-copy-message",
+      copyPhone: "manual-copy-phone",
+      box: "manual-message",
+      message: function () { return area_value("manual-message"); },
+      phone: person.phone
+    });
+  }
+
+  // Past this household without writing anything down. A skip is not a refusal
+  // and not a send, so nothing about it is recorded.
+  function skipManualSms() {
+    var run = growState().manual;
+    if (!run) return;
+    run.skipped += 1;
+    run.at += 1;
+    renderManualSmsRunner();
+  }
+
+  // "I read it and pressed Send." The server checks the consent record again
+  // before it writes, so a household that opted out while this list was open is
+  // refused here even though their card was already on screen.
+  function markManualSmsSent() {
+    var g = growState();
+    var run = g.manual;
+    if (!run || run.at >= run.queue.length) return;
+    var person = run.queue[run.at];
+    var message = area_value("manual-message");
+    if (!message) {
+      toast("There is no message to record as sent.");
+      return;
+    }
+    var button = document.querySelector("[data-manual-sent]");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Recording…";
+    }
+    api("marketing/customer-marketing/manual-sms/sent", {
+      method: "POST",
+      body: {
+        customerId: person.id,
+        campaignId: run.campaign ? run.campaign.id : null,
+        promotionCode: run.promotion.code,
+        message: message
+      }
+    })
+      .then(function (d) {
+        run.recorded = d.progress && d.progress.sent ? d.progress.sent : run.recorded + 1;
+        run.at += 1;
+        // The history table below is now a text out of date.
+        g.customerMarketing = null;
+        renderManualSmsRunner();
+        toast("Recorded as texted to " + person.name + ".");
+      })
+      .catch(function (e) {
+        // Already recorded by somebody else: move on rather than stall the run.
+        if (/already been recorded/i.test(e.message || "")) {
+          run.at += 1;
+          renderManualSmsRunner();
+        } else if (button) {
+          button.disabled = false;
+          button.textContent = "Mark sent";
+        }
+        toast(e.message || "That text could not be recorded.");
+      });
+  }
+
+  function closeManualSmsRun() {
+    growState().manual = null;
+    renderManualSmsRunner();
   }
 
   // --- Campaigns ------------------------------------------------------------
@@ -3048,13 +4416,15 @@
     api("marketing/consent/customers?q=" + encodeURIComponent(g.consent.q) +
       "&needs=" + encodeURIComponent(g.consent.needs))
       .then(function (d) {
+        // The three choices and the five sources, as the server spells them.
+        g.consent.vocab = { smsConsentChoices: d.smsConsentChoices, consentSources: d.consentSources };
         list.innerHTML = d.customers.length
           ? '<div class="card"><table><thead><tr><th>Customer</th><th>Text messages</th><th>Email</th>' +
             "<th></th></tr></thead><tbody>" +
             d.customers.map(function (c) {
               return "<tr><td>" + esc(c.name) + '<br /><span class="muted">' +
                 esc([c.phone, c.email].filter(Boolean).join(" · ") || "No contact details") + "</span></td>" +
-                "<td>" + consentCell(c.smsConsentStatus, c.smsConsentSource, c.smsOptedOutAt) + "</td>" +
+                "<td>" + smsConsentCell(c) + "</td>" +
                 "<td>" + consentCell(c.emailConsentStatus, c.emailConsentSource, c.emailOptedOutAt) + "</td>" +
                 '<td class="right"><button type="button" class="btn btn-ghost btn-sm" data-grow-consent="' +
                 c.id + '" data-name="' + esc(c.name) + '">Record</button></td></tr>';
@@ -3068,6 +4438,21 @@
       });
   }
 
+  // Text messages, described by the server so this column and the customer
+  // profile cannot disagree about who is textable.
+  function smsConsentCell(c) {
+    var described = c.sms;
+    if (!described) return consentCell(c.smsConsentStatus, c.smsConsentSource, c.smsOptedOutAt);
+    var tone = described.choice === "granted"
+      ? (described.textable ? "completed" : "")
+      : described.choice === "opted_out" ? "cancelled" : "";
+    return '<span class="pill ' + tone + '">' + esc(described.label) + "</span>" +
+      '<br /><span class="muted">' + esc(described.bucket) +
+      (c.smsConsentSource ? " · " + esc(c.smsConsentSource) : "") +
+      (c.smsConsentByName ? " · " + esc(c.smsConsentByName) : "") +
+      "</span>";
+  }
+
   function consentCell(status, source, optedOutAt) {
     if (optedOutAt) return '<span class="pill cancelled">Opted out</span>';
     if (status === "granted") {
@@ -3079,30 +4464,45 @@
   }
 
   function promptConsent(customerId, name) {
+    var vocab = growState().consent.vocab || {};
+    var choices = vocab.smsConsentChoices || [
+      { value: "granted", label: "Consented" },
+      { value: "not_asked", label: "Not Asked" },
+      { value: "opted_out", label: "Opted Out" }
+    ];
+    var sources = vocab.consentSources || ["Website Form", "Booking Form", "Written", "Verbal", "Other"];
     openModal(
       "Marketing permission — " + name,
       '<label class="field"><span>Channel</span><select id="m-channel">' +
       '<option value="sms">Text messages</option><option value="email">Email</option></select></label>' +
-      '<label class="field"><span>Decision</span><select id="m-decision">' +
-      '<option value="granted">They agreed to receive promotions</option>' +
-      '<option value="opted_out">They asked to stop</option>' +
-      '<option value="denied">They said no</option></select></label>' +
-      '<label class="field"><span>Where this came from</span><input id="m-source" type="text" maxlength="200" placeholder="Signed service agreement, 14 Aug 2026" /></label>' +
+      '<label class="field"><span>Consent</span><select id="m-decision">' +
+      choices.map(function (ch) {
+        return '<option value="' + esc(ch.value) + '">' + esc(ch.label) + "</option>";
+      }).join("") +
+      "</select></label>" +
+      '<label class="field"><span>Consent source</span><select id="m-source">' +
+      sources.map(function (src) { return '<option value="' + esc(src) + '">' + esc(src) + "</option>"; }).join("") +
+      "</select></label>" +
+      '<label class="field"><span>Anything worth recording <span class="field-optional">optional</span></span>' +
+      '<input id="m-detail" type="text" maxlength="300" placeholder="Signed service agreement #1841" /></label>' +
       '<p class="hint">Permission to text has to be traceable to something that happened — a form they signed, ' +
-      "a box they ticked, a text they sent in. Say which.</p>",
+      "a box they ticked, a text they sent in. Say which. Not Asked is the state every account starts in and " +
+      "is never texted; Opted Out is permanent for promotional texts.</p>",
       function () {
+        var choice = val("m-decision");
         return api("marketing/consent", {
           method: "POST",
           body: {
             customerId: customerId,
             channel: val("m-channel"),
-            action: val("m-decision"),
-            source: val("m-source")
+            action: choice,
+            source: choice === "not_asked" ? "" : val("m-source"),
+            detail: val("m-detail")
           }
-        }).then(function () {
+        }).then(function (d) {
           loadConsentList();
           refreshGrow();
-          return "Recorded.";
+          return d.optedOutRetained ? "Recorded. The earlier opt-out still stands." : "Recorded.";
         });
       }
     );
@@ -5468,6 +6868,13 @@
       var roleFor = e.target.dataset ? e.target.dataset.roleFor : null;
       if (roleFor) changeRole(Number(roleFor), e.target.value);
     });
+    // A segment box, ticked or unticked. Listening for the change rather than the
+    // click means it reads the same whether the box or its label was tapped.
+    document.body.addEventListener("change", function (e) {
+      var box = e.target.closest ? e.target.closest("[data-cm-segment]") : null;
+      if (box) toggleCustomerSegment(box.dataset.cmSegment, box.checked);
+    });
+
     document.body.addEventListener("click", function (e) {
       // A Call, Text or Email link hands off to the handset. It is checked first
       // because these links sit inside rows that would otherwise open a job.
@@ -5503,6 +6910,43 @@
         );
         return;
       }
+      // --- Customer profile: service history and marketing ---
+      var profileBtn = e.target.closest("[data-customer-profile]");
+      if (profileBtn) {
+        openCustomerProfile(Number(profileBtn.dataset.customerProfile));
+        return;
+      }
+      var addNote = e.target.closest("[data-add-note]");
+      if (addNote) {
+        openServiceNoteForm(Number(addNote.dataset.addNote), null);
+        return;
+      }
+      var editNote = e.target.closest("[data-edit-note]");
+      if (editNote) {
+        var profile = state.customerProfile;
+        var wanted = Number(editNote.dataset.editNote);
+        var note = profile
+          ? (profile.history.notes || []).filter(function (n) { return n.id === wanted; })[0]
+          : null;
+        if (note) openServiceNoteForm(profile.customer.id, note);
+        return;
+      }
+      if (e.target.closest("[data-log-contact]")) {
+        if (state.customerProfile) {
+          openContactLogForm(state.customerProfile.customer.id, state.customerProfile.customer.name);
+        }
+        return;
+      }
+      var smsConsent = e.target.closest("[data-sms-consent]");
+      if (smsConsent) {
+        openSmsConsentForm(
+          Number(smsConsent.dataset.smsConsent),
+          smsConsent.dataset.name || "this customer",
+          state.customerProfile ? state.customerProfile.consent : null
+        );
+        return;
+      }
+
       // "Show on map" from a job drawer: remember the address, close the job and
       // hand the person back to the dashboard, where the map centres on it.
       var showOnMap = e.target.closest("[data-map-focus]");
@@ -5524,6 +6968,21 @@
         return;
       }
       if (e.target.closest("[data-grow-new]")) { newCampaign(); return; }
+      if (e.target.closest("[data-cm-campaign]")) { buildCustomerCampaign(); return; }
+      if (e.target.closest("[data-cm-manual]")) { startManualSmsRun(); return; }
+      if (e.target.closest("[data-manual-sent]")) { markManualSmsSent(); return; }
+      if (e.target.closest("[data-manual-skip]")) { skipManualSms(); return; }
+      if (e.target.closest("[data-manual-restart]")) { startManualSmsRun(); return; }
+      if (e.target.closest("[data-manual-close]")) { closeManualSmsRun(); return; }
+      var textBtn = e.target.closest("[data-manual-text]");
+      if (textBtn) {
+        openManualTextForm(
+          Number(textBtn.dataset.manualText),
+          textBtn.dataset.name,
+          textBtn.dataset.phone
+        );
+        return;
+      }
       var openCamp = e.target.closest("[data-grow-open]");
       if (openCamp) { openCampaign(Number(openCamp.dataset.growOpen)); return; }
       if (e.target.closest("[data-grow-back]")) {

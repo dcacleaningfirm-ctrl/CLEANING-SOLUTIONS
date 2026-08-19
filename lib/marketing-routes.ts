@@ -10,6 +10,7 @@ import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { campaigns, customers, marketingSuppressions } from "../db/schema.js";
 import { looksLikeEmail, normalizePhone } from "./notify.js";
+import { can } from "./manager-session.js";
 import {
   CAMPAIGN_STATUSES,
   MARKETING_CHANNELS,
@@ -18,21 +19,33 @@ import {
   MAX_EMAIL_SUBJECT,
   MAX_PROMO_CODE,
   MAX_SMS_BODY,
+  CONSENT_SOURCES,
+  CUSTOMER_SEGMENTS,
+  MANUAL_SMS_LABEL,
+  MANUAL_SMS_METHOD,
   PROMOTION_LINKS,
   SERVICE_SEGMENTS,
+  SMS_CONSENT_CHOICES,
+  SMS_CONSENT_CHOICE_VALUES,
   attributionWindowDays,
   batchSize,
   clickUrl,
   describeAudience,
+  describeSmsConsent,
   isEditable,
   landingUrl,
   marketingEmailSettings,
   marketingSmsSettings,
   newToken,
   normalizeAudience,
+  manualSmsMessage,
+  manualSmsTemplate,
+  normalizeConsentSource,
   normalizePromotionUrl,
+  smsComposeHref,
   renderEmail,
   renderSms,
+  siteUrl,
   smsSegments,
   unsubscribeUrl,
   type MarketingChannel
@@ -46,10 +59,34 @@ import {
   consentHistory,
   recentCampaignEvents,
   recordConsent,
+  smsConsentSnapshot,
   releaseSuppression,
   suppressAddress
 } from "./marketing-store.js";
 import { cancelCampaign, drainQueue, queueCampaign, sendTest } from "./marketing-dispatch.js";
+import {
+  campaignContactTotals,
+  contactById,
+  listContacts,
+  logContact,
+  manualSmsProgress,
+  manualSmsQueue,
+  markManualSmsSent,
+  matchCount,
+  matchPreview,
+  readContactInput,
+  recordCampaignContacts,
+  segmentCounts,
+  textableNow,
+  updateContact
+} from "./customer-marketing.js";
+import {
+  BUSINESS_VOICE_LINE,
+  CONTACT_CHANNELS,
+  CONTACT_RESPONSES,
+  PROMOTIONS,
+  promotionByCode
+} from "./promotions.js";
 
 export interface MarketingActor {
   id: number;
@@ -383,12 +420,24 @@ export async function handleMarketingRoute(request: MarketingRequest): Promise<R
         console.error("first marketing batch failed", err);
         return { sent: 0, failed: 0, suppressed: 0, remaining: queued.queued };
       });
+      // Write the send into the customer marketing history, so the office sees
+      // on a customer's own profile what they were offered and when — and so the
+      // duplicate guard has something to object to if the same campaign is aimed
+      // at them again. Never allowed to affect the send itself.
+      const logged = await recordCampaignContacts(id, {
+        id: account.id,
+        name: account.name
+      }).catch((err) => {
+        console.error("marketing history not written", err);
+        return { added: 0, skipped: 0 };
+      });
       const totals = await campaignTotals([id]);
       const [row] = await db.select().from(campaigns).where(eq(campaigns.id, id));
       return json({
         campaign: shapeCampaign(row, totals.get(id) || null),
         queued,
-        firstBatch: drained
+        firstBatch: drained,
+        history: logged
       });
     }
 
@@ -398,6 +447,401 @@ export async function handleMarketingRoute(request: MarketingRequest): Promise<R
       const totals = await campaignTotals([id]);
       return json({ campaign: shapeCampaign(row, totals.get(id) || null), dropped });
     }
+  }
+
+  // --- Customer Marketing Center -------------------------------------------
+  //
+  // Segmenting the office's own customer list by what people have had done, and
+  // keeping the history of what was offered to whom.
+  //
+  // Behind a second permission check of its own. The whole Grow section already
+  // needs the marketing permission, but these routes read the shape of the
+  // customer base — who spends, who has lapsed, what has been sold — which is
+  // management information rather than promotional material, so the role that
+  // writes campaign copy does not automatically get it.
+  if (path === "customer-marketing" || path.startsWith("customer-marketing/") || segments[0] === "contacts") {
+    if (!can(account.role, "customer_marketing")) {
+      return json(
+        {
+          error: "Your role does not have access to the customer marketing center.",
+          forbidden: true
+        },
+        { status: 403 }
+      );
+    }
+    const money = can(account.role, "reports");
+
+    // The screen's first load: the segments with a live count on each, the
+    // promotions the site is advertising, and the vocabulary for logging a
+    // contact by hand.
+    if (path === "customer-marketing" && method === "GET") {
+      const counts = await segmentCounts();
+      return json({
+        segments: CUSTOMER_SEGMENTS.map((segment) => ({
+          value: segment.value,
+          label: segment.label,
+          detail: segment.detail,
+          count: counts[segment.value] ?? 0
+        })),
+        marketableTotal: counts.total ?? 0,
+        // The published promotions, with the address of the page each one already
+        // lives on. Nothing here creates or edits a promotion page: a campaign
+        // points at the page the site is serving, so a customer who follows the
+        // link submits through the same verified form as any other visitor.
+        promotions: PROMOTIONS.map((promotion) => ({
+          ...promotion,
+          url: `${siteUrl()}${promotion.path}`
+        })),
+        contactChannels: CONTACT_CHANNELS,
+        contactResponses: CONTACT_RESPONSES,
+        // The SMS marketing consent vocabulary, so the customer profile can draw
+        // the control from the same list the segments are counted against.
+        smsConsentChoices: SMS_CONSENT_CHOICES,
+        consentSources: CONSENT_SOURCES,
+        // DCA's business line, for the office to record which number a call or
+        // text went out on. This app does not place the call.
+        businessVoiceLine: BUSINESS_VOICE_LINE,
+        contacts: await listContacts({ limit: 50, money })
+      });
+    }
+
+    // How many customers a chosen set of segments matches, before anybody builds
+    // a campaign. Counted by the same conditions the sender queues from.
+    if (path === "customer-marketing/count" && method === "POST") {
+      const input = await body(req);
+      const filter = normalizeAudience(input.audience ?? input);
+      const counts = await audienceCount(filter);
+      const preview = await matchPreview(filter, PREVIEW_LIMIT);
+      return json({
+        filter,
+        label: describeAudience(filter),
+        counts,
+        matching: counts.total,
+        // A sample so the office can recognise the list. Contact details are
+        // reduced to a hint here as they are everywhere else in this section.
+        preview
+      });
+    }
+
+    // Build a campaign around one of the existing promotions and the chosen
+    // segments. The promotion is taken from the published catalog by its code, so
+    // the campaign carries the real promotion page and the real promotion code
+    // and neither is rewritten here. The draft then goes through the ordinary
+    // campaign builder — wording, test send, schedule, send — which is what keeps
+    // one sending path, one consent test and one audience count in the app.
+    if (path === "customer-marketing/campaign" && method === "POST") {
+      const input = await body(req);
+      const promotion = promotionByCode(input.promotionCode);
+      if (!promotion) return bad("Pick one of the promotions the site is advertising");
+
+      const filter = normalizeAudience(input.audience ?? {});
+      const counts = await audienceCount(filter);
+      const name = text(input.name, MAX_CAMPAIGN_NAME) || `${promotion.name} — ${promotion.code}`;
+      const url = `${siteUrl()}${promotion.path}`;
+      const link = normalizePromotionUrl(url);
+      if (!link.url) return bad(link.error || "That promotion link is not usable");
+
+      const [row] = await db
+        .insert(campaigns)
+        .values({
+          name,
+          promotionTitle: promotion.name,
+          promoCode: promotion.code,
+          promotionUrl: link.url,
+          smsBody: text(input.smsBody, MAX_SMS_BODY),
+          emailSubject: text(input.emailSubject, MAX_EMAIL_SUBJECT),
+          emailBody: text(input.emailBody, MAX_EMAIL_BODY),
+          smsEnabled: input.smsEnabled !== false,
+          emailEnabled: input.emailEnabled !== false,
+          audience: filter,
+          status: "draft",
+          audienceSize: counts.total,
+          createdBy: account.id,
+          createdByName: account.name
+        })
+        .returning();
+
+      return json(
+        {
+          campaign: shapeCampaign(row),
+          counts,
+          promotion: { ...promotion, url: link.url },
+          audienceLabel: describeAudience(filter)
+        },
+        { status: 201 }
+      );
+    }
+
+    // --- Manual iPhone texting ----------------------------------------------
+    //
+    // The bridge between an audience and a handset, for as long as automated
+    // texting is not switched on. It prepares one message per household and
+    // hands back an sms: link; the sending is done by a person on a phone.
+    //
+    // Two things are deliberately true of every route here. The queue is built
+    // from SMS_ELIGIBLE_SQL, so Not Asked and Opted Out cannot appear in it and
+    // an opt-out removes somebody from it the moment it is recorded. And nothing
+    // is written by opening a composer: a contact row exists only because
+    // somebody pressed Mark sent afterwards.
+    if (path === "customer-marketing/manual-sms" && method === "POST") {
+      const input = await body(req);
+      const promotion = promotionByCode(input.promotionCode);
+      if (!promotion) return bad("Pick one of the promotions the site is advertising");
+
+      const url = `${siteUrl()}${promotion.path}`;
+      const link = normalizePromotionUrl(url);
+      if (!link.url) return bad(link.error || "That promotion link is not usable");
+
+      const filter = normalizeAudience(input.audience ?? {});
+      // Only accounts that may be texted, whatever the screen sent, so the run
+      // and the count agree.
+      const smsFilter = { ...filter, channel: "sms" as const };
+
+      // A hand-worked list is still a campaign: it has an audience, a promotion
+      // and a record of who was contacted. Sending is switched off on it, so the
+      // automated dispatcher can never text the same households again — sendGuard
+      // refuses a campaign with neither channel enabled.
+      let campaign: typeof campaigns.$inferSelect | null = null;
+      const wanted = Number(input.campaignId);
+      if (Number.isInteger(wanted) && wanted > 0) {
+        const [existing] = await db.select().from(campaigns).where(eq(campaigns.id, wanted)).limit(1);
+        if (!existing) return bad("That campaign no longer exists");
+        campaign = existing;
+      } else if (input.createCampaign !== false) {
+        const counts = await audienceCount(smsFilter);
+        const [row] = await db
+          .insert(campaigns)
+          .values({
+            name:
+              text(input.name, MAX_CAMPAIGN_NAME) ||
+              `${promotion.name} — texts sent by hand`,
+            promotionTitle: promotion.name,
+            promoCode: promotion.code,
+            promotionUrl: link.url,
+            smsBody: manualSmsTemplate(promotion),
+            smsEnabled: false,
+            emailEnabled: false,
+            audience: smsFilter,
+            status: "draft",
+            audienceSize: counts.total,
+            createdBy: account.id,
+            createdByName: account.name
+          })
+          .returning();
+        campaign = row;
+      }
+
+      const template = text(input.template, MAX_SMS_BODY) || (campaign ? campaign.smsBody : null);
+      const queue = await manualSmsQueue(smsFilter, promotion, {
+        campaignId: campaign ? campaign.id : null,
+        link: landingUrl(link.url, campaign ? campaign.id : 0, promotion.code),
+        template,
+        limit: Number(input.limit) || 200
+      });
+
+      return json({
+        campaign: campaign ? shapeCampaign(campaign) : null,
+        promotion: { ...promotion, url: link.url },
+        method: MANUAL_SMS_METHOD,
+        methodLabel: MANUAL_SMS_LABEL,
+        audienceLabel: describeAudience(smsFilter),
+        template: template || manualSmsTemplate(promotion),
+        queue,
+        remaining: queue.length,
+        progress: campaign ? await manualSmsProgress(campaign.id) : { sent: 0, logged: 0 },
+        // Variable names only, never values: what would have to be set for the
+        // provider to take over this work. The placeholders stay in place so
+        // switching automated texting on later needs no rebuild here.
+        automatedSms: marketingSmsSettings()
+      });
+    }
+
+    // The prepared message for one household, for the button on a customer's own
+    // profile. Refused unless that household is textable right now.
+    if (path === "customer-marketing/manual-sms/message" && method === "POST") {
+      const input = await body(req);
+      const promotion = promotionByCode(input.promotionCode);
+      if (!promotion) return bad("Pick one of the promotions the site is advertising");
+
+      const customerId = Number(input.customerId);
+      if (!Number.isInteger(customerId) || customerId < 1) return bad("Pick a customer");
+      const customer = await textableNow(customerId);
+      if (!customer) return json({ error: "That customer no longer exists" }, { status: 404 });
+      if (!customer.eligible) {
+        return bad(
+          "That customer is not recorded as Consented with a mobile number, so no promotional text may be prepared for them."
+        );
+      }
+
+      const link = normalizePromotionUrl(`${siteUrl()}${promotion.path}`);
+      const campaignId = Number(input.campaignId) > 0 ? Number(input.campaignId) : 0;
+      const target = landingUrl(link.url, campaignId, promotion.code);
+      const message = manualSmsMessage(
+        promotion,
+        { name: customer.name, city: customer.city },
+        target,
+        text(input.template, MAX_SMS_BODY)
+      );
+
+      return json({
+        customer: { id: customer.id, name: customer.name, phone: customer.phone },
+        promotion: { ...promotion, url: link.url },
+        message,
+        segments: smsSegments(message),
+        // Built here as well as in the browser so the link a phone opens is the
+        // one this app composed.
+        smsHref: smsComposeHref(customer.phone, message),
+        method: MANUAL_SMS_METHOD
+      });
+    }
+
+    // "I sent it." Written only on a person's word, after the fact.
+    if (path === "customer-marketing/manual-sms/sent" && method === "POST") {
+      const input = await body(req);
+      const customerId = Number(input.customerId);
+      if (!Number.isInteger(customerId) || customerId < 1) return bad("Pick a customer");
+
+      const customer = await textableNow(customerId);
+      if (!customer) return json({ error: "That customer no longer exists" }, { status: 404 });
+      // Checked again at the moment of writing, not when the list was drawn.
+      if (!customer.eligible) {
+        return bad(
+          "That customer may not be sent promotional texts, so nothing can be recorded against them."
+        );
+      }
+
+      const promotion = promotionByCode(input.promotionCode);
+      let campaignId: number | null = null;
+      const wanted = Number(input.campaignId);
+      if (Number.isInteger(wanted) && wanted > 0) {
+        const [campaign] = await db
+          .select({ id: campaigns.id })
+          .from(campaigns)
+          .where(eq(campaigns.id, wanted))
+          .limit(1);
+        if (!campaign) return bad("That campaign no longer exists");
+        campaignId = campaign.id;
+      }
+
+      const result = await markManualSmsSent(
+        customerId,
+        {
+          campaignId,
+          promotionCode: promotion ? promotion.code : null,
+          promotionName: promotion ? promotion.name : null,
+          promotionUrl: promotion ? `${siteUrl()}${promotion.path}` : null,
+          message: text(input.message, MAX_SMS_BODY),
+          address: customer.phone
+        },
+        { id: account.id, name: account.name }
+      );
+
+      if (result.duplicate) {
+        return json(
+          {
+            error: "A text to this customer has already been recorded for that campaign.",
+            duplicate: true
+          },
+          { status: 409 }
+        );
+      }
+
+      return json(
+        {
+          contact: result.row,
+          progress: campaignId ? await manualSmsProgress(campaignId) : { sent: 0, logged: 0 }
+        },
+        { status: 201 }
+      );
+    }
+
+    // --- Marketing history --------------------------------------------------
+
+    if (path === "contacts" && method === "GET") {
+      const customerId = Number(url.searchParams.get("customerId") || 0);
+      const campaignId = Number(url.searchParams.get("campaignId") || 0);
+      const contacts = await listContacts({
+        customerId: customerId > 0 ? customerId : undefined,
+        campaignId: campaignId > 0 ? campaignId : undefined,
+        limit: 200,
+        money
+      });
+      return json({
+        contacts,
+        totals: campaignId > 0 ? await campaignContactTotals(campaignId, money) : null
+      });
+    }
+
+    // Logging a contact made outside the campaign machinery — a call from the
+    // business line, a text somebody sent by hand. The unique index on
+    // (campaign, customer, channel) is what stops the same campaign being logged
+    // against the same household twice, and a clash comes back as a plain "they
+    // have already been contacted" rather than a second row.
+    if (path === "contacts" && method === "POST") {
+      const input = await body(req);
+      const customerId = Number(input.customerId);
+      if (!Number.isInteger(customerId) || customerId < 1) return bad("Pick a customer");
+
+      const [customer] = await db
+        .select({ id: customers.id })
+        .from(customers)
+        .where(eq(customers.id, customerId))
+        .limit(1);
+      if (!customer) return json({ error: "That customer no longer exists" }, { status: 404 });
+
+      const parsed = readContactInput(input);
+      if (!parsed.values) return bad(parsed.error || "That contact is not complete");
+      const values = parsed.values;
+      if (!money) delete values.revenueCents;
+      if (values.campaignId) {
+        const [campaign] = await db
+          .select({ id: campaigns.id })
+          .from(campaigns)
+          .where(eq(campaigns.id, Number(values.campaignId)))
+          .limit(1);
+        if (!campaign) return bad("That campaign no longer exists");
+      }
+      if (values.promotionUrl === undefined && values.promotionCode) {
+        const promotion = promotionByCode(values.promotionCode);
+        if (promotion) values.promotionUrl = `${siteUrl()}${promotion.path}`;
+      }
+
+      const result = await logContact(customerId, values, { id: account.id, name: account.name });
+      if (result.duplicate) {
+        return json(
+          {
+            error: "This customer has already been contacted for that campaign on that channel.",
+            duplicate: true
+          },
+          { status: 409 }
+        );
+      }
+      return json({ contact: result.row }, { status: 201 });
+    }
+
+    // What came of a contact: what the customer said, the request it produced,
+    // the job it became, what it was worth.
+    if (segments[0] === "contacts" && segments[1] && (method === "PATCH" || method === "PUT")) {
+      const id = Number(segments[1]);
+      if (!Number.isInteger(id) || id < 1) return bad("That is not a contact");
+      const existing = await contactById(id);
+      if (!existing) return json({ error: "That contact no longer exists" }, { status: 404 });
+
+      const parsed = readContactInput(await body(req));
+      if (!parsed.values) return bad(parsed.error || "That change is not usable");
+      const values = parsed.values;
+      if (!money) delete values.revenueCents;
+      // The household a contact belongs to is not something an edit may move.
+      delete values.campaignId;
+      delete values.recipientId;
+
+      const row = await updateContact(id, values, { id: account.id, name: account.name });
+      const contact = row as Record<string, unknown> | null;
+      if (contact && !money) delete contact.revenueCents;
+      return json({ contact });
+    }
+
+    return json({ error: "Unknown customer marketing request" }, { status: 404 });
   }
 
   // --- Consent --------------------------------------------------------------
@@ -435,6 +879,7 @@ export async function handleMarketingRoute(request: MarketingRequest): Promise<R
         smsConsentStatus: customers.smsConsentStatus,
         smsConsentSource: customers.smsConsentSource,
         smsConsentAt: customers.smsConsentAt,
+        smsConsentByName: customers.smsConsentByName,
         smsOptedOutAt: customers.smsOptedOutAt,
         emailConsentStatus: customers.emailConsentStatus,
         emailConsentSource: customers.emailConsentSource,
@@ -445,19 +890,34 @@ export async function handleMarketingRoute(request: MarketingRequest): Promise<R
       .where(conditions.length ? (and(...(conditions as never[])) as never) : undefined)
       .orderBy(customers.name)
       .limit(50);
-    return json({ customers: rows });
+    // The bucket each row falls into, worked out here so the list, the customer
+    // profile and the audience count all say the same thing about an account.
+    return json({
+      customers: rows.map((row) => ({ ...row, sms: describeSmsConsent(row) })),
+      smsConsentChoices: SMS_CONSENT_CHOICES,
+      consentSources: CONSENT_SOURCES
+    });
   }
 
   if (path === "consent" && method === "POST") {
     const input = await body(req);
     const customerId = Number(input.customerId);
     const channel = String(input.channel || "") as MarketingChannel;
+    // The console sends the three words the control is labelled with —
+    // Consented, Not Asked, Opted Out — as granted, not_asked and opted_out.
+    // "denied" is still accepted: it is what the older screens send, and what
+    // the existing consent records were written with.
     const action = String(input.action || "");
     if (!Number.isInteger(customerId) || customerId < 1) return bad("Pick a customer");
     if (!MARKETING_CHANNELS.includes(channel)) return bad("Pick text messages or email");
-    if (!["granted", "opted_out", "denied"].includes(action)) return bad("That is not a consent decision");
+    if (!SMS_CONSENT_CHOICE_VALUES.includes(action) && action !== "denied") {
+      return bad("That is not a consent decision");
+    }
 
-    const source = text(input.source, 200);
+    // One of the five recorded sources, or free text kept for anything an older
+    // screen sends. Nothing is invented: a blank stays blank.
+    const supplied = text(input.source, 200);
+    const source = normalizeConsentSource(supplied) || supplied;
     // Permission to text somebody has to be traceable to something that
     // happened — a form they signed, a box they ticked, a text they sent in.
     // "Because we have their number" is not consent, so a source is required.
@@ -468,7 +928,7 @@ export async function handleMarketingRoute(request: MarketingRequest): Promise<R
     const result = await recordConsent({
       customerId,
       channel,
-      action: action as "granted" | "opted_out" | "denied",
+      action: action as "granted" | "opted_out" | "denied" | "not_asked",
       source,
       detail: text(input.detail, 300),
       actorEmployeeId: account.id,
@@ -477,13 +937,31 @@ export async function handleMarketingRoute(request: MarketingRequest): Promise<R
       userAgent: request.req.headers.get("user-agent")
     });
     if (!result.ok) return bad(result.error);
-    return json({ ok: true, status: result.status, history: await consentHistory(customerId) });
+    return json({
+      ok: true,
+      status: result.status,
+      // What the account now says about texting, decided on the server, so the
+      // screen does not have to work out for itself whether somebody is
+      // textable.
+      consent: await smsConsentSnapshot(customerId),
+      // True when the record was set back to Not Asked over an existing
+      // opt-out. The opt-out stands, and the screen says so.
+      optedOutRetained: result.optedOutRetained,
+      history: await consentHistory(customerId)
+    });
   }
 
   if (segments[0] === "consent" && segments[1] && method === "GET") {
     const customerId = Number(segments[1]);
     if (!Number.isInteger(customerId) || customerId < 1) return bad("That is not a customer");
-    return json({ history: await consentHistory(customerId, 50) });
+    return json({
+      history: await consentHistory(customerId, 50),
+      consent: await smsConsentSnapshot(customerId),
+      // The vocabulary the control is drawn from, so the three choices and the
+      // five sources are the server's list rather than a copy in the browser.
+      smsConsentChoices: SMS_CONSENT_CHOICES,
+      consentSources: CONSENT_SOURCES
+    });
   }
 
   // --- Suppression list -----------------------------------------------------
