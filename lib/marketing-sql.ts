@@ -60,18 +60,37 @@ function anyIlike(column: SQL, patterns: readonly string[]): SQL {
   )})`;
 }
 
-// Whether this account has ever been in for a given kind of work. Three places
+// The service-notes column that, when anything is written in it, settles that a
+// household has had this kind of work done. Area rugs have no column of their
+// own — rug work is written up in the summary line — so that segment is matched
+// on the wording alone.
+const SERVICE_SEGMENT_NOTE_COLUMN: Record<string, string> = {
+  carpet: "carpet_detail",
+  air_duct: "air_duct_detail",
+  upholstery: "upholstery_detail"
+};
+
+// Whether this account has ever been in for a given kind of work. Four places
 // record that — the jobs they have booked, the service written on the account
-// when it was imported, and the requests they have sent in — and a customer
-// counts if any of them says so.
+// when it was imported, the requests they have sent in, and the service notes
+// written up after a visit — and a customer counts if any of them says so.
+//
+// The service notes matter most for the households that were imported: years of
+// carpet cleaning can exist as notes with no jobs row behind them at all, and
+// "carpet cleaning customers" has to find those houses or the filter reads as
+// broken.
 export function serviceSegmentSql(value: string): SQL | null {
   const segment = serviceSegment(value);
   if (!segment) return null;
   const patterns = segment.patterns;
-  const jobMatch = anyIlike(sql`j."service_type"`, patterns);
-  const leadMatch = anyIlike(sql`coalesce(l."service", '')`, patterns);
+  const jobMatch = anyIlike(sql`coalesce(j."service_type", '')`, patterns);
+  const leadMatch = anyIlike(sql`coalesce(l."service", '') || ' ' || coalesce(l."service_detail", '')`, patterns);
   const ownMatch = anyIlike(sql`coalesce(${customers.service}, '')`, patterns);
-  return sql`(exists (select 1 from "jobs" j where j."customer_id" = ${customers.id} and ${jobMatch}) or exists (select 1 from "leads" l where l."customer_id" = ${customers.id} and ${leadMatch}) or ${ownMatch})`;
+  const column = SERVICE_SEGMENT_NOTE_COLUMN[segment.value];
+  const noteMatch = column
+    ? noteSaysSql(column, patterns)
+    : sql`exists (select 1 from "service_notes" n where n."customer_id" = ${customers.id} and ${anyIlike(sql`coalesce(n."service_performed", '')`, patterns)})`;
+  return sql`(exists (select 1 from "jobs" j where j."customer_id" = ${customers.id} and ${jobMatch}) or exists (select 1 from "leads" l where l."customer_id" = ${customers.id} and ${leadMatch}) or ${ownMatch} or ${noteMatch})`;
 }
 
 // The last time this household had work done, counting the service history as
@@ -188,23 +207,41 @@ export function audienceConditions(filter: AudienceFilter): SQL | null {
   }
 
   if (filter.cities.length) {
-    parts.push(anyIlike(sql`coalesce(${customers.city}, '')`, filter.cities.map((c) => c)));
+    // Matched on containment rather than equality, on purpose. An imported
+    // account might carry "Atlanta, GA", "ATLANTA " or "East Atlanta" in its
+    // city column, and an office that chose Atlanta means all of those houses.
+    // normalizeAudience() has already stripped ILIKE wildcards out of whatever
+    // the browser sent, so the two per cent signs below are the only wildcards
+    // that reach the query.
+    parts.push(
+      anyIlike(
+        sql`btrim(coalesce(${customers.city}, ''))`,
+        filter.cities.map((c) => `%${c}%`)
+      )
+    );
   }
 
+  // Both date bounds and the "has not booked" cutoff read LAST_SERVICE_ANY_SQL,
+  // the same last-service date the audience preview and the customer-marketing
+  // segments show. Reading the jobs table alone here used to mean an imported
+  // household whose whole history is service notes had no last-service date at
+  // all, so any date bound removed it — the office set "on or after" and watched
+  // a real audience drop to nobody. One definition of "last service" everywhere
+  // is what makes the count agree with the list underneath it.
   if (filter.lastServiceFrom) {
-    parts.push(sql`${LAST_SERVICE_SQL} >= ${filter.lastServiceFrom}::date`);
+    parts.push(sql`${LAST_SERVICE_ANY_SQL} >= ${filter.lastServiceFrom}::date`);
   }
   if (filter.lastServiceTo) {
     // Inclusive of the end day, so "to 31 July" includes work done that evening.
-    parts.push(sql`${LAST_SERVICE_SQL} < (${filter.lastServiceTo}::date + interval '1 day')`);
+    parts.push(sql`${LAST_SERVICE_ANY_SQL} < (${filter.lastServiceTo}::date + interval '1 day')`);
   }
 
   if (filter.notBookedDays) {
     const cutoff = sql`(now() - (${String(filter.notBookedDays)} || ' days')::interval)`;
     parts.push(
       filter.includeNeverBooked
-        ? sql`(${LAST_SERVICE_SQL} is null or ${LAST_SERVICE_SQL} < ${cutoff})`
-        : sql`(${LAST_SERVICE_SQL} is not null and ${LAST_SERVICE_SQL} < ${cutoff})`
+        ? sql`(${LAST_SERVICE_ANY_SQL} is null or ${LAST_SERVICE_ANY_SQL} < ${cutoff})`
+        : sql`(${LAST_SERVICE_ANY_SQL} is not null and ${LAST_SERVICE_ANY_SQL} < ${cutoff})`
     );
   }
 

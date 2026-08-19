@@ -322,8 +322,18 @@ export const DEFAULT_AUDIENCE: AudienceFilter = {
 
 const MAX_LIST_VALUES = 60;
 
-function readList(raw: unknown, max: number, clean: (v: string) => string): string[] {
-  const values = Array.isArray(raw) ? raw : String(raw || "").split(/[,\s]+/);
+// One filter list, however the browser chose to send it. A real list is taken as
+// it stands; a single string is split on the separator given, which is why cities
+// and ZIP codes do not share one. Splitting a typed "Atlanta, College Park" on
+// whitespace produced "College" and "Park" as two cities, neither of which is
+// anywhere, so cities split on commas and newlines only and keep their spaces.
+function readList(
+  raw: unknown,
+  max: number,
+  clean: (v: string) => string,
+  separator: RegExp = /[,\s]+/
+): string[] {
+  const values = Array.isArray(raw) ? raw : String(raw || "").split(separator);
   const out: string[] = [];
   for (const value of values) {
     const cleaned = clean(String(value || ""));
@@ -356,8 +366,11 @@ export function normalizeAudience(raw: unknown): AudienceFilter {
     zips: readList(input.zips ?? input.zip, MAX_LIST_VALUES, (v) =>
       v.replace(/\D/g, "").slice(0, 5)
     ),
-    cities: readList(input.cities ?? input.city, MAX_LIST_VALUES, (v) =>
-      v.trim().replace(/[%_\\]/g, "").slice(0, 60)
+    cities: readList(
+      input.cities ?? input.city,
+      MAX_LIST_VALUES,
+      (v) => v.trim().replace(/\s+/g, " ").replace(/[%_\\]/g, "").slice(0, 60),
+      /[,;\n]+/
     ),
     lastServiceFrom: readDate(input.lastServiceFrom),
     lastServiceTo: readDate(input.lastServiceTo),
@@ -381,10 +394,15 @@ export function describeAudience(filter: AudienceFilter): string {
   if (filter.segments.length) parts.push(describeSegments(filter.segments));
   if (filter.zips.length) parts.push(`ZIP ${filter.zips.join(", ")}`);
   if (filter.cities.length) parts.push(filter.cities.join(", "));
-  if (filter.lastServiceFrom || filter.lastServiceTo) {
-    parts.push(
-      `last service ${filter.lastServiceFrom || "any time"} to ${filter.lastServiceTo || "today"}`
-    );
+  // Only the bounds that were actually set are described. Reading an open-ended
+  // range back as "to today" implied a restriction the filter does not apply: a
+  // blank date field means no restriction on that side at all.
+  if (filter.lastServiceFrom && filter.lastServiceTo) {
+    parts.push(`last service ${filter.lastServiceFrom} to ${filter.lastServiceTo}`);
+  } else if (filter.lastServiceFrom) {
+    parts.push(`last service on or after ${filter.lastServiceFrom}`);
+  } else if (filter.lastServiceTo) {
+    parts.push(`last service on or before ${filter.lastServiceTo}`);
   }
   if (filter.notBookedDays) {
     parts.push(`no booking in ${filter.notBookedDays} days`);
