@@ -31,7 +31,7 @@ import {
   EMAIL_ELIGIBLE_SQL,
   HAS_EMAIL_SQL,
   HAS_MOBILE_SQL,
-  LAST_SERVICE_SQL,
+  LAST_SERVICE_ANY_SQL,
   OPTED_OUT_SQL,
   SMS_ELIGIBLE_SQL,
   audienceConditions
@@ -132,7 +132,9 @@ export async function audienceRows(
       email: customers.email,
       smsEligible: sql<boolean>`${SMS_ELIGIBLE_SQL}`,
       emailEligible: sql<boolean>`${EMAIL_ELIGIBLE_SQL}`,
-      lastServiceAt: sql<Date | null>`${LAST_SERVICE_SQL}`
+      // The same last-service date the date filters read, so a row cannot show
+      // a service date that the "on or after" bound would then exclude.
+      lastServiceAt: sql<Date | null>`${LAST_SERVICE_ANY_SQL}`
     })
     .from(customers)
     .where(where || undefined)
@@ -144,6 +146,59 @@ export async function audienceRows(
     smsEligible: Boolean(r.smsEligible),
     emailEligible: Boolean(r.emailEligible)
   }));
+}
+
+// --- Where the customers actually are ---------------------------------------
+//
+// The ZIP codes and towns that exist in the customer database, each with how
+// many reachable households it holds. The Audience screen builds its ZIP and
+// city pickers from this, so choosing a location is choosing from what is on
+// file rather than typing a guess and wondering why nobody matched. Counted
+// among reachable customers only, for the same reason the segment totals are:
+// offering the office a ZIP that turns out to hold nobody contactable would
+// promise a campaign that cannot be sent.
+export interface AudienceLocation {
+  value: string;
+  count: number;
+}
+
+export interface AudienceLocations {
+  zips: AudienceLocation[];
+  cities: AudienceLocation[];
+}
+
+const LOCATION_LIMIT = 300;
+
+export async function audienceLocations(): Promise<AudienceLocations> {
+  const reachable = sql`(${SMS_ELIGIBLE_SQL} or ${EMAIL_ELIGIBLE_SQL})`;
+  const zipKey = sql<string>`left(regexp_replace(coalesce(${customers.zip}, ''), '[^0-9]', '', 'g'), 5)`;
+  // Towns are grouped on a tidied form of what is written on the account, so
+  // "atlanta", "Atlanta " and "Atlanta" are one entry in the picker rather than
+  // three. The tidied spelling is what the picker offers, and the filter matches
+  // it loosely, so every one of those three accounts is still found.
+  const cityKey = sql<string>`initcap(btrim(regexp_replace(coalesce(${customers.city}, ''), '[[:space:]]+', ' ', 'g')))`;
+
+  const [zips, cities] = await Promise.all([
+    db
+      .select({ value: zipKey, count: sql<number>`cast(count(*) as int)` })
+      .from(customers)
+      .where(sql`${reachable} and length(${zipKey}) = 5`)
+      .groupBy(zipKey)
+      .orderBy(zipKey)
+      .limit(LOCATION_LIMIT),
+    db
+      .select({ value: cityKey, count: sql<number>`cast(count(*) as int)` })
+      .from(customers)
+      .where(sql`${reachable} and ${cityKey} <> ''`)
+      .groupBy(cityKey)
+      .orderBy(cityKey)
+      .limit(LOCATION_LIMIT)
+  ]);
+
+  return {
+    zips: zips.map((r) => ({ value: String(r.value), count: Number(r.count) || 0 })),
+    cities: cities.map((r) => ({ value: String(r.value), count: Number(r.count) || 0 }))
+  };
 }
 
 // --- Consent ----------------------------------------------------------------

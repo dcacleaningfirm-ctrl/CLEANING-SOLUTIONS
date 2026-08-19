@@ -53,6 +53,7 @@ import {
 import {
   attributeBookings,
   audienceCount,
+  audienceLocations,
   audienceRows,
   audienceStats,
   campaignTotals,
@@ -250,12 +251,20 @@ export async function handleMarketingRoute(request: MarketingRequest): Promise<R
     // Credit any bookings that have landed since the last look, so the numbers
     // on the history are current rather than as of the last send.
     await attributeBookings().catch((err) => console.error("attribution failed", err));
-    const [stats, list] = await Promise.all([audienceStats(), listCampaigns()]);
+    const [stats, list, locations] = await Promise.all([
+      audienceStats(),
+      listCampaigns(),
+      audienceLocations()
+    ]);
     return json({
       stats,
       campaigns: list,
       providers: readiness(),
       segments: SERVICE_SEGMENTS.map((s) => ({ value: s.value, label: s.label })),
+      // The ZIP codes and towns that actually exist on file, so the Audience
+      // screen can offer them to be picked instead of asking the office to type
+      // a location and hope it matches something.
+      locations,
       promotionLinks: PROMOTION_LINKS,
       limits: {
         smsBody: MAX_SMS_BODY,

@@ -3306,16 +3306,15 @@
       state.grow = {
         tab: "audience",
         data: null,
-        filter: {
-          channel: "any",
-          service: "",
-          zips: "",
-          cities: "",
-          lastServiceFrom: "",
-          lastServiceTo: "",
-          notBookedDays: "",
-          includeNeverBooked: true
-        },
+        // The audience filters currently on screen. ZIP codes and cities are
+        // held as lists rather than as a line of text, so a single one of them
+        // can be taken off again; both dates are held as "" when unset, which
+        // means no restriction on service date rather than "today".
+        filter: defaultAudienceFilter(),
+        // The date field whose calendar is open, and the month it is showing.
+        // Kept here rather than read back out of the DOM so moving the year does
+        // not depend on anything the browser's own date picker does.
+        calendar: null,
         counts: null,
         preview: [],
         countTimer: null,
@@ -3385,6 +3384,9 @@
     var g = growState();
     var panel = document.getElementById("grow-panel");
     if (!panel) return;
+    // Any open calendar belongs to the panel about to be replaced, so the state
+    // saying one is open goes with it.
+    g.calendar = null;
     if (g.tab === "customers") return renderGrowCustomers(panel);
     if (g.tab === "campaigns") return renderGrowCampaigns(panel);
     if (g.tab === "consent") return renderGrowConsent(panel);
@@ -3438,13 +3440,124 @@
   }
 
   // --- Audience -------------------------------------------------------------
+  //
+  // Every control on this card is optional, and every one of them can be taken
+  // back off again. A blank field is not a filter that matches nobody, it is the
+  // absence of a restriction — which is why the ZIP and city lists start empty
+  // and read "all ZIP codes", why either date may be left blank or emptied again
+  // afterwards, and why there is a Clear filters button that puts the whole card
+  // back to "every customer we may lawfully contact".
+  //
+  // The four counts underneath are recalculated after every one of those
+  // changes, the clearing ones included, so the figures on screen always
+  // describe the filters currently set rather than the last set that happened to
+  // finish loading.
+
+  // The two list filters. They behave identically — chosen values sit in the
+  // filter as a list, are shown as chips that can be taken off one at a time,
+  // and can be added either from what is on file or by typing — so they are
+  // described here once rather than written out twice.
+  var AUDIENCE_LISTS = [
+    {
+      key: "zips",
+      label: "ZIP codes",
+      single: "ZIP code",
+      empty: "All ZIP codes",
+      addLabel: "Add a ZIP code…",
+      typeHint: "or type 30349",
+      inputMode: "numeric",
+      clean: function (raw) {
+        var digits = String(raw == null ? "" : raw).replace(/\D/g, "").slice(0, 5);
+        return digits.length === 5 ? digits : "";
+      },
+      invalid: "A ZIP code is five digits, like 30349."
+    },
+    {
+      key: "cities",
+      label: "Cities",
+      single: "city",
+      empty: "All cities",
+      addLabel: "Add a city…",
+      typeHint: "or type College Park",
+      inputMode: "text",
+      clean: function (raw) {
+        // The wildcard characters are stripped for the same reason the server
+        // strips them: a city is a name, not a pattern. Inner spaces are kept,
+        // because College Park is one town and not two.
+        return String(raw == null ? "" : raw)
+          .replace(/[%_\\]/g, "")
+          .replace(/\s+/g, " ")
+          .trim()
+          .slice(0, 60);
+      },
+      invalid: "Type the name of a town, like College Park."
+    }
+  ];
+
+  var AUDIENCE_LIST_MAX = 60;
+
+  var AUDIENCE_DATES = [
+    { key: "lastServiceFrom", label: "Last service on or after" },
+    { key: "lastServiceTo", label: "Last service on or before" }
+  ];
+
+  function audienceListSpec(key) {
+    return AUDIENCE_LISTS.filter(function (s) { return s.key === key; })[0] || null;
+  }
+
+  // What is actually on file to be picked from. Sent with the overview, so the
+  // menus offer the ZIP codes and towns the customer database really contains
+  // rather than asking somebody to type one and wonder why nobody matched.
+  function audienceListOptions(key) {
+    var g = state.grow;
+    var locations = (g && g.data && g.data.locations) || {};
+    return locations[key] || [];
+  }
+
+  // Every optional restriction at its widest setting. "Widest" is the important
+  // word: this is the filter that includes everybody who may lawfully be
+  // contacted, which is what Clear filters has to return the screen to.
+  function defaultAudienceFilter() {
+    return {
+      channel: "any",
+      service: "",
+      zips: [],
+      cities: [],
+      lastServiceFrom: "",
+      lastServiceTo: "",
+      notBookedDays: "",
+      includeNeverBooked: true
+    };
+  }
+
+  // How many restrictions are in force, so the screen can say plainly that
+  // nothing is narrowing the audience, and so "nobody matches" can point at the
+  // filters rather than leaving the office to wonder where its customers went.
+  function audienceRestrictionCount() {
+    var f = growState().filter;
+    var n = 0;
+    if (f.channel && f.channel !== "any") n++;
+    if (f.service) n++;
+    if (f.zips.length) n++;
+    if (f.cities.length) n++;
+    if (f.lastServiceFrom) n++;
+    if (f.lastServiceTo) n++;
+    if (f.notBookedDays) n++;
+    if (!f.includeNeverBooked) n++;
+    return n;
+  }
 
   function renderGrowAudience(panel) {
     var g = growState();
     var f = g.filter;
     var segments = g.data.segments || [];
+
     panel.innerHTML =
       '<div class="card grow-filters">' +
+      '<div class="row-between filter-head">' +
+      '<h3 class="section-title">Who to reach</h3>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-audience-reset>Clear filters</button>' +
+      "</div>" +
       '<div class="grow-grid">' +
       '<label class="field"><span>Reachable by</span><select id="gr-channel">' +
       growOption("any", "Text or email", f.channel) +
@@ -3452,39 +3565,40 @@
       growOption("email", "Email only", f.channel) +
       growOption("both", "Both text and email", f.channel) +
       "</select></label>" +
-      '<label class="field"><span>Previous service</span><select id="gr-service">' +
+      '<div class="field"><span>Previous service</span>' +
+      '<div class="pick-entry"><select id="gr-service">' +
       growOption("", "Any service", f.service) +
       segments.map(function (s) { return growOption(s.value, s.label, f.service); }).join("") +
-      "</select></label>" +
-      '<label class="field"><span>ZIP codes</span><input id="gr-zips" type="text" maxlength="400" placeholder="30349, 30291" value="' +
-      esc(f.zips) + '" /></label>' +
-      '<label class="field"><span>Cities</span><input id="gr-cities" type="text" maxlength="400" placeholder="Atlanta, College Park" value="' +
-      esc(f.cities) + '" /></label>' +
-      '<label class="field"><span>Last service on or after</span><input id="gr-from" type="date" value="' +
-      esc(f.lastServiceFrom) + '" /></label>' +
-      '<label class="field"><span>Last service on or before</span><input id="gr-to" type="date" value="' +
-      esc(f.lastServiceTo) + '" /></label>' +
-      '<label class="field"><span>Has not booked in (days)</span><input id="gr-notbooked" type="number" min="1" max="3650" placeholder="180" value="' +
+      "</select>" +
+      '<button type="button" class="btn btn-ghost btn-sm" data-audience-clear-service' +
+      (f.service ? "" : " disabled") + ">Clear</button></div>" +
+      '<p class="pick-note">Any service means no restriction on what they have had done.</p>' +
+      "</div>" +
+      "</div>" +
+      '<div class="grow-grid">' +
+      AUDIENCE_LISTS.map(function (spec) {
+        return audienceListFieldHtml(spec, f[spec.key]);
+      }).join("") +
+      "</div>" +
+      '<div class="grow-grid">' +
+      AUDIENCE_DATES.map(function (spec) {
+        return audienceDateFieldHtml(spec, f[spec.key]);
+      }).join("") +
+      '<label class="field"><span>Has not booked in (days)</span>' +
+      '<input id="gr-notbooked" type="number" min="1" max="3650" placeholder="Any" value="' +
       esc(f.notBookedDays) + '" /></label>' +
       '<label class="field checkbox"><input id="gr-never" type="checkbox"' +
       (f.includeNeverBooked ? " checked" : "") +
       " /><span>Include customers who have never booked</span></label>" +
       "</div>" +
-      '<p class="hint">A customer only appears here if they may lawfully be contacted on the chosen channel. ' +
-      "Somebody who has opted out is never in an audience, whatever the filters say.</p>" +
+      '<p class="hint">Every box above is optional and leaving one empty means no restriction of that kind. ' +
+      "A customer only appears here if they may lawfully be contacted on the chosen channel: somebody who " +
+      "has opted out is never in an audience, whatever the filters say.</p>" +
       "</div>" +
       '<div id="gr-counts"></div>' +
       '<div id="gr-preview"></div>';
 
-    ["gr-channel", "gr-service", "gr-zips", "gr-cities", "gr-from", "gr-to", "gr-notbooked", "gr-never"]
-      .forEach(function (id) {
-        var field = document.getElementById(id);
-        if (!field) return;
-        field.addEventListener(field.tagName === "INPUT" && field.type === "text" ? "input" : "change",
-          function () { readAudienceForm(); });
-        if (field.type === "number") field.addEventListener("input", readAudienceForm);
-      });
-
+    bindAudienceForm();
     loadAudience();
   }
 
@@ -3493,33 +3607,552 @@
       esc(label) + "</option>";
   }
 
-  function readAudienceForm() {
-    var g = growState();
-    g.filter = {
-      channel: val("gr-channel") || "any",
-      service: val("gr-service"),
-      zips: val("gr-zips"),
-      cities: val("gr-cities"),
-      lastServiceFrom: val("gr-from"),
-      lastServiceTo: val("gr-to"),
-      notBookedDays: val("gr-notbooked"),
-      includeNeverBooked: document.getElementById("gr-never")
-        ? document.getElementById("gr-never").checked
-        : true
-    };
-    clearTimeout(g.countTimer);
-    g.countTimer = setTimeout(loadAudience, 350);
+  // One list filter: what has been chosen, and the two ways to add to it.
+  function audienceListFieldHtml(spec, chosen) {
+    var options = audienceListOptions(spec.key);
+    return (
+      '<div class="field pick-field" data-pick-field="' + spec.key + '">' +
+      "<span>" + esc(spec.label) + "</span>" +
+      audienceChipsHtml(spec, chosen) +
+      '<div class="pick-entry">' +
+      '<select data-pick-add="' + spec.key + '" aria-label="' + esc(spec.addLabel) + '">' +
+      '<option value="">' + esc(options.length ? spec.addLabel : "Nothing on file yet") + "</option>" +
+      options
+        .map(function (o) {
+          return '<option value="' + esc(o.value) + '"' +
+            (audienceListHas(chosen, o.value) ? " disabled" : "") + ">" +
+            esc(o.value + (o.count ? " · " + o.count : "")) + "</option>";
+        })
+        .join("") +
+      "</select>" +
+      '<input type="text" data-pick-type="' + spec.key + '" inputmode="' + spec.inputMode +
+      '" autocomplete="off" maxlength="60" placeholder="' + esc(spec.typeHint) +
+      '" aria-label="Type a ' + esc(spec.single) + '" />' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-pick-commit="' + spec.key +
+      '">Add</button>' +
+      "</div>" +
+      '<p class="pick-note" data-pick-note="' + spec.key + '"></p>' +
+      "</div>"
+    );
   }
 
-  // The filter as the API wants it. Lists are typed as text and split here; the
-  // server sanitises them again, so this is convenience rather than protection.
+  // The chosen values, each with its own remove button, plus one button that
+  // takes the lot off. Redrawn on its own whenever the list changes so that the
+  // typing box beside it keeps both its contents and the cursor.
+  function audienceChipsHtml(spec, chosen) {
+    var list = chosen || [];
+    return (
+      '<div class="pick-chips" data-pick-chips="' + spec.key + '">' +
+      (list.length
+        ? list
+            .map(function (v) {
+              return '<span class="pick-chip">' + esc(v) +
+                '<button type="button" data-pick-remove="' + spec.key + '" data-pick-value="' +
+                esc(v) + '" aria-label="Remove ' + esc(v) + '">×</button></span>';
+            })
+            .join("") +
+          '<button type="button" class="pick-clear" data-pick-clear="' + spec.key +
+          '">Clear all</button>'
+        : '<span class="pick-empty">' + esc(spec.empty) + "</span>") +
+      "</div>"
+    );
+  }
+
+  function audienceListHas(list, value) {
+    var wanted = String(value || "").toLowerCase();
+    return (list || []).some(function (v) { return String(v).toLowerCase() === wanted; });
+  }
+
+  function addAudienceListValue(key, raw) {
+    var spec = audienceListSpec(key);
+    if (!spec) return false;
+    var g = growState();
+    var note = document.querySelector('[data-pick-note="' + key + '"]');
+    var typed = String(raw == null ? "" : raw).trim();
+    if (!typed) return false;
+    var cleaned = spec.clean(typed);
+    if (!cleaned) {
+      if (note) note.textContent = spec.invalid;
+      return false;
+    }
+    // If what was typed names something already on file, the spelling from the
+    // file wins, so "atlanta" and "Atlanta" cannot both end up as chips.
+    audienceListOptions(key).forEach(function (o) {
+      if (String(o.value).toLowerCase() === cleaned.toLowerCase()) cleaned = o.value;
+    });
+    var list = g.filter[key];
+    if (audienceListHas(list, cleaned)) {
+      if (note) note.textContent = cleaned + " is already on the list.";
+      return true;
+    }
+    if (list.length >= AUDIENCE_LIST_MAX) {
+      if (note) note.textContent = "That is as many as one audience can hold.";
+      return false;
+    }
+    list.push(cleaned);
+    if (note) note.textContent = "";
+    redrawAudienceList(key);
+    scheduleAudienceCount();
+    return true;
+  }
+
+  function removeAudienceListValue(key, value) {
+    var list = growState().filter[key];
+    var at = list.indexOf(value);
+    if (at === -1) return;
+    list.splice(at, 1);
+    redrawAudienceList(key);
+    scheduleAudienceCount();
+  }
+
+  function clearAudienceList(key) {
+    var g = growState();
+    if (!g.filter[key].length) return;
+    g.filter[key] = [];
+    redrawAudienceList(key);
+    scheduleAudienceCount();
+  }
+
+  function redrawAudienceList(key) {
+    var spec = audienceListSpec(key);
+    if (!spec) return;
+    var chosen = growState().filter[key];
+    var chips = document.querySelector('[data-pick-chips="' + key + '"]');
+    if (chips) chips.outerHTML = audienceChipsHtml(spec, chosen);
+    var menu = document.querySelector('[data-pick-add="' + key + '"]');
+    if (menu) {
+      menu.value = "";
+      Array.prototype.forEach.call(menu.options, function (option) {
+        if (option.value) option.disabled = audienceListHas(chosen, option.value);
+      });
+    }
+  }
+
+  // Takes whatever is half-typed in a list box and puts it on the list. Used by
+  // the Add button, by the Enter key and when the box loses focus, so a value
+  // that was typed and not confirmed is never silently dropped.
+  function commitAudienceListEntry(key) {
+    var input = document.querySelector('[data-pick-type="' + key + '"]');
+    if (!input) return;
+    var text = input.value;
+    if (!String(text).trim()) return;
+    if (addAudienceListValue(key, text)) input.value = "";
+  }
+
+  // --- The calendar ---------------------------------------------------------
+  //
+  // Written out by hand rather than left to <input type="date">, because the
+  // browser's own picker is the part that was not working: Safari on the Mac
+  // offers no calendar at all behind that field, and the iPhone's spinning wheel
+  // makes moving back several years a fight. This one has the same controls
+  // everywhere — a month menu, a year menu, single-month arrows and whole-year
+  // arrows either side of them — and the field beside it stays an ordinary text
+  // box that a date can simply be typed into.
+  //
+  // Two rules run through all of it. Nothing is ever written into the box that
+  // somebody did not put there: no current year is filled in for them, and a
+  // date they cleared is never restored. And a blank box is a valid, meaningful
+  // state — it means no restriction on service date at all.
+
+  var MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+  var DOW_NAMES = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
+  var CALENDAR_MIN_YEAR = 1950;
+  var CALENDAR_MAX_YEAR = 2100;
+
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+
+  // month is 0-based throughout, as it is on a JavaScript Date.
+  function isoDate(year, month, day) {
+    return String(year) + "-" + pad2(month + 1) + "-" + pad2(day);
+  }
+
+  function daysInMonth(year, month) {
+    return new Date(year, month + 1, 0).getDate();
+  }
+
+  // A date the filter can use, or "" for no restriction. It accepts what somebody
+  // would actually type — 2026-08-19, 8/19/2026, 08-19-2026 — and refuses
+  // anything that is not a real day rather than rolling it forward, so 2026-02-30
+  // is rejected instead of quietly becoming the 2nd of March.
+  function parseAudienceDate(raw) {
+    var text = String(raw == null ? "" : raw).trim();
+    if (!text) return "";
+    var year, month, day;
+    var iso = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(text);
+    var us = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(text);
+    if (iso) {
+      year = Number(iso[1]); month = Number(iso[2]); day = Number(iso[3]);
+    } else if (us) {
+      year = Number(us[3]); month = Number(us[1]); day = Number(us[2]);
+    } else {
+      return "";
+    }
+    if (year < CALENDAR_MIN_YEAR || year > CALENDAR_MAX_YEAR) return "";
+    if (month < 1 || month > 12 || day < 1) return "";
+    if (day > daysInMonth(year, month - 1)) return "";
+    return isoDate(year, month - 1, day);
+  }
+
+  // Moving the calendar by whole months, carrying into the year. The single
+  // arrows pass ±1 and the year arrows pass ±12, so twelve taps of one and one
+  // tap of the other land in the same month — which is the behaviour that was
+  // missing when changing the year did not take.
+  function shiftCalendar(year, month, months) {
+    var total = year * 12 + month + months;
+    var y = Math.floor(total / 12);
+    var m = total - y * 12;
+    if (y < CALENDAR_MIN_YEAR) return { year: CALENDAR_MIN_YEAR, month: 0 };
+    if (y > CALENDAR_MAX_YEAR) return { year: CALENDAR_MAX_YEAR, month: 11 };
+    return { year: y, month: m };
+  }
+
+  // The years the menu offers: a generous span around today, always widened to
+  // include whatever year is on screen. That last part is what lets the year
+  // arrows keep walking past the end of the list instead of stopping at it.
+  function calendarYearOptions(shown, thisYear) {
+    var from = Math.max(CALENDAR_MIN_YEAR, Math.min(shown, thisYear - 40));
+    var to = Math.min(CALENDAR_MAX_YEAR, Math.max(shown, thisYear + 5));
+    var years = [];
+    for (var y = from; y <= to; y++) years.push(y);
+    return years;
+  }
+
+  // Six weeks of seven days, so the grid keeps its height as the months change
+  // and nothing underneath it jumps. The days either side of the month are drawn
+  // faint and stay selectable, because reaching the 1st from the end of the
+  // previous month is how people actually move a day forward.
+  function calendarCells(year, month) {
+    var lead = new Date(year, month, 1).getDay();
+    var cells = [];
+    for (var i = 0; i < 42; i++) {
+      var d = new Date(year, month, 1 - lead + i);
+      cells.push({
+        iso: isoDate(d.getFullYear(), d.getMonth(), d.getDate()),
+        day: d.getDate(),
+        outside: d.getMonth() !== month
+      });
+    }
+    return cells;
+  }
+
+  function audienceDateFieldHtml(spec, value) {
+    return (
+      '<div class="field date-field" data-date-field="' + spec.key + '">' +
+      "<span>" + esc(spec.label) + "</span>" +
+      '<div class="pick-entry date-entry">' +
+      '<input type="text" data-date-input="' + spec.key + '" value="' + esc(value || "") +
+      '" placeholder="YYYY-MM-DD (optional)" inputmode="numeric" autocomplete="off" ' +
+      'maxlength="10" aria-label="' + esc(spec.label) + '" />' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-date-open="' + spec.key +
+      '" aria-label="Open the calendar for ' + esc(spec.label.toLowerCase()) + '">Calendar</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-date-clear="' + spec.key +
+      '" aria-label="Clear ' + esc(spec.label.toLowerCase()) + '">Clear</button>' +
+      "</div>" +
+      '<div class="date-pop" data-date-pop="' + spec.key + '" hidden></div>' +
+      '<p class="pick-note" data-date-note="' + spec.key + '"></p>' +
+      "</div>"
+    );
+  }
+
+  function renderCalendar(key) {
+    var pop = document.querySelector('[data-date-pop="' + key + '"]');
+    if (!pop) return;
+    var g = growState();
+    var cal = g.calendar;
+    if (!cal || cal.key !== key) {
+      pop.hidden = true;
+      pop.innerHTML = "";
+      return;
+    }
+    var now = new Date();
+    var thisYear = now.getFullYear();
+    var todayIso = isoDate(thisYear, now.getMonth(), now.getDate());
+    var selected = parseAudienceDate(g.filter[key]);
+
+    pop.hidden = false;
+    pop.innerHTML =
+      '<div class="cal-head">' +
+      '<button type="button" class="cal-step" data-cal-move="-12" aria-label="Back one year" title="Back one year">«</button>' +
+      '<button type="button" class="cal-step" data-cal-move="-1" aria-label="Back one month" title="Back one month">‹</button>' +
+      '<select class="cal-pick" data-cal-month aria-label="Month">' +
+      MONTH_NAMES.map(function (name, i) {
+        return '<option value="' + i + '"' + (i === cal.month ? " selected" : "") + ">" +
+          esc(name) + "</option>";
+      }).join("") +
+      "</select>" +
+      '<select class="cal-pick" data-cal-year aria-label="Year">' +
+      calendarYearOptions(cal.year, thisYear)
+        .map(function (y) {
+          return '<option value="' + y + '"' + (y === cal.year ? " selected" : "") + ">" +
+            y + "</option>";
+        })
+        .join("") +
+      "</select>" +
+      '<button type="button" class="cal-step" data-cal-move="1" aria-label="Forward one month" title="Forward one month">›</button>' +
+      '<button type="button" class="cal-step" data-cal-move="12" aria-label="Forward one year" title="Forward one year">»</button>' +
+      "</div>" +
+      '<div class="cal-grid">' +
+      DOW_NAMES.map(function (d) { return '<span class="cal-dow">' + d + "</span>"; }).join("") +
+      calendarCells(cal.year, cal.month)
+        .map(function (cell) {
+          var classes = ["cal-day"];
+          if (cell.outside) classes.push("outside");
+          if (cell.iso === todayIso) classes.push("today");
+          if (selected && cell.iso === selected) classes.push("chosen");
+          return '<button type="button" class="' + classes.join(" ") + '" data-cal-day="' +
+            cell.iso + '" aria-label="' + cell.iso + '">' + cell.day + "</button>";
+        })
+        .join("") +
+      "</div>" +
+      '<div class="cal-foot">' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-cal-today>Today</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-cal-clear>Clear date</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-cal-close>Done</button>' +
+      "</div>";
+  }
+
+  // Which date field a control inside a calendar belongs to.
+  function audienceDateFieldKey(node) {
+    var field = node && node.closest ? node.closest("[data-date-field]") : null;
+    return field ? field.dataset.dateField : "";
+  }
+
+  function openAudienceCalendar(key) {
+    var g = growState();
+    if (g.calendar && g.calendar.key === key) {
+      closeAudienceCalendar();
+      return;
+    }
+    closeAudienceCalendar();
+    // Opened on the month of the date already in the box, or on this month when
+    // the box is empty. Opening on this month is not the same as filling the box
+    // in: nothing is chosen until a day is tapped.
+    var current = parseAudienceDate(g.filter[key]);
+    var year, month;
+    if (current) {
+      year = Number(current.slice(0, 4));
+      month = Number(current.slice(5, 7)) - 1;
+    } else {
+      var now = new Date();
+      year = now.getFullYear();
+      month = now.getMonth();
+    }
+    g.calendar = { key: key, year: year, month: month };
+    renderCalendar(key);
+  }
+
+  function closeAudienceCalendar() {
+    var g = state.grow;
+    if (!g || !g.calendar) return;
+    var key = g.calendar.key;
+    g.calendar = null;
+    var pop = document.querySelector('[data-date-pop="' + key + '"]');
+    if (pop) {
+      pop.hidden = true;
+      pop.innerHTML = "";
+    }
+  }
+
+  function moveAudienceCalendar(months) {
+    var g = growState();
+    if (!g.calendar) return;
+    var next = shiftCalendar(g.calendar.year, g.calendar.month, months);
+    g.calendar.year = next.year;
+    g.calendar.month = next.month;
+    renderCalendar(g.calendar.key);
+  }
+
+  // Show a given month without touching what is chosen. This is what the month
+  // and year menus do: changing the year on screen must not change, invent or
+  // clear the date in the box.
+  function showCalendarMonth(year, month) {
+    var g = growState();
+    if (!g.calendar) return;
+    var next = shiftCalendar(year, month, 0);
+    g.calendar.year = next.year;
+    g.calendar.month = next.month;
+    renderCalendar(g.calendar.key);
+  }
+
+  // Put a date in a field, or take it out again when iso is empty. Both go
+  // through here so the box, the filter and the counts can never disagree.
+  function setAudienceDate(key, iso) {
+    if (!key) return;
+    var g = growState();
+    var value = iso || "";
+    var input = document.querySelector('[data-date-input="' + key + '"]');
+    if (input) input.value = value;
+    var note = document.querySelector('[data-date-note="' + key + '"]');
+    if (note) note.textContent = "";
+    if (g.filter[key] === value) return;
+    g.filter[key] = value;
+    scheduleAudienceCount();
+  }
+
+  // What is being typed, applied the moment it is a real date and taken as "no
+  // restriction" the moment the box is empty. Nothing is written back into the
+  // box here — reformatting somebody's half-typed date under the cursor is what
+  // makes a date field impossible to edit.
+  function typeAudienceDate(key, text) {
+    var g = growState();
+    var note = document.querySelector('[data-date-note="' + key + '"]');
+    var trimmed = String(text == null ? "" : text).trim();
+    if (!trimmed) {
+      if (note) note.textContent = "";
+      if (g.filter[key] !== "") {
+        g.filter[key] = "";
+        scheduleAudienceCount();
+      }
+      return;
+    }
+    var parsed = parseAudienceDate(trimmed);
+    // Half a date is not an error yet, so nothing is said while it is being
+    // typed. The complaint, if there is one, comes when the box is left.
+    if (!parsed) return;
+    if (note) note.textContent = "";
+    if (g.filter[key] !== parsed) {
+      g.filter[key] = parsed;
+      scheduleAudienceCount();
+    }
+    if (g.calendar && g.calendar.key === key) {
+      showCalendarMonth(Number(parsed.slice(0, 4)), Number(parsed.slice(5, 7)) - 1);
+    }
+  }
+
+  // Leaving the box. A good date is tidied into YYYY-MM-DD, an empty box means
+  // no restriction, and something that is not a date is left exactly as typed
+  // with the restriction lifted and a line saying so — replacing it with today,
+  // or with the last date that worked, would hide the typo instead of letting it
+  // be corrected.
+  function settleAudienceDate(key, input) {
+    var g = growState();
+    var note = document.querySelector('[data-date-note="' + key + '"]');
+    var trimmed = String(input.value || "").trim();
+    if (!trimmed) {
+      input.value = "";
+      if (note) note.textContent = "";
+      if (g.filter[key] !== "") {
+        g.filter[key] = "";
+        scheduleAudienceCount();
+      }
+      return;
+    }
+    var parsed = parseAudienceDate(trimmed);
+    if (!parsed) {
+      if (note) {
+        note.textContent = "That is not a date yet, so no service-date limit is being applied. " +
+          "Try 2026-08-19, or use the calendar.";
+      }
+      if (g.filter[key] !== "") {
+        g.filter[key] = "";
+        scheduleAudienceCount();
+      }
+      return;
+    }
+    input.value = parsed;
+    if (note) note.textContent = "";
+    if (g.filter[key] !== parsed) {
+      g.filter[key] = parsed;
+      scheduleAudienceCount();
+    }
+  }
+
+  // --- Wiring, reading and counting ----------------------------------------
+
+  function bindAudienceForm() {
+    var channel = document.getElementById("gr-channel");
+    if (channel) channel.addEventListener("change", readAudienceForm);
+    var service = document.getElementById("gr-service");
+    if (service) service.addEventListener("change", readAudienceForm);
+    var notBooked = document.getElementById("gr-notbooked");
+    if (notBooked) {
+      notBooked.addEventListener("input", readAudienceForm);
+      notBooked.addEventListener("change", readAudienceForm);
+    }
+    var never = document.getElementById("gr-never");
+    if (never) never.addEventListener("change", readAudienceForm);
+
+    AUDIENCE_LISTS.forEach(function (spec) {
+      var typed = document.querySelector('[data-pick-type="' + spec.key + '"]');
+      if (!typed) return;
+      // A comma is how a list is written, so it commits whatever is in front of
+      // it and leaves the box ready for the next value.
+      typed.addEventListener("input", function () {
+        if (this.value.indexOf(",") === -1) return;
+        var parts = this.value.split(",");
+        var tail = parts.pop();
+        parts.forEach(function (part) {
+          if (String(part).trim()) addAudienceListValue(spec.key, part);
+        });
+        this.value = tail;
+      });
+      typed.addEventListener("blur", function () { commitAudienceListEntry(spec.key); });
+    });
+
+    AUDIENCE_DATES.forEach(function (spec) {
+      var input = document.querySelector('[data-date-input="' + spec.key + '"]');
+      if (!input) return;
+      input.addEventListener("input", function () { typeAudienceDate(spec.key, this.value); });
+      input.addEventListener("blur", function () { settleAudienceDate(spec.key, this); });
+    });
+  }
+
+  // The plain controls, read off the form. The lists and the dates are not read
+  // here: they are kept in the filter by their own handlers, because a chip that
+  // was removed has no box left to read it out of.
+  function readAudienceForm() {
+    var f = growState().filter;
+    f.channel = val("gr-channel") || "any";
+    f.service = val("gr-service");
+    f.notBookedDays = val("gr-notbooked");
+    var never = document.getElementById("gr-never");
+    f.includeNeverBooked = never ? never.checked : true;
+    var clearService = document.querySelector("[data-audience-clear-service]");
+    if (clearService) clearService.disabled = !f.service;
+    scheduleAudienceCount();
+  }
+
+  function clearAudienceService() {
+    var select = document.getElementById("gr-service");
+    if (select) select.value = "";
+    growState().filter.service = "";
+    var button = document.querySelector("[data-audience-clear-service]");
+    if (button) button.disabled = true;
+    scheduleAudienceCount();
+  }
+
+  // Clear filters. Every optional restriction goes back to its widest setting,
+  // which means no restriction rather than match-nobody: no locations, no
+  // service, no dates, no booking cutoff, and households that have never booked
+  // counted in again. The card is redrawn from that filter and recounted, so the
+  // office sees its whole reachable customer base come back.
+  function resetAudienceFilter() {
+    var g = growState();
+    closeAudienceCalendar();
+    g.filter = defaultAudienceFilter();
+    var panel = document.getElementById("grow-panel");
+    if (panel) renderGrowAudience(panel);
+    toast("Filters cleared. Every customer who may be contacted is back in the audience.");
+  }
+
+  function scheduleAudienceCount() {
+    var g = growState();
+    clearTimeout(g.countTimer);
+    g.countTimer = setTimeout(loadAudience, 300);
+  }
+
+  // The filter as the API wants it. The server rebuilds and sanitises all of it
+  // again, so this is convenience rather than protection.
   function audiencePayload() {
     var f = growState().filter;
     return {
       channel: f.channel,
       service: f.service,
-      zips: f.zips ? f.zips.split(/[,\s]+/).filter(Boolean) : [],
-      cities: f.cities ? f.cities.split(/\s*,\s*/).filter(Boolean) : [],
+      zips: f.zips.slice(),
+      cities: f.cities.slice(),
       lastServiceFrom: f.lastServiceFrom,
       lastServiceTo: f.lastServiceTo,
       notBookedDays: f.notBookedDays ? Number(f.notBookedDays) : null,
@@ -3531,6 +4164,7 @@
     var counts = document.getElementById("gr-counts");
     var preview = document.getElementById("gr-preview");
     if (!counts) return;
+    var restrictions = audienceRestrictionCount();
     counts.innerHTML = '<div class="loading">Counting…</div>';
     api("marketing/audience", { method: "POST", body: { audience: audiencePayload() } })
       .then(function (d) {
@@ -3539,13 +4173,20 @@
         g.preview = d.preview;
         counts.innerHTML =
           '<div class="stat-grid">' +
-          stat("In this audience", d.counts.total) +
+          stat("Customers in audience", d.counts.total) +
           stat("Can be texted", d.counts.sms) +
           stat("Can be emailed", d.counts.email) +
           stat("Both", d.counts.both) +
           "</div>" +
-          '<div class="card"><p class="hint">' + esc(d.label) + "</p>" +
+          '<div class="card grow-actions"><p class="hint">' + esc(d.label) +
+          (restrictions
+            ? " · " + restrictions + (restrictions === 1 ? " filter" : " filters") + " in force"
+            : " · no filters in force") +
+          "</p>" +
           '<button type="button" class="btn btn-primary btn-sm" data-grow-new>Build a campaign for this audience</button>' +
+          (restrictions
+            ? '<button type="button" class="btn btn-ghost btn-sm" data-audience-reset>Clear filters</button>'
+            : "") +
           "</div>";
         preview.innerHTML = d.preview.length
           ? '<div class="card"><h3>A sample of this audience</h3><table><thead><tr><th>Name</th>' +
@@ -3562,7 +4203,11 @@
             "</tbody></table>" +
             '<p class="hint">Contact details are deliberately not listed here. The count above is what the ' +
             "campaign will send to.</p></div>"
-          : '<div class="card"><p class="empty">Nobody matches those filters yet.</p></div>';
+          : '<div class="card"><p class="empty">' +
+            (restrictions
+              ? "Nobody matches those filters. Clear filters to bring the whole reachable customer base back."
+              : "There is nobody on file who may be contacted yet.") +
+            "</p></div>";
       })
       .catch(function (e) {
         counts.innerHTML = '<div class="card"><p class="empty">' +
@@ -3603,7 +4248,12 @@
 
     panel.innerHTML =
       '<div class="card grow-filters">' +
+      '<div class="row-between filter-head">' +
       '<h3 class="section-title">Who to reach</h3>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-cm-reset' +
+      (chosen.length || g.cm.channel !== "any" ? "" : " disabled") +
+      ">Clear filters</button>" +
+      "</div>" +
       '<div class="segment-grid">' +
       (cm.segments || [])
         .map(function (segment) {
@@ -3639,6 +4289,8 @@
     if (channel) {
       channel.addEventListener("change", function () {
         g.cm.channel = this.value || "any";
+        var reset = document.querySelector("[data-cm-reset]");
+        if (reset) reset.disabled = !g.cm.segments.length && g.cm.channel === "any";
         loadCustomerMarketingCount();
       });
     }
@@ -3740,6 +4392,17 @@
       });
   }
 
+  // Clear filters on the customer-marketing tab: every ticked segment comes off
+  // and the channel goes back to its widest setting, so the count returns to
+  // every customer who may lawfully be contacted rather than to nobody.
+  function resetCustomerMarketing() {
+    var g = growState();
+    g.cm.segments = [];
+    g.cm.channel = "any";
+    renderGrowPanel();
+    toast("Filters cleared. Every customer who may be contacted is back in the count.");
+  }
+
   function toggleCustomerSegment(value, on) {
     var cm = growState().cm;
     var at = cm.segments.indexOf(value);
@@ -3749,6 +4412,8 @@
     if (label && label.parentNode) {
       label.parentNode.className = "segment" + (on ? " chosen" : "");
     }
+    var reset = document.querySelector("[data-cm-reset]");
+    if (reset) reset.disabled = !cm.segments.length && cm.channel === "any";
     clearTimeout(cm.timer);
     cm.timer = setTimeout(loadCustomerMarketingCount, 250);
   }
@@ -6850,11 +7515,31 @@
       // Choosing Management Specialist takes the code boxes off the form.
       if (ev.target.id === "m-role") syncAddCrewForm();
     });
+    // Enter confirms a typed ZIP code, town or date without leaving the keyboard,
+    // which is how a list gets typed straight through on a phone. It is caught
+    // here rather than on the boxes themselves because the boxes are redrawn.
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      var pick = e.target.closest ? e.target.closest("[data-pick-type]") : null;
+      if (pick) {
+        e.preventDefault();
+        commitAudienceListEntry(pick.dataset.pickType);
+        return;
+      }
+      var date = e.target.closest ? e.target.closest("[data-date-input]") : null;
+      if (date) {
+        e.preventDefault();
+        settleAudienceDate(date.dataset.dateInput, date);
+        closeAudienceCalendar();
+      }
+    });
     document.addEventListener("keydown", function (e) {
       if (e.key !== "Escape") return;
       // The forced code change has no way out but changing the code or signing
       // out, so Escape does not dismiss it.
       if (forcingPinChange) return;
+      // An open calendar is the innermost thing on screen, so it goes first.
+      if (state.grow && state.grow.calendar) { closeAudienceCalendar(); return; }
       if (!document.getElementById("modal").hidden) { closeModal(); return; }
       if (!document.getElementById("import").hidden) closeImport();
     });
@@ -6873,6 +7558,28 @@
     document.body.addEventListener("change", function (e) {
       var box = e.target.closest ? e.target.closest("[data-cm-segment]") : null;
       if (box) toggleCustomerSegment(box.dataset.cmSegment, box.checked);
+    });
+    // The audience menus: picking a ZIP code or town off the list, and moving the
+    // calendar's month or year. Delegated because the calendar is rebuilt every
+    // time it moves, so a listener bound to its menus would not survive the move.
+    document.body.addEventListener("change", function (e) {
+      if (!e.target.closest) return;
+      var add = e.target.closest("[data-pick-add]");
+      if (add) {
+        if (add.value) addAudienceListValue(add.dataset.pickAdd, add.value);
+        add.value = "";
+        return;
+      }
+      var head = e.target.closest(".cal-head");
+      if (head && (e.target.closest("[data-cal-month]") || e.target.closest("[data-cal-year]"))) {
+        // Both menus are read together, so the month showing is always the pair
+        // that is on screen — whichever of the two was just changed.
+        var monthPick = head.querySelector("[data-cal-month]");
+        var yearPick = head.querySelector("[data-cal-year]");
+        if (monthPick && yearPick) {
+          showCalendarMonth(Number(yearPick.value), Number(monthPick.value));
+        }
+      }
     });
 
     document.body.addEventListener("click", function (e) {
@@ -6959,6 +7666,62 @@
       var row = e.target.closest("[data-job]");
       if (row) { openJob(Number(row.dataset.job)); return; }
 
+      // --- Audience filters ---
+      // Taken before the rest of Grow so that a tap inside the calendar is never
+      // read as a tap on the card behind it.
+      var chipOff = e.target.closest("[data-pick-remove]");
+      if (chipOff) {
+        removeAudienceListValue(chipOff.dataset.pickRemove, chipOff.dataset.pickValue);
+        return;
+      }
+      var listOff = e.target.closest("[data-pick-clear]");
+      if (listOff) { clearAudienceList(listOff.dataset.pickClear); return; }
+      var listAdd = e.target.closest("[data-pick-commit]");
+      if (listAdd) { commitAudienceListEntry(listAdd.dataset.pickCommit); return; }
+      if (e.target.closest("[data-audience-clear-service]")) { clearAudienceService(); return; }
+      if (e.target.closest("[data-audience-reset]")) { resetAudienceFilter(); return; }
+      var dateOpen = e.target.closest("[data-date-open]");
+      if (dateOpen) { openAudienceCalendar(dateOpen.dataset.dateOpen); return; }
+      var dateOff = e.target.closest("[data-date-clear]");
+      if (dateOff) {
+        setAudienceDate(dateOff.dataset.dateClear, "");
+        closeAudienceCalendar();
+        return;
+      }
+      var calMove = e.target.closest("[data-cal-move]");
+      if (calMove) { moveAudienceCalendar(Number(calMove.dataset.calMove)); return; }
+      // Which field a calendar belongs to is read off the field it sits in rather
+      // than out of the open-calendar state, so a stale tap cannot land on the
+      // wrong date box.
+      var calDay = e.target.closest("[data-cal-day]");
+      if (calDay) {
+        setAudienceDate(audienceDateFieldKey(calDay), calDay.dataset.calDay);
+        closeAudienceCalendar();
+        return;
+      }
+      var calToday = e.target.closest("[data-cal-today]");
+      if (calToday) {
+        var now = new Date();
+        setAudienceDate(
+          audienceDateFieldKey(calToday),
+          isoDate(now.getFullYear(), now.getMonth(), now.getDate())
+        );
+        closeAudienceCalendar();
+        return;
+      }
+      var calOff = e.target.closest("[data-cal-clear]");
+      if (calOff) {
+        setAudienceDate(audienceDateFieldKey(calOff), "");
+        closeAudienceCalendar();
+        return;
+      }
+      if (e.target.closest("[data-cal-close]")) { closeAudienceCalendar(); return; }
+      // A tap anywhere else on the page puts the calendar away. Taps inside a
+      // date field are excluded, so using its own menus does not close it.
+      if (state.grow && state.grow.calendar && !e.target.closest(".date-field")) {
+        closeAudienceCalendar();
+      }
+
       // --- Grow ---
       var growTab = e.target.closest("[data-grow-tab]");
       if (growTab) {
@@ -6968,6 +7731,7 @@
         return;
       }
       if (e.target.closest("[data-grow-new]")) { newCampaign(); return; }
+      if (e.target.closest("[data-cm-reset]")) { resetCustomerMarketing(); return; }
       if (e.target.closest("[data-cm-campaign]")) { buildCustomerCampaign(); return; }
       if (e.target.closest("[data-cm-manual]")) { startManualSmsRun(); return; }
       if (e.target.closest("[data-manual-sent]")) { markManualSmsSent(); return; }
