@@ -128,6 +128,40 @@ const MAX_DURATION_MINUTES = 12 * 60;
 const DEFAULT_DURATION_MINUTES = 120;
 const MAX_BACKDATE_DAYS = 30;
 const MAX_LEAD_DAYS = 540;
+
+const CORE_SERVICE_CITIES = [
+  "stone mountain", "riverdale", "south clayton", "jonesboro", "morrow", "stockbridge"
+];
+const CORE_SERVICE_ZIPS = [
+  "30083", "30087", "30088", "30236", "30238", "30250", "30260",
+  "30273", "30274", "30281", "30296"
+];
+
+function serviceAreaZone(row: { city?: string | null; state?: string | null; zip?: string | null }) {
+  const city = String(row.city || "").trim().toLowerCase();
+  const state = String(row.state || "").trim().toLowerCase();
+  const zip = (String(row.zip || "").match(/\d{5}/) || [""])[0];
+  const georgia = !state || state === "ga" || state === "georgia";
+  return georgia && (CORE_SERVICE_CITIES.includes(city) || CORE_SERVICE_ZIPS.includes(zip))
+    ? "core_service_area"
+    : "extended_area_sales_lead";
+}
+
+function leadAttention(row: {
+  status: string;
+  submittedAt?: Date | null;
+  updatedAt?: Date | null;
+  nextFollowUpAt?: Date | null;
+}) {
+  if (["scheduled", "completed", "lost"].includes(row.status)) return "closed";
+  const now = Date.now();
+  if (row.nextFollowUpAt) {
+    return new Date(row.nextFollowUpAt).getTime() <= now ? "due" : "scheduled";
+  }
+  const anchor = new Date(row.updatedAt || row.submittedAt || 0).getTime();
+  const wait = row.status === "new" ? 15 * 60 * 1000 : row.status === "contacted" ? 24 * 60 * 60 * 1000 : 48 * 60 * 60 * 1000;
+  return anchor && anchor + wait <= now ? "due" : "waiting";
+}
 const MAX_LINE_ITEMS = 40;
 const MAX_UNIT_PRICE_CENTS = 1000000;
 const MAX_JOB_TOTAL_CENTS = 5000000;
@@ -3174,6 +3208,8 @@ export default async (req: Request, context: Context) => {
       const from = (url.searchParams.get("from") || "").trim();
       const to = (url.searchParams.get("to") || "").trim();
       const q = (url.searchParams.get("q") || "").trim();
+      const zone = (url.searchParams.get("zone") || "").trim();
+      const attention = (url.searchParams.get("attention") || "").trim();
 
       // Everything except the status chips, so the count on each chip says how
       // many requests that chip would show under the filters already in force.
@@ -3207,6 +3243,26 @@ export default async (req: Request, context: Context) => {
         );
       }
 
+      const coreAreaSql = sql`(
+        lower(trim(coalesce(${leads.state}, ''))) in ('', 'ga', 'georgia')
+        and (
+          lower(trim(coalesce(${leads.city}, ''))) in ('stone mountain','riverdale','south clayton','jonesboro','morrow','stockbridge')
+          or substring(coalesce(${leads.zip}, '') from '[0-9]{5}') in ('30083','30087','30088','30236','30238','30250','30260','30273','30274','30281','30296')
+        )
+      )`;
+      if (zone === "core_service_area") base.push(coreAreaSql);
+      if (zone === "extended_area_sales_lead") base.push(sql`not ${coreAreaSql}`);
+      if (attention === "due") {
+        base.push(sql`${leads.status} in ('new','contacted','estimate_sent') and (
+          (${leads.nextFollowUpAt} is not null and ${leads.nextFollowUpAt} <= now())
+          or (${leads.nextFollowUpAt} is null and (
+            (${leads.status} = 'new' and ${leads.submittedAt} <= now() - interval '15 minutes')
+            or (${leads.status} = 'contacted' and ${leads.updatedAt} <= now() - interval '24 hours')
+            or (${leads.status} = 'estimate_sent' and ${leads.updatedAt} <= now() - interval '48 hours')
+          ))
+        )`);
+      }
+
       const conditions = base.filter((part): part is SQL => Boolean(part));
       const baseFilter = conditions.length ? and(...conditions) : undefined;
       const statusFilter =
@@ -3237,6 +3293,8 @@ export default async (req: Request, context: Context) => {
           customerNotes: leads.customerNotes,
           submittedAt: leads.submittedAt,
           updatedAt: leads.updatedAt,
+          nextFollowUpAt: leads.nextFollowUpAt,
+          lastContactedAt: leads.lastContactedAt,
           assignedName: employees.name
         })
         .from(leads)
@@ -3278,6 +3336,8 @@ export default async (req: Request, context: Context) => {
           ...row,
           sourceLabel: leadSourceLabel(row.source),
           statusLabel: leadStatusLabel(row.status),
+          serviceAreaZone: serviceAreaZone(row),
+          attention: leadAttention(row),
           isTest: isTestLead(row)
         })),
         byStatus,
@@ -3349,6 +3409,29 @@ export default async (req: Request, context: Context) => {
         }
         updates.status = body.status;
         changed.push(`status to ${leadStatusLabel(body.status)}`);
+        if (["scheduled", "completed", "lost"].includes(body.status)) updates.nextFollowUpAt = null;
+      }
+
+      if (body.markContacted === true) {
+        const contactedAt = new Date();
+        updates.lastContactedAt = contactedAt;
+        updates.status = existing.status === "new" ? "contacted" : existing.status;
+        updates.nextFollowUpAt = new Date(contactedAt.getTime() + 24 * 60 * 60 * 1000);
+        changed.push("customer as contacted and follow-up for tomorrow");
+      }
+
+      if (body.nextFollowUpAt !== undefined) {
+        if (body.nextFollowUpAt === null || body.nextFollowUpAt === "") {
+          updates.nextFollowUpAt = null;
+          changed.push("follow-up reminder");
+        } else {
+          const followUp = new Date(String(body.nextFollowUpAt));
+          if (!Number.isFinite(followUp.getTime())) {
+            return json({ error: "Choose a valid follow-up time" }, { status: 400 });
+          }
+          updates.nextFollowUpAt = followUp;
+          changed.push(`follow-up for ${followUp.toLocaleString("en-US")}`);
+        }
       }
 
       if (body.assignedTo !== undefined) {
@@ -3657,6 +3740,8 @@ async function loadLead(id: number) {
       assignedName: lead.assignedName,
       sourceLabel: leadSourceLabel(lead.lead.source),
       statusLabel: leadStatusLabel(lead.lead.status),
+      serviceAreaZone: serviceAreaZone(lead.lead),
+      attention: leadAttention(lead.lead),
       isTest: isTestLead(lead.lead)
     },
     customer: customer || null,
@@ -4221,6 +4306,18 @@ async function buildDashboard(view: {
           .from(intakeFailures)
           .where(eq(intakeFailures.status, "open"));
 
+        const [followUpsDue] = await db
+          .select({ count: sql<number>`cast(count(*) as int)` })
+          .from(leads)
+          .where(sql`${leads.status} in ('new','contacted','estimate_sent') and (
+            (${leads.nextFollowUpAt} is not null and ${leads.nextFollowUpAt} <= now())
+            or (${leads.nextFollowUpAt} is null and (
+              (${leads.status} = 'new' and ${leads.submittedAt} <= now() - interval '15 minutes')
+              or (${leads.status} = 'contacted' and ${leads.updatedAt} <= now() - interval '24 hours')
+              or (${leads.status} = 'estimate_sent' and ${leads.updatedAt} <= now() - interval '48 hours')
+            ))
+          )`);
+
         // The newest requests nobody has touched yet, so the dashboard shows
         // work to pick up rather than only work already booked.
         const newLeads = await db
@@ -4250,7 +4347,8 @@ async function buildDashboard(view: {
               (leadsByStatus.new || 0) +
               (leadsByStatus.contacted || 0) +
               (leadsByStatus.estimate_sent || 0),
-            failedImports: openIntakeFailures?.count || 0
+            failedImports: openIntakeFailures?.count || 0,
+            followUpsDue: followUpsDue?.count || 0
           },
           newLeads: newLeads.map((row) => ({
             ...row,

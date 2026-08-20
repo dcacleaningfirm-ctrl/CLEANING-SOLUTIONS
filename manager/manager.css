@@ -228,6 +228,28 @@ tbody tr.clickable:hover { background: var(--surface-2); }
   border: 1px solid transparent;
   white-space: nowrap;
 }
+
+.pill.area-core {
+  color: var(--green);
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.28);
+}
+.pill.area-extended {
+  color: var(--sky);
+  background: rgba(56, 189, 248, 0.12);
+  border-color: rgba(56, 189, 248, 0.28);
+}
+.pill.follow-due {
+  color: #fff;
+  background: rgba(248, 113, 113, 0.28);
+  border-color: var(--red);
+}
+.pill.follow-set {
+  color: var(--amber);
+  background: rgba(251, 191, 36, 0.1);
+  border-color: rgba(251, 191, 36, 0.28);
+}
+.lead-follow-actions { margin: 12px 0 18px; }
 .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .pill.scheduled { color: var(--sky); background: rgba(56, 189, 248, 0.12); }
 .pill.en_route { color: var(--violet); background: rgba(167, 139, 250, 0.12); }

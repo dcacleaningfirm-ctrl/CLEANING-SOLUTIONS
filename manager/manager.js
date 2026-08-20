@@ -56,7 +56,7 @@
     // debounce timer behind the search box, and the source/status vocabulary
     // the server sent — which is what the filter menus are built from, so a new
     // source appears here without this file changing.
-    leadFilters: { status: "", source: "", service: "", promotion: "", from: "", to: "", q: "" },
+    leadFilters: { status: "", source: "", service: "", promotion: "", zone: "", attention: "", from: "", to: "", q: "" },
     leadTimer: null,
     leadVocab: null,
     lead: null,
@@ -603,6 +603,7 @@
           ? '<div class="stat-grid lead-stats">' +
             stat("New leads today", leadStats.newToday) +
             stat("Website leads", leadStats.website) +
+            stat("Follow-ups due", leadStats.followUpsDue || 0) +
             stat("Scheduled", leadStats.scheduled) +
             stat("Completed", leadStats.completed) +
             "</div>"
@@ -1144,6 +1145,10 @@
       '<label class="field"><span>Lead source</span><select id="lf-source"></select></label>' +
       '<label class="field"><span>Service</span><select id="lf-service"></select></label>' +
       '<label class="field"><span>Promotion code</span><select id="lf-promotion"></select></label>' +
+      '<label class="field"><span>Service zone</span><select id="lf-zone"><option value="">Every zone</option>' +
+      '<option value="core_service_area">Core service area</option><option value="extended_area_sales_lead">Extended-area sales leads</option></select></label>' +
+      '<label class="field"><span>Follow-up</span><select id="lf-attention"><option value="">All follow-ups</option>' +
+      '<option value="due">Due now</option></select></label>' +
       '<label class="field"><span>From</span><input id="lf-from" type="date" value="' + esc(f.from) + '" /></label>' +
       '<label class="field"><span>To</span><input id="lf-to" type="date" value="' + esc(f.to) + '" /></label>' +
       "</div>" +
@@ -1153,7 +1158,7 @@
   }
 
   function wireLeadFilters() {
-    ["lf-source", "lf-service", "lf-promotion", "lf-from", "lf-to"].forEach(function (id) {
+    ["lf-source", "lf-service", "lf-promotion", "lf-zone", "lf-attention", "lf-from", "lf-to"].forEach(function (id) {
       var field = document.getElementById(id);
       if (!field) return;
       field.addEventListener("change", function () {
@@ -1172,7 +1177,7 @@
     });
     document.getElementById("lf-clear").addEventListener("click", function () {
       state.leadFilters = emptyLeadFilters();
-      ["lf-q", "lf-source", "lf-service", "lf-promotion", "lf-from", "lf-to"].forEach(function (id) {
+      ["lf-q", "lf-source", "lf-service", "lf-promotion", "lf-zone", "lf-attention", "lf-from", "lf-to"].forEach(function (id) {
         var field = document.getElementById(id);
         if (field) field.value = "";
       });
@@ -1182,7 +1187,7 @@
   }
 
   function emptyLeadFilters() {
-    return { status: "", source: "", service: "", promotion: "", from: "", to: "", q: "" };
+    return { status: "", source: "", service: "", promotion: "", zone: "", attention: "", from: "", to: "", q: "" };
   }
 
   function leadQuery() {
@@ -1203,6 +1208,8 @@
       fillLeadSelect("lf-source", d.sources, state.leadFilters.source, "Every source");
       fillLeadSelect("lf-service", plainOptions(d.services), state.leadFilters.service, "Every service");
       fillLeadSelect("lf-promotion", plainOptions(d.promotions), state.leadFilters.promotion, "Every promotion");
+      document.getElementById("lf-zone").value = state.leadFilters.zone;
+      document.getElementById("lf-attention").value = state.leadFilters.attention;
       list.innerHTML =
         leadStatusChips(d) + '<div id="lead-failures"></div>' + leadsTable(d.leads);
       if (d.openFailures) renderIntakeFailures();
@@ -1260,16 +1267,16 @@
     }
     return (
       '<div class="card"><table><thead><tr><th>Customer</th><th>Phone</th><th>Service</th>' +
-      '<th>Promotion</th><th class="right">Quoted</th><th>Source</th><th>Submitted</th><th>Status</th></tr></thead><tbody>' +
+      '<th>Area</th><th>Follow-up</th><th class="right">Quoted</th><th>Source</th><th>Status</th></tr></thead><tbody>' +
       rows
         .map(function (l) {
           return (
             '<tr class="clickable" data-lead="' + l.id + '"><td>' + esc(l.customerName) +
             (l.isTest ? ' <span class="pill test">Test</span>' : "") +
             "</td><td>" + phoneText(l.phone) + '</td><td class="muted">' + esc(l.service || "—") +
-            "</td><td>" + promoCell(l) + '</td><td class="right mono">' + fmtMoney(l.totalCents) +
-            '</td><td class="muted">' + esc(l.sourceLabel || l.source) + '</td><td class="muted">' +
-            fmtDate(l.submittedAt) + "</td><td>" + leadPill(l) + "</td></tr>"
+            "</td><td>" + serviceAreaPill(l) + "</td><td>" + followUpPill(l) +
+            '</td><td class="right mono">' + fmtMoney(l.totalCents) +
+            '</td><td class="muted">' + esc(l.sourceLabel || l.source) + '</td><td>' + leadPill(l) + "</td></tr>"
           );
         })
         .join("") +
@@ -1290,6 +1297,19 @@
     return (
       '<span class="pill lead-' + esc(l.status) + '">' + esc(l.statusLabel || l.status) + "</span>"
     );
+  }
+
+  function serviceAreaPill(l) {
+    var core = l.serviceAreaZone === "core_service_area";
+    return '<span class="pill ' + (core ? "area-core" : "area-extended") + '">' +
+      (core ? "Core" : "Extended") + "</span>";
+  }
+
+  function followUpPill(l) {
+    if (l.attention === "closed") return '<span class="muted">—</span>';
+    if (l.attention === "due") return '<span class="pill follow-due">Due now</span>';
+    if (l.nextFollowUpAt) return '<span class="pill follow-set">' + esc(fmtDate(l.nextFollowUpAt)) + "</span>";
+    return '<span class="muted">' + esc(timeAgo(l.submittedAt)) + "</span>";
   }
 
   // Requests that reached the site but could not be filed. Netlify still holds
@@ -1463,6 +1483,7 @@
       "<h2>" + esc(l.customerName) + "</h2>" +
       '<div class="lead-badges">' + leadPill(l) +
       '<span class="pill source">' + esc(l.sourceLabel || l.source) + "</span>" +
+      serviceAreaPill(l) + followUpPill(l) +
       (l.campaign ? '<span class="pill campaign">' + esc(l.campaign) + "</span>" : "") +
       (l.isTest ? '<span class="pill test">Test — do not schedule</span>' : "") +
       "</div>" +
@@ -1492,6 +1513,8 @@
       "</dd>" +
       (l.contactMethod ? "<dt>Best contact</dt><dd>" + esc(l.contactMethod) + "</dd>" : "") +
       "<dt>Submitted</dt><dd>" + fmtDate(l.submittedAt) + "</dd>" +
+      (l.lastContactedAt ? "<dt>Last contacted</dt><dd>" + fmtDate(l.lastContactedAt) + "</dd>" : "") +
+      (l.nextFollowUpAt ? "<dt>Next follow-up</dt><dd>" + fmtDate(l.nextFollowUpAt) + "</dd>" : "") +
       "</dl>" +
       leadQuantities(l) +
       (l.customerNotes
@@ -1499,6 +1522,11 @@
           esc(l.customerNotes) + "</p></div>"
         : "") +
       contactActions({ id: l.customerId, phone: l.phone, email: l.email }, null) +
+      '<div class="btn-row lead-follow-actions">' +
+      '<button type="button" class="btn btn-primary btn-sm" id="l-contacted">Mark contacted</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="l-follow-tomorrow">Follow up tomorrow</button>' +
+      (l.nextFollowUpAt ? '<button type="button" class="btn btn-ghost btn-sm" id="l-follow-clear">Clear reminder</button>' : "") +
+      "</div>" +
       // Booking it, or the job it already became.
       (data.job
         ? '<div class="card lead-booked"><h3 class="section-title">Booked</h3>' +
@@ -1517,6 +1545,18 @@
     });
     document.getElementById("l-assign").addEventListener("change", function () {
       patchLead(l.id, { assignedTo: this.value === "" ? null : Number(this.value) });
+    });
+    document.getElementById("l-contacted").addEventListener("click", function () {
+      patchLead(l.id, { markContacted: true });
+    });
+    document.getElementById("l-follow-tomorrow").addEventListener("click", function () {
+      var tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      tomorrow.setHours(9, 0, 0, 0);
+      patchLead(l.id, { nextFollowUpAt: tomorrow.toISOString() });
+    });
+    var clearFollow = document.getElementById("l-follow-clear");
+    if (clearFollow) clearFollow.addEventListener("click", function () {
+      patchLead(l.id, { nextFollowUpAt: null });
     });
     var convert = document.getElementById("l-convert");
     if (convert) {
