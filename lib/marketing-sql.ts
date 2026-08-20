@@ -245,6 +245,22 @@ export function audienceConditions(filter: AudienceFilter): SQL | null {
     );
   }
 
+  if (filter.excludeCampaignId) {
+    // Older automated sends live in campaign_recipients; hand-worked sends are
+    // also written to marketing_contacts. Checking both makes the exclusion
+    // dependable regardless of how the earlier campaign was delivered.
+    parts.push(sql`not exists (
+      select 1 from "campaign_recipients" cr
+      where cr."campaign_id" = ${filter.excludeCampaignId}
+        and cr."customer_id" = ${customers.id}
+    )`);
+    parts.push(sql`not exists (
+      select 1 from "marketing_contacts" mc
+      where mc."campaign_id" = ${filter.excludeCampaignId}
+        and mc."customer_id" = ${customers.id}
+    )`);
+  }
+
   if (!parts.length) return null;
   return sql`(${sql.join(parts, sql` and `)})`;
 }

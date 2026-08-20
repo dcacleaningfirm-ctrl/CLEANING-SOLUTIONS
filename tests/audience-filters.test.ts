@@ -50,6 +50,7 @@ test("a filter with nothing set restricts nothing", () => {
   assert.equal(DEFAULT_AUDIENCE.lastServiceTo, "");
   assert.equal(DEFAULT_AUDIENCE.notBookedDays, null);
   assert.equal(DEFAULT_AUDIENCE.includeNeverBooked, true);
+  assert.equal(DEFAULT_AUDIENCE.excludeCampaignId, null);
 
   const cleared = normalizeAudience({
     channel: "any",
@@ -59,7 +60,8 @@ test("a filter with nothing set restricts nothing", () => {
     lastServiceFrom: "",
     lastServiceTo: "",
     notBookedDays: "",
-    includeNeverBooked: true
+    includeNeverBooked: true,
+    excludeCampaignId: ""
   });
   assert.deepEqual(cleared, DEFAULT_AUDIENCE);
 });
@@ -194,6 +196,7 @@ test("Clear filters restores the widest filter rather than an empty one", () => 
   assert.match(defaults, /lastServiceTo: ""/);
   assert.match(defaults, /notBookedDays: ""/);
   assert.match(defaults, /includeNeverBooked: true/);
+  assert.match(defaults, /excludeCampaignId: ""/);
 });
 
 test("every change and every clearing triggers a recount", () => {

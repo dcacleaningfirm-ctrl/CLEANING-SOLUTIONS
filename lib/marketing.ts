@@ -306,6 +306,10 @@ export interface AudienceFilter {
   notBookedDays: number | null;
   // Whether accounts that have never booked anything count as "not recent".
   includeNeverBooked: boolean;
+  // Omit every customer recorded as a recipient/contact of this earlier
+  // campaign. This is enforced by the shared audience SQL, so previewing,
+  // counting and sending all use the same duplicate protection.
+  excludeCampaignId: number | null;
 }
 
 export const DEFAULT_AUDIENCE: AudienceFilter = {
@@ -317,7 +321,8 @@ export const DEFAULT_AUDIENCE: AudienceFilter = {
   lastServiceFrom: "",
   lastServiceTo: "",
   notBookedDays: null,
-  includeNeverBooked: true
+  includeNeverBooked: true,
+  excludeCampaignId: null
 };
 
 const MAX_LIST_VALUES = 60;
@@ -356,6 +361,7 @@ export function normalizeAudience(raw: unknown): AudienceFilter {
   const input = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const channel = String(input.channel || "any").trim().toLowerCase();
   const days = Number(input.notBookedDays);
+  const excludeCampaignId = Number(input.excludeCampaignId);
 
   return {
     channel: ["any", "sms", "email", "both"].includes(channel)
@@ -376,7 +382,11 @@ export function normalizeAudience(raw: unknown): AudienceFilter {
     lastServiceTo: readDate(input.lastServiceTo),
     notBookedDays:
       Number.isFinite(days) && days > 0 ? Math.min(Math.round(days), 3650) : null,
-    includeNeverBooked: input.includeNeverBooked !== false
+    includeNeverBooked: input.includeNeverBooked !== false,
+    excludeCampaignId:
+      Number.isSafeInteger(excludeCampaignId) && excludeCampaignId > 0
+        ? excludeCampaignId
+        : null
   };
 }
 
@@ -388,6 +398,7 @@ export function describeAudience(filter: AudienceFilter): string {
   else if (filter.channel === "email") parts.push("emailable customers");
   else if (filter.channel === "both") parts.push("customers reachable both ways");
   else parts.push("all reachable customers");
+  if (filter.excludeCampaignId) parts.push(`excluding campaign #${filter.excludeCampaignId} recipients`);
 
   const segment = serviceSegment(filter.service);
   if (segment) parts.push(segment.label.toLowerCase());

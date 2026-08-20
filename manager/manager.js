@@ -3566,7 +3566,8 @@
       lastServiceFrom: "",
       lastServiceTo: "",
       notBookedDays: "",
-      includeNeverBooked: true
+      includeNeverBooked: true,
+      excludeCampaignId: ""
     };
   }
 
@@ -3584,6 +3585,7 @@
     if (f.lastServiceTo) n++;
     if (f.notBookedDays) n++;
     if (!f.includeNeverBooked) n++;
+    if (f.excludeCampaignId) n++;
     return n;
   }
 
@@ -3591,6 +3593,9 @@
     var g = growState();
     var f = g.filter;
     var segments = g.data.segments || [];
+    var previousCampaigns = (g.data.campaigns || []).filter(function (campaign) {
+      return campaign.status !== "draft" && campaign.status !== "cancelled";
+    });
 
     panel.innerHTML =
       '<div class="card grow-filters">' +
@@ -3598,6 +3603,16 @@
       '<h3 class="section-title">Who to reach</h3>' +
       '<button type="button" class="btn btn-ghost btn-sm" data-audience-reset>Clear filters</button>' +
       "</div>" +
+      '<div class="grow-grid">' +
+      '<label class="field"><span>Exclude recipients from previous campaign</span>' +
+      '<select id="gr-exclude-campaign">' +
+      growOption("", "Do not exclude a campaign", String(f.excludeCampaignId || "")) +
+      previousCampaigns.map(function (campaign) {
+        var label = campaign.name + " (#" + campaign.id + ")";
+        return growOption(String(campaign.id), label, String(f.excludeCampaignId || ""));
+      }).join("") +
+      '</select><p class="pick-note">Customers reached by the selected campaign will not appear in this batch.</p></label>' +
+      '</div>' +
       '<div class="grow-grid">' +
       '<label class="field"><span>Reachable by</span><select id="gr-channel">' +
       growOption("any", "Text or email", f.channel) +
@@ -4107,6 +4122,8 @@
     if (channel) channel.addEventListener("change", readAudienceForm);
     var service = document.getElementById("gr-service");
     if (service) service.addEventListener("change", readAudienceForm);
+    var excludeCampaign = document.getElementById("gr-exclude-campaign");
+    if (excludeCampaign) excludeCampaign.addEventListener("change", readAudienceForm);
     var notBooked = document.getElementById("gr-notbooked");
     if (notBooked) {
       notBooked.addEventListener("input", readAudienceForm);
@@ -4148,6 +4165,7 @@
     f.channel = val("gr-channel") || "any";
     f.service = val("gr-service");
     f.notBookedDays = val("gr-notbooked");
+    f.excludeCampaignId = val("gr-exclude-campaign");
     var never = document.getElementById("gr-never");
     f.includeNeverBooked = never ? never.checked : true;
     var clearService = document.querySelector("[data-audience-clear-service]");
@@ -4196,7 +4214,8 @@
       lastServiceFrom: f.lastServiceFrom,
       lastServiceTo: f.lastServiceTo,
       notBookedDays: f.notBookedDays ? Number(f.notBookedDays) : null,
-      includeNeverBooked: f.includeNeverBooked
+      includeNeverBooked: f.includeNeverBooked,
+      excludeCampaignId: f.excludeCampaignId ? Number(f.excludeCampaignId) : null
     };
   }
 
