@@ -255,7 +255,8 @@ test("a filter from the browser is rebuilt rather than trusted", () => {
     cities: ["Atlanta", "100% clean_"],
     lastServiceFrom: "not-a-date",
     notBookedDays: "9999999",
-    includeNeverBooked: false
+    includeNeverBooked: false,
+    excludeCampaignId: "42"
   });
   assert.equal(filter.channel, "any");
   assert.equal(filter.service, "");
@@ -264,6 +265,12 @@ test("a filter from the browser is rebuilt rather than trusted", () => {
   assert.equal(filter.lastServiceFrom, "");
   assert.equal(filter.notBookedDays, 3650);
   assert.equal(filter.includeNeverBooked, false);
+  assert.equal(filter.excludeCampaignId, 42);
+});
+
+test("an invalid previous campaign exclusion is discarded", () => {
+  assert.equal(normalizeAudience({ excludeCampaignId: "not-an-id" }).excludeCampaignId, null);
+  assert.equal(normalizeAudience({ excludeCampaignId: -3 }).excludeCampaignId, null);
 });
 
 test("an empty filter is the widest sensible default", () => {
