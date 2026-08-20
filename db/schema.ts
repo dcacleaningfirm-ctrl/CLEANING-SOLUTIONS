@@ -508,6 +508,11 @@ export const leads = pgTable(
     // new | contacted | estimate_sent | scheduled | completed | lost
     status: text().notNull().default("new"),
     assignedTo: integer("assigned_to").references(() => employees.id),
+    // The next promised touch and the most recent confirmed customer contact.
+    // Kept on the lead so the queue can sort and alert without interpreting
+    // free-text notes. A null follow-up means no reminder is currently set.
+    nextFollowUpAt: timestamp("next_follow_up_at"),
+    lastContactedAt: timestamp("last_contacted_at"),
 
     // --- What the customer sent -------------------------------------------
     customerName: text("customer_name").notNull(),
@@ -551,6 +556,7 @@ export const leads = pgTable(
   },
   (table) => [
     index("leads_status_idx").on(table.status),
+    index("leads_follow_up_idx").on(table.nextFollowUpAt),
     index("leads_source_idx").on(table.source),
     index("leads_customer_idx").on(table.customerId),
     index("leads_submitted_idx").on(table.submittedAt),
