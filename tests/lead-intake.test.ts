@@ -18,7 +18,7 @@ registerHooks({
   }
 });
 
-const { quickEstimateAdapter } = await import("../lib/lead-intake.ts");
+const { classifyServiceArea, quickEstimateAdapter } = await import("../lib/lead-intake.ts");
 
 test("MOVE249 preserves the complete move-cleaning submission", () => {
   const submittedAt = new Date("2026-08-18T18:00:00.000Z");
@@ -88,4 +88,26 @@ test("MOVE249 preserves the complete move-cleaning submission", () => {
   assert.match(draft.customerNotes || "", /Add-ons: Inside refrigerator; Interior windows/);
   assert.match(draft.customerNotes || "", /Clearly labeled MOVE249 lead intake test\./);
   assert.equal(draft.submittedAt, submittedAt);
+});
+
+
+test("service area routing labels core cities without blocking leads", () => {
+  assert.deepEqual(classifyServiceArea({ city: "Stone Mountain", state: "GA", zip_code: "30083" }), {
+    status: "core_service_area",
+    match: "city:stone mountain",
+    note: "Service area: Core service area"
+  });
+
+  const extended = quickEstimateAdapter({
+    customer_name: "Extended Lead",
+    phone: "404-555-0199",
+    city: "Atlanta",
+    state: "GA",
+    zip_code: "30303",
+    carpet_rooms: "2",
+    planning_estimate: "$100.00"
+  });
+
+  assert.equal(extended.status, "new");
+  assert.match(extended.customerNotes || "", /Extended-area sales lead \(do not reject\)/);
 });
