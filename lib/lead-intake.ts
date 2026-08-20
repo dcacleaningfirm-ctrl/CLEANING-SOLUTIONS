@@ -192,6 +192,61 @@ export function isTestLead(row: {
   return haystack.includes("TEST - DO NOT SCHEDULE") || haystack.includes("TEST — DO NOT SCHEDULE");
 }
 
+// --- Service-area routing -------------------------------------------------
+
+// This is a lead label, never a gate. Requests outside the core zone remain
+// new leads so the office can quote travel, send a partner, or sell/refer them.
+const CORE_SERVICE_CITIES = new Set([
+  "stone mountain",
+  "riverdale",
+  "south clayton",
+  "jonesboro",
+  "morrow",
+  "stockbridge"
+]);
+
+const CORE_SERVICE_ZIPS = new Set([
+  "30083", "30087", "30088",
+  "30236", "30238", "30250", "30260", "30273",
+  "30274", "30281", "30296"
+]);
+
+function locationKey(value: unknown): string {
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function classifyServiceArea(data: Record<string, unknown>): {
+  status: "core_service_area" | "extended_area_sales_lead";
+  match: string;
+  note: string;
+} {
+  const city = locationKey(data.city);
+  const state = locationKey(data.state);
+  const zipMatch = String(data.zip_code ?? data.zip ?? "").match(/\d{5}/);
+  const zip = zipMatch?.[0] || "";
+  const isGeorgia = !state || state === "ga" || state === "georgia";
+  const cityIsCore = isGeorgia && CORE_SERVICE_CITIES.has(city);
+  const zipIsCore = isGeorgia && CORE_SERVICE_ZIPS.has(zip);
+
+  if (cityIsCore || zipIsCore) {
+    return {
+      status: "core_service_area",
+      match: cityIsCore ? `city:${city}` : `zip:${zip}`,
+      note: "Service area: Core service area"
+    };
+  }
+
+  return {
+    status: "extended_area_sales_lead",
+    match: city || zip ? `outside_core:${city || zip}` : "location_unconfirmed",
+    note: "Service area: Extended-area sales lead (do not reject)"
+  };
+}
+
 // --- Adapters -------------------------------------------------------------
 
 // The quantities the website booking form counts, and what each one is called
@@ -284,6 +339,8 @@ export function quickEstimateAdapter(
   const name = text(data.customer_name, 120) || "";
   const parts = name ? splitName(name) : { firstName: "", lastName: "" };
 
+  const serviceArea = classifyServiceArea(data);
+
   // Everything the customer told us that is not already a column, kept as the
   // note the office reads first.
   const propertyDetails = [
@@ -296,6 +353,8 @@ export function quickEstimateAdapter(
     .join("\n");
 
   const notes = [
+    serviceArea.note,
+    `Service-area match: ${serviceArea.match}`,
     propertyDetails || null,
     longText(data.job_description, 3000),
     longText(data.customer_notes, 2000),
