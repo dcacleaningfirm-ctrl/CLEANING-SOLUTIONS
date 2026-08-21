@@ -210,6 +210,22 @@ window.DCA_PRICING = Object.freeze({
       ])
     }),
     Object.freeze({
+      code: "UPHOLSTERY199",
+      kind: "upholstery",
+      name: "Upholstery cleaning special",
+      price: 199.00,
+      summary: "One standard sofa, one loveseat and one chair cleaned in one visit, with deodorizer included.",
+      includes: Object.freeze(["One standard sofa", "One loveseat", "One chair", "Deodorizer"]),
+      terms: Object.freeze([
+        "Covers one standard sofa, one loveseat and one chair at one residential address in a single visit.",
+        "Professional upholstery cleaning and deodorizer are included at no extra charge.",
+        "Sectionals, oversized furniture, specialty fabrics, pet-odor or enzyme treatment, heavy-stain treatment, fabric protector and additional furniture are quoted separately.",
+        "Every piece is inspected and colorfast-tested before cleaning. Fabric stains and permanent discoloration are not guaranteed to be removed.",
+        "Applies to residential addresses inside the published service area and cannot be combined with another offer.",
+        "Request it with the quote form or mention the code on the phone. The promotional rate is confirmed with the rest of the scope before work begins."
+      ])
+    }),
+    Object.freeze({
       code: "MOVE249",
       kind: "move",
       name: "Essential Clean",
