@@ -17,7 +17,7 @@ export type Promotion = {
   /** The code the customer says on the phone and the site reads from ?code=. */
   code: string;
   /** carpet | duct | move — which kind of work the offer is for. */
-  kind: "carpet" | "duct" | "combo" | "move";
+  kind: "carpet" | "duct" | "upholstery" | "combo" | "move";
   /** How the promotion is titled on the site. */
   name: string;
   /** The advertised price, in whole dollars, for display only. */
@@ -76,6 +76,14 @@ export const PROMOTIONS: readonly Promotion[] = Object.freeze([
     price: 199,
     path: "/vents199",
     summary: "One HVAC system, up to 10 supply vents and 1 return."
+  },
+  {
+    code: "UPHOLSTERY199",
+    kind: "upholstery",
+    name: "Upholstery cleaning special",
+    price: 199,
+    path: "/upholstery199",
+    summary: "One standard sofa, one loveseat and one chair, with deodorizer included."
   },
   {
     code: "MOVE249",
