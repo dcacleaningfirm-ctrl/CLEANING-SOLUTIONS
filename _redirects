@@ -26,6 +26,7 @@
 # A spoken or printed promo code is a URL. Each one lands on the request form
 # with its own offer already selected.
 /carpet199                    /quote?code=CARPET199                301
+/combo498                     /quote?code=COMBO498                 301
 /carpet350                    /quote?code=CARPET350                301
 /carpet431                    /quote?code=CARPET431                301
 /duct299                      /quote?code=DUCT299                  301

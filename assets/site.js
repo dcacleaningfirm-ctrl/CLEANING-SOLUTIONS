@@ -75,10 +75,20 @@
     return { field: null, label: "Not applicable", noun: "items", included: 1, max: 0 };
   }
 
+  function specialQuantities(offer) {
+    if (offer && offer.kind === "combo") {
+      return [
+        { field: "carpet_rooms", label: "Carpeted areas", noun: "areas", included: offer.includedAreas || 5, max: 40 },
+        { field: "hvac_units", label: "HVAC units / systems", noun: "units", included: offer.includedUnits || 1, max: 3 }
+      ];
+    }
+    return [specialQuantity(offer)];
+  }
+
   /* The estimate for one special at a given quantity. Each shape of offer is
      priced the way its own terms describe, so the figure on the page and the
      sentence in the terms cannot disagree. */
-  function specialEstimate(offer, quantity) {
+  function specialEstimate(offer, quantity, secondaryQuantity) {
     var lines = [];
     var total = 0;
 
@@ -88,6 +98,15 @@
     }
 
     if (!offer || !pricing || quantity <= 0) return { lines: lines, total: 0 };
+
+    if (offer.kind === "combo") {
+      var carpetResult = specialEstimate(special("CARPET199"), quantity);
+      var ductResult = specialEstimate(special("DUCT299"), secondaryQuantity || offer.includedUnits || 1);
+      return {
+        lines: carpetResult.lines.concat(ductResult.lines),
+        total: toCents(carpetResult.total + ductResult.total)
+      };
+    }
 
     var services = pricing.services;
     var title = offer.name + " (" + offer.code + ")";
@@ -859,7 +878,7 @@
     function applyOffer() {
       var offer = currentOffer();
       if (!offer) return;
-      var quantity = specialQuantity(offer);
+      var quantities = specialQuantities(offer);
 
       document.querySelectorAll("[data-quote-offer]").forEach(function (block) {
         block.dataset.special = offer.code;
@@ -872,7 +891,7 @@
 
       /* How areas are counted only applies to the carpet specials. */
       document.querySelectorAll("[data-quote-carpet-only]").forEach(function (element) {
-        element.hidden = offer.kind !== "carpet";
+        element.hidden = offer.kind !== "carpet" && offer.kind !== "combo";
       });
 
       document.querySelectorAll("[data-quote-includes-card]").forEach(function (element) {
@@ -882,7 +901,8 @@
       form.querySelectorAll("[data-quantity-group]").forEach(function (group) {
         var name = group.dataset.quantityGroup;
         var field = form.elements[name];
-        var active = Boolean(quantity.field) && name === quantity.field;
+        var quantity = quantities.find(function (listed) { return listed && listed.field === name; });
+        var active = Boolean(quantity);
 
         group.hidden = !active;
         if (!field) return;
@@ -909,13 +929,17 @@
     function sync() {
       var offer = currentOffer();
       if (!offer) return { lines: [], total: 0 };
-      var quantity = specialQuantity(offer);
+      var quantities = specialQuantities(offer);
+      var quantity = quantities[0];
       var field = quantity.field ? form.elements[quantity.field] : null;
       /* An offer whose counter is not on this page — a flat-rate promotion, or
          one naming a quantity the markup has no control for — is still priced
          and still bookable, at the quantity its own catalog record includes. */
       var count = field ? toCount(field.value) : (quantity.included || 1);
-      var result = specialEstimate(offer, count);
+      var secondary = quantities[1] && form.elements[quantities[1].field]
+        ? toCount(form.elements[quantities[1].field].value)
+        : 0;
+      var result = specialEstimate(offer, count, secondary);
 
       document.querySelectorAll("[data-quote-total]").forEach(function (element) {
         element.textContent = formatPrice(result.total);
@@ -949,8 +973,8 @@
       }).join("; ") || "No quantity entered");
       setHidden("pricing_version", pricing.version);
       setHidden("promotion_name", offer.name);
-      setHidden("promotion_quantity", String(count));
-      setHidden("promotion_quantity_label", quantity.label);
+      setHidden("promotion_quantity", offer.kind === "combo" ? "1" : String(count));
+      setHidden("promotion_quantity_label", offer.kind === "combo" ? "Combined appointment" : quantity.label);
       setHidden("notes", form.elements.job_description ? form.elements.job_description.value : "");
 
       return result;
@@ -1006,9 +1030,10 @@
          every keystroke — rewriting the field as it is typed makes it fiddly
          to clear and retype. */
       var offer = currentOffer();
-      var quantityField = specialQuantity(offer).field;
-      var countField = quantityField ? form.elements[quantityField] : null;
-      if (countField) countField.value = String(toCount(countField.value));
+      specialQuantities(offer).forEach(function (quantity) {
+        var countField = quantity && quantity.field ? form.elements[quantity.field] : null;
+        if (countField) countField.value = String(toCount(countField.value));
+      });
 
       var result = sync();
       var original = button ? button.textContent : "";

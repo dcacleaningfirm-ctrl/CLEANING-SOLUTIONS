@@ -17,7 +17,7 @@ export type Promotion = {
   /** The code the customer says on the phone and the site reads from ?code=. */
   code: string;
   /** carpet | duct | move — which kind of work the offer is for. */
-  kind: "carpet" | "duct" | "move";
+  kind: "carpet" | "duct" | "combo" | "move";
   /** How the promotion is titled on the site. */
   name: string;
   /** The advertised price, in whole dollars, for display only. */
@@ -29,6 +29,14 @@ export type Promotion = {
 };
 
 export const PROMOTIONS: readonly Promotion[] = Object.freeze([
+  {
+    code: "COMBO498",
+    kind: "combo",
+    name: "Carpet + air duct cleaning combo",
+    price: 498,
+    path: "/combo498",
+    summary: "Up to 5 carpeted areas plus one HVAC system in one appointment."
+  },
   {
     code: "CARPET199",
     kind: "carpet",
