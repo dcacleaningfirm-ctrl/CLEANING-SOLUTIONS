@@ -104,6 +104,23 @@ window.DCA_PRICING = Object.freeze({
    */
   specials: Object.freeze([
     Object.freeze({
+      code: "COMBO498",
+      kind: "combo",
+      name: "Carpet + air duct cleaning combo",
+      price: 498.00,
+      includedAreas: 5,
+      includedUnits: 1,
+      summary: "Up to 5 carpeted areas plus one HVAC system in one appointment.",
+      includes: Object.freeze(["Carpet deodorizer", "Carpet fiber rinse", "Unlimited supply and return vents", "Furnace cleaning"]),
+      terms: Object.freeze([
+        "Covers up to 5 carpeted areas and one HVAC system at one residential address in a single appointment.",
+        "The carpet service includes deodorizer and fiber rinse. Additional carpeted areas are added at the catalog rate per area.",
+        "The air-duct service includes every supply and return vent connected to the first HVAC system, plus furnace cleaning. A second system is $299.00 and a third is $199.00 additional.",
+        "This is one defined combined offer and creates one service request. It cannot be combined with another promotion.",
+        "Final scope, availability and price are confirmed before work begins."
+      ])
+    }),
+    Object.freeze({
       code: "CARPET199",
       kind: "carpet",
       name: "Whole-home carpet cleaning special",
