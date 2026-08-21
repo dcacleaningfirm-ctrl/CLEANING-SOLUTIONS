@@ -240,7 +240,7 @@ test("the segment counts and the audience preview never carry a contact list", (
 // ---------------------------------------------------------------------------
 
 test("the promotions the site advertises are the ones a campaign can use", () => {
-  for (const code of ["CARPET199", "DUCT299", "MOVE249", "MOVE399", "MOVE599"]) {
+  for (const code of ["COMBO498", "CARPET199", "DUCT299", "MOVE249", "MOVE399", "MOVE599"]) {
     assert.ok(PROMOTION_CODES.includes(code), `${code} is missing from the catalog`);
   }
   for (const promotion of PROMOTIONS) {
