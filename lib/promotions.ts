@@ -117,7 +117,7 @@ export function promotionByCode(code: unknown): Promotion | null {
 // is, and the office dials from its own handset. The column exists so that when
 // call and message activity can be reconciled from Google Voice later, it has a
 // customer marketing history to attach itself to.
-export const BUSINESS_VOICE_LINE = "470-485-3123";
+export const BUSINESS_VOICE_LINE = "404-716-2720";
 
 // The choices the console offers when somebody logs a contact by hand. "call"
 // and "voicemail" are the two that come off the business line today.
