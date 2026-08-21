@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SMS Offers Opt-In | DCA Cleaning Solutions</title>
+  <meta name="description" content="Opt in to receive occasional promotional text messages from DCA Cleaning Solutions.">
+  <link rel="canonical" href="https://www.dcacleaningsolutions.com/sms-opt-in">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="container nav-shell">
+      <a class="brand" href="/" aria-label="DCA Cleaning Solutions home"><span class="brand-mark" aria-hidden="true">DCA</span><span class="brand-copy"><strong>DCA Cleaning Solutions</strong><small>Carpet · Air Duct · Upholstery</small></span></a>
+      <nav class="nav-links" aria-label="Main navigation"><a href="/">Home</a><a href="/promotions">Promotions</a><a href="/privacy">Privacy</a><a href="/service-terms">Terms</a><a href="tel:4047162720">(404) 716-2720</a></nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="page-hero">
+      <div class="container">
+        <p class="eyebrow eyebrow-light">Optional text updates</p>
+        <h1>Get DCA specials by text.</h1>
+        <p>Sign up for occasional promotional text messages about cleaning specials, discounts and service reminders.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container estimate-layout">
+        <form class="estimate-form" name="sms-marketing-opt-in" method="POST" action="/thank-you" data-netlify="true" netlify-honeypot="bot-field">
+          <input type="hidden" name="form-name" value="sms-marketing-opt-in">
+          <p class="honeypot"><label>Do not fill this out: <input name="bot-field"></label></p>
+
+          <section class="form-card" aria-labelledby="sms-opt-in-heading">
+            <p class="eyebrow">SMS marketing consent</p>
+            <h2 id="sms-opt-in-heading">Choose whether you want promotional texts.</h2>
+            <p class="form-intro">This consent is optional and is not required to purchase or receive cleaning services.</p>
+
+            <div class="field-grid">
+              <div class="field"><label for="sms-name">Name</label><input id="sms-name" name="customer_name" autocomplete="name" required></div>
+              <div class="field"><label for="sms-phone">Mobile phone</label><input id="sms-phone" name="phone" type="tel" autocomplete="tel" required></div>
+
+              <div class="field field-full">
+                <label class="consent-check">
+                  <input type="checkbox" name="sms_marketing_consent" value="Yes" required>
+                  <span>I agree to receive promotional SMS/text messages from DCA Cleaning Solutions at the mobile number I provided, including cleaning specials, discounts and returning-customer offers. Message frequency varies. Message and data rates may apply. Reply STOP to opt out or HELP for help. Consent is not a condition of purchase. See our <a href="/privacy" target="_blank" rel="noopener">Privacy Policy</a> and <a href="/service-terms" target="_blank" rel="noopener">Terms &amp; Conditions</a>.</span>
+                </label>
+              </div>
+            </div>
+
+            <div class="step-actions">
+              <button class="button button-dark" type="submit">Sign me up for texts</button>
+              <a class="button button-ghost" href="/">No thanks — return home</a>
+            </div>
+          </section>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-bottom"><span>© 2026 Deluxe Carpet &amp; Air Duct Cleaning Solutions LLC, operating as DCA Cleaning Solutions. Atlanta, Georgia.</span><span><a href="/privacy">Privacy</a> · <a href="/service-terms">Terms &amp; Conditions</a></span></div>
+    </div>
+  </footer>
+  <script src="/assets/site.js" defer></script>
+</body>
+</html>
