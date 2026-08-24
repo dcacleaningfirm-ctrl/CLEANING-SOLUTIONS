@@ -5,7 +5,7 @@
  * steps, the add-ons page and the promotion page at once.
  */
 window.DCA_PRICING = Object.freeze({
-  version: "2026-08-18",
+  version: "2026-08-23",
   currency: "USD",
   services: Object.freeze({
     carpetRoom: Object.freeze({ label: "Carpet cleaning — per room", price: 46.58 }),
@@ -195,18 +195,19 @@ window.DCA_PRICING = Object.freeze({
     Object.freeze({
       code: "VENTS199",
       kind: "duct",
-      name: "Whole-home air duct promotion",
+      name: "Monday-Wednesday air duct special",
       price: 199.00,
       includedVents: 10,
       includedReturns: 1,
       systems: 1,
-      summary: "One HVAC system, up to 10 supply vents and 1 return.",
+      summary: "Monday-Wednesday only — one HVAC system, up to 10 supply vents and 1 return.",
       includes: Object.freeze([]),
       terms: Object.freeze([
+        "Available for appointments performed Monday through Wednesday only. Thursday through Sunday appointments do not qualify for the $199 VENTS199 promotional rate.",
         "Covers one HVAC system with up to 10 supply vents and 1 return. Additional vents are added at the catalog rate per vent.",
         "Homes with more than one air handler are estimated per system.",
         "Applies to residential addresses inside the published service area and cannot be combined with another offer.",
-        "Mention the code when you request the estimate. The promotional rate is confirmed with the rest of the scope before work begins."
+        "Mention the code when you request the estimate. The promotional rate and appointment day are confirmed with the rest of the scope before work begins."
       ])
     }),
     Object.freeze({
