@@ -72,10 +72,10 @@ export const PROMOTIONS: readonly Promotion[] = Object.freeze([
   {
     code: "VENTS199",
     kind: "duct",
-    name: "Whole-home air duct promotion",
+    name: "Monday-Wednesday air duct special",
     price: 199,
     path: "/vents199",
-    summary: "One HVAC system, up to 10 supply vents and 1 return."
+    summary: "Monday-Wednesday only — one HVAC system, up to 10 supply vents and 1 return."
   },
   {
     code: "UPHOLSTERY199",
