@@ -1731,6 +1731,8 @@
         '<div class="card customer-search"><label class="field"><span>Find a customer</span>' +
         '<input id="cu-search" type="search" maxlength="80" placeholder="Name, phone, email or street…" value="' +
         esc(term) + '" /></label>' +
+        '<label class="field"><span>Customer type</span><select id="cu-type"><option value="">All customers</option>' +
+        '<option value="residential">Residential</option><option value="business">Business / Commercial</option></select></label>' +
         '<p class="hint">Tap a number to call, or Text to open a message. Profile shows the service ' +
         'history and what has been offered; Edit fixes what is on file.</p></div>' +
         '<div id="cu-list"><div class="loading">Loading…</div></div>';
@@ -1744,6 +1746,7 @@
           renderCustomers();
         }, 300);
       });
+      document.getElementById("cu-type").addEventListener("change", renderCustomers);
     }
 
     // The search card above is built once and then left alone, so the import
@@ -1753,9 +1756,13 @@
 
     var list = document.getElementById("cu-list");
     list.innerHTML = '<div class="loading">Loading…</div>';
-    api("customers" + (term ? "?q=" + encodeURIComponent(term) : "")).then(function (d) {
+    var type = val("cu-type");
+    var params = [];
+    if (term) params.push("q=" + encodeURIComponent(term));
+    if (type) params.push("type=" + encodeURIComponent(type));
+    api("customers" + (params.length ? "?" + params.join("&") : "")).then(function (d) {
       list.innerHTML = d.customers.length
-        ? '<div class="card"><table><thead><tr><th>Name</th><th>Contact</th><th>Location</th>' +
+        ? '<div class="card"><table><thead><tr><th>Name</th><th>Type</th><th>Contact</th><th>Location</th>' +
           '<th>Clover</th><th class="right">Jobs</th><th class="right">Open</th></tr></thead><tbody>' +
           d.customers.map(function (c) {
             var dial = telDigits(c.phone);
@@ -1765,7 +1772,8 @@
               (c.email ? "<br />" + emailText(c.email) : "") +
               "</div>";
             var loc = [c.city, c.state].filter(Boolean).map(esc).join(", ") || '<span class="muted">—</span>';
-            return "<tr><td>" + esc(c.name) + "</td><td>" + contact + '</td><td class="muted">' +
+            return "<tr><td>" + esc(c.name) + "</td><td>" +
+              esc(c.customerType === "business" ? "Business" : "Residential") + "</td><td>" + contact + '</td><td class="muted">' +
               loc + "</td><td>" + cloverCell(c) + '</td><td class="right mono">' + c.jobCount + "</td>" +
               '<td class="right"><button type="button" class="btn btn-ghost btn-sm" data-customer-profile="' +
               c.id + '">Profile</button> <button type="button" class="btn btn-ghost btn-sm" ' +
@@ -1860,6 +1868,9 @@
       openModal(
         "Edit " + c.name,
         '<div class="booking-fields">' +
+          '<label class="field"><span>Customer type</span><select id="cf-customer-type"><option value="residential"' +
+          (c.customerType === "business" ? "" : " selected") + '>Residential</option><option value="business"' +
+          (c.customerType === "business" ? " selected" : "") + '>Business / Commercial</option></select></label>' +
           '<label class="field"><span>Name</span><input id="cf-name" maxlength="120" required value="' + esc(c.name || "") + '" /></label>' +
           '<label class="field"><span>Phone</span><input id="cf-phone" type="tel" maxlength="30" value="' + esc(c.phone || "") + '" placeholder="(404) 555-0134" /></label>' +
           '<label class="field"><span>Alternate phone</span><input id="cf-alt-phone" type="tel" maxlength="30" value="' + esc(c.altPhone || "") + '" placeholder="Second number to try" /></label>' +
@@ -1876,6 +1887,7 @@
           " on this account. Changes apply to every one of them.</p>",
         function () {
           var body = {
+            customerType: val("cf-customer-type"),
             name: val("cf-name"),
             phone: val("cf-phone"),
             altPhone: val("cf-alt-phone"),
@@ -1993,6 +2005,7 @@
       '<button class="drawer-close" data-close>×</button>' +
       "<h2>" + esc(c.name) + "</h2>" +
       '<div class="lead-badges">' +
+      '<span class="pill source">' + esc(c.customerType === "business" ? "Business / Commercial" : "Residential") + "</span>" +
       '<span class="pill source">' + c.jobCount + (c.jobCount === 1 ? " job" : " jobs") + "</span>" +
       '<span class="pill scheduled">' + notes.length +
       (notes.length === 1 ? " service note" : " service notes") + "</span>" +
@@ -6001,7 +6014,7 @@
   function bookingTotalCents() {
     return state.booking.items.reduce(function (sum, i) {
       return sum + i.unitPriceCents * i.quantity;
-    }, 0);
+    }, 2500);
   }
 
   function renderBook() {
@@ -6048,6 +6061,8 @@
         : "") +
       '<div id="bk-customer"></div>' +
       '<div class="booking-fields">' +
+      '<label class="field"><span>Customer type</span><select id="bk-customer-type" required>' +
+      '<option value="residential">Residential</option><option value="business">Business / Commercial</option></select></label>' +
       '<label class="field"><span>Name</span><input id="bk-name" maxlength="120" required placeholder="Customer name" /></label>' +
       '<label class="field"><span>Phone</span><input id="bk-phone" type="tel" maxlength="30" placeholder="(404) 555-0134" /></label>' +
       '<label class="field"><span>Email</span><input id="bk-email" type="email" maxlength="120" placeholder="Optional" /></label>' +
@@ -6067,6 +6082,7 @@
       '<label class="field"><span>Price list</span><select id="bk-catalog">' + catalogOptions + "</select></label>" +
       "</div>" + catalogNote +
       '<div id="bk-items" class="booking-items"></div>' +
+      '<div class="line-items"><div class="li"><span>Environmental Waste Fee <small>ENVMT · required</small></span><span class="mono">$25.00</span></div></div>' +
       '<div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" id="bk-add-custom">Other charge</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" id="bk-clear-items">Clear list</button></div>' +
       "</section>" +
@@ -6258,6 +6274,7 @@
     setValue("bk-city", customer.city);
     setValue("bk-state", customer.state);
     setValue("bk-zip", customer.zip);
+    setValue("bk-customer-type", customer.customerType || "residential");
     renderBookingCustomer();
     // Picking an existing customer is the same as typing their address: the map
     // is pointed at the house the crew will be driving to.
@@ -6503,7 +6520,8 @@
       address: val("bk-address"),
       city: val("bk-city"),
       state: val("bk-state"),
-      zip: val("bk-zip")
+      zip: val("bk-zip"),
+      customerType: val("bk-customer-type") || "residential"
     };
     var payload = {
       customer: contact,
@@ -6868,13 +6886,13 @@
             (item.kind === "addon" ? ' <small class="muted">add-on</small>' : "") +
             (item.detail ? ' <small class="muted">' + esc(item.detail) + "</small>" : "") + "</span>" +
             '<label class="booking-item-qty"><small>Qty</small><input type="number" min="1" max="99" step="1" ' +
-            'data-item-qty value="' + item.quantity + '" /></label>' +
+            'data-item-qty value="' + item.quantity + '"' + (item.kind === "fee" ? " disabled" : "") + ' /></label>' +
             '<label class="booking-item-price"><small>Each</small><div class="money-input"><span>$</span>' +
             '<input type="number" min="0" max="10000" step="0.01" data-item-price value="' +
-            (item.unitPriceCents / 100).toFixed(2) + '" /></div></label>' +
+            (item.unitPriceCents / 100).toFixed(2) + '"' + (item.kind === "fee" ? " disabled" : "") + ' /></div></label>' +
             '<span class="booking-item-amount mono" data-item-amount>' +
             fmtMoney(item.unitPriceCents * item.quantity) + "</span>" +
-            '<button type="button" class="btn btn-ghost btn-sm" data-item-remove="' + index + '" aria-label="Remove">×</button>' +
+            (item.kind === "fee" ? '<span class="muted">Required</span>' : '<button type="button" class="btn btn-ghost btn-sm" data-item-remove="' + index + '" aria-label="Remove">×</button>') +
             "</div>"
           );
         }).join("")
