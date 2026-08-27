@@ -28,6 +28,7 @@ export const customers = pgTable(
     state: text(),
     zip: text(),
     notes: text(),
+    customerType: text("customer_type").notNull().default("residential"),
     // A second number to try when the main one does not answer. Common on
     // imported lists, where a household gives both a mobile and a landline.
     altPhone: text("alt_phone"),
@@ -90,7 +91,8 @@ export const customers = pgTable(
     // The audience screen counts and segments on these on every load.
     index("customers_sms_consent_idx").on(table.smsConsentStatus),
     index("customers_email_consent_idx").on(table.emailConsentStatus),
-    index("customers_zip_idx").on(table.zip)
+    index("customers_zip_idx").on(table.zip),
+    index("customers_type_idx").on(table.customerType)
   ]
 );
 
