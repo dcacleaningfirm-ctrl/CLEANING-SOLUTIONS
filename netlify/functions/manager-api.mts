@@ -723,6 +723,17 @@ interface BookingItem {
   amountCents: number;
 }
 
+const ENVMT_LABEL = "Environmental Waste Fee (ENVMT)";
+const ENVMT_CENTS = 2500;
+
+function withRequiredEnvmt(items: BookingItem[]): BookingItem[] {
+  return [
+    ...items.filter((item) => item.kind !== "fee" && item.label.toUpperCase() !== ENVMT_LABEL.toUpperCase()),
+    { kind: "fee", label: ENVMT_LABEL, detail: "Required on every order", quantity: 1,
+      unitPriceCents: ENVMT_CENTS, amountCents: ENVMT_CENTS }
+  ];
+}
+
 // The account details the office can correct from the app, with the length each
 // one is stored at. A customer's name is the only field that cannot be blanked.
 const CUSTOMER_FIELDS = [
@@ -768,7 +779,7 @@ function readBookingItems(raw: unknown): { items: BookingItem[]; error?: string 
 
     const kind = String(entry?.kind || "service").trim().toLowerCase();
     items.push({
-      kind: ["service", "addon", "custom"].includes(kind) ? kind : "service",
+      kind: ["service", "addon", "custom", "fee", "tax"].includes(kind) ? kind : "service",
       label: label.slice(0, 160),
       detail: String(entry?.detail || "").trim().slice(0, 200) || null,
       quantity,
@@ -2092,6 +2103,7 @@ export default async (req: Request, context: Context) => {
       // a name, a phone number as the caller says it, or a street, and gets the
       // matching account back without leaving the call.
       const q = (url.searchParams.get("q") || "").trim();
+      const type = (url.searchParams.get("type") || "").trim().toLowerCase();
       let filter;
       if (q) {
         const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
@@ -2111,7 +2123,7 @@ export default async (req: Request, context: Context) => {
       const rows = await db
         .select()
         .from(customers)
-        .where(filter)
+        .where(and(filter, ["residential", "business"].includes(type) ? eq(customers.customerType, type) : undefined))
         .orderBy(customers.name)
         .limit(q ? 25 : 500);
       const jobCounts = await db
@@ -2178,6 +2190,16 @@ export default async (req: Request, context: Context) => {
 
       const updates: Record<string, string | null> = {};
       const changed: string[] = [];
+      if (typeof body.customerType === "string") {
+        const type = body.customerType.trim().toLowerCase();
+        if (!["residential", "business"].includes(type)) {
+          return json({ error: "Choose Residential or Business / Commercial" }, { status: 400 });
+        }
+        if (existing.customerType !== type) {
+          updates.customerType = type;
+          changed.push("customer type");
+        }
+      }
       for (const field of CUSTOMER_FIELDS) {
         const raw = body[field.key];
         if (typeof raw !== "string") continue;
@@ -2615,6 +2637,7 @@ export default async (req: Request, context: Context) => {
           city?: string;
           state?: string;
           zip?: string;
+          customerType?: string;
         };
         serviceType?: string;
         scheduledFor?: string;
@@ -2640,10 +2663,14 @@ export default async (req: Request, context: Context) => {
 
       const parsedItems = readBookingItems(body.items);
       if (parsedItems.error) return json({ error: parsedItems.error }, { status: 400 });
-      const itemsTotal = parsedItems.items.reduce((sum, i) => sum + i.amountCents, 0);
-      const priceCents = parsedItems.items.length
-        ? itemsTotal
-        : Math.round(Number(body.priceCents || 0));
+      const fallbackPrice = Math.round(Number(body.priceCents || 0));
+      const orderItems = parsedItems.items.length || fallbackPrice <= 0
+        ? parsedItems.items
+        : [{ kind: "service", label: serviceType.slice(0, 160), detail: null, quantity: 1,
+             unitPriceCents: fallbackPrice, amountCents: fallbackPrice }];
+      const requiredItems = withRequiredEnvmt(orderItems);
+      const itemsTotal = requiredItems.reduce((sum, i) => sum + i.amountCents, 0);
+      const priceCents = itemsTotal;
       if (!Number.isFinite(priceCents) || priceCents < 0 || priceCents > MAX_JOB_TOTAL_CENTS) {
         return json({ error: "Check the total — it is outside the allowed range" }, { status: 400 });
       }
@@ -2664,6 +2691,10 @@ export default async (req: Request, context: Context) => {
       // below rejects the time, the 409 hands this id back so a second attempt
       // attaches to the same account instead of filing the caller twice.
       const supplied = body.customer || {};
+      const customerType = String(supplied.customerType || "residential").trim().toLowerCase();
+      if (!["residential", "business"].includes(customerType)) {
+        return json({ error: "Choose Residential or Business / Commercial" }, { status: 400 });
+      }
       const contact = {
         name: (supplied.name || "").trim(),
         phone: (supplied.phone || "").trim() || null,
@@ -2682,6 +2713,10 @@ export default async (req: Request, context: Context) => {
           .where(eq(customers.id, Number(body.customerId)));
         if (!found) return json({ error: "That customer no longer exists" }, { status: 404 });
         customer = found;
+        if (customer.customerType !== customerType) {
+          await db.update(customers).set({ customerType }).where(eq(customers.id, customer.id));
+          customer = { ...customer, customerType };
+        }
 
         // Fill in details the account was missing — a first address, a mobile
         // number — but never overwrite something already on file from a call.
@@ -2716,6 +2751,7 @@ export default async (req: Request, context: Context) => {
             city: contact.city,
             state: contact.state,
             zip: contact.zip,
+            customerType,
             notes: `Added by ${account.name} while booking by phone`,
             cloverSyncStatus: "pending"
           })
@@ -2766,9 +2802,9 @@ export default async (req: Request, context: Context) => {
         })
         .returning({ id: jobs.id });
 
-      if (parsedItems.items.length) {
+      if (requiredItems.length) {
         await db.insert(jobItems).values(
-          parsedItems.items.map((i) => ({ ...i, jobId: job.id }))
+          requiredItems.map((i) => ({ ...i, jobId: job.id }))
         );
       }
 
@@ -3030,11 +3066,12 @@ export default async (req: Request, context: Context) => {
 
       const parsed = readBookingItems(body.items);
       if (parsed.error) return json({ error: parsed.error }, { status: 400 });
-      if (!parsed.items.length) {
+      const requiredItems = withRequiredEnvmt(parsed.items);
+      if (requiredItems.length === 1) {
         return json({ error: "A ticket needs at least one line" }, { status: 400 });
       }
 
-      const priceCents = parsed.items.reduce((sum, i) => sum + i.amountCents, 0);
+      const priceCents = requiredItems.reduce((sum, i) => sum + i.amountCents, 0);
       if (priceCents > MAX_JOB_TOTAL_CENTS) {
         return json(
           { error: `A single job cannot total more than ${money(MAX_JOB_TOTAL_CENTS)}` },
@@ -3059,7 +3096,7 @@ export default async (req: Request, context: Context) => {
       const note = (body.note || "").trim().slice(0, 300) || null;
 
       await db.delete(jobItems).where(eq(jobItems.jobId, id));
-      await db.insert(jobItems).values(parsed.items.map((i) => ({ ...i, jobId: id })));
+      await db.insert(jobItems).values(requiredItems.map((i) => ({ ...i, jobId: id })));
       await db.update(jobs).set({ priceCents }).where(eq(jobs.id, id));
 
       const moved = priceCents !== previousCents;
