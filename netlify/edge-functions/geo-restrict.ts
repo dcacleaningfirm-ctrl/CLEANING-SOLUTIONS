@@ -84,6 +84,19 @@ export const config: Config = {
   // verification, so the whole namespace stays reachable regardless of region.
   excludedPath: [
     "/.well-known/*",
+    // Messaging compliance and policy pages must be publicly reviewable from
+    // carrier and provider infrastructure, which may operate outside the US.
+    "/sms-opt-in",
+    "/sms-opt-in/*",
+    "/sms-opt-in.html",
+    "/privacy",
+    "/privacy/*",
+    "/privacy.html",
+    "/service-terms",
+    "/service-terms/*",
+    "/service-terms.html",
+    // Let those public pages load the shared DCA branding and behavior.
+    "/assets/*",
     "/logo.svg",
     "/.netlify/*",
     "/styles.css",
