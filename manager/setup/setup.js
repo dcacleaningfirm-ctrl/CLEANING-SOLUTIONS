@@ -66,6 +66,43 @@
     return pin;
   }
 
+  // A Management Specialist code is never typed by hand — not here and not in
+  // the app. The server draws a temporary one, shows it once, and the account
+  // has to replace it at its next sign-in.
+  function isSpecialist(role) {
+    return String(role || "").trim().toLowerCase() === "management_specialist";
+  }
+
+  function findMember(id) {
+    for (var i = 0; i < crew.length; i++) {
+      if (crew[i].id === id) return crew[i];
+    }
+    return null;
+  }
+
+  function selectedMember() {
+    var sel = document.getElementById("s-member");
+    return sel ? findMember(Number(sel.value)) : null;
+  }
+
+  // Swap the reset form between "type a code" and "the app will draw one".
+  function syncResetForm() {
+    var member = selectedMember();
+    var specialist = Boolean(member && isSpecialist(member.role));
+    var fields = document.getElementById("s-code-fields");
+    var note = document.getElementById("s-temp-note");
+    var btn = document.getElementById("s-reset-submit");
+    if (fields) fields.hidden = specialist;
+    if (note) note.hidden = !specialist;
+    if (fields) {
+      var inputs = fields.querySelectorAll("input");
+      for (var i = 0; i < inputs.length; i++) inputs[i].required = !specialist;
+    }
+    if (btn) {
+      btn.textContent = specialist ? "Issue a temporary code" : "Set the new code";
+    }
+  }
+
   // Step 0: recovery is switched off until the site has a setup key.
   function renderDisabled(minLength) {
     body().innerHTML =
@@ -130,12 +167,17 @@
         })
         .join("") +
       "</select></label>" +
-      codeFields("New code") +
+      '<div id="s-code-fields">' + codeFields("New code") + "</div>" +
+      '<p class="setup-note" id="s-temp-note" hidden>This is a Management Specialist account. The app will draw a temporary code and show it to you once — hand it over in person, and they must choose their own code the first time they sign in.</p>' +
       '<label class="check"><input type="checkbox" id="s-promote" /> <span>Also make this person an owner, so they can issue codes to everyone else from inside the app</span></label>' +
       '<p class="login-error" id="setup-error" hidden></p>' +
       '<button class="btn btn-primary" type="submit" id="s-reset-submit">Set the new code</button>' +
       '<button class="btn btn-ghost" type="button" id="s-switch-create">Add a new account instead</button>' +
       "</form>";
+
+    document.getElementById("s-member").addEventListener("change", syncResetForm);
+    document.getElementById("s-promote").addEventListener("change", syncResetForm);
+    syncResetForm();
 
     document.getElementById("s-switch-create").addEventListener("click", function () {
       renderCreateForm(false);
@@ -145,12 +187,18 @@
       ev.preventDefault();
       clearError();
       var btn = document.getElementById("s-reset-submit");
-      var pin;
-      try {
-        pin = readCode();
-      } catch (e) {
-        showError(e.message);
-        return;
+      var label = btn.textContent;
+      var member = selectedMember();
+      var promote = document.getElementById("s-promote").checked;
+      var generated = Boolean(member && isSpecialist(member.role)) && !promote;
+      var pin = "";
+      if (!generated) {
+        try {
+          pin = readCode();
+        } catch (e) {
+          showError(e.message);
+          return;
+        }
       }
       btn.disabled = true;
       btn.textContent = "Saving…";
@@ -158,15 +206,15 @@
         action: "reset",
         employeeId: Number(document.getElementById("s-member").value),
         pin: pin,
-        promote: document.getElementById("s-promote").checked
+        promote: promote
       })
         .then(function (data) {
-          renderDone(data.member ? data.member.name : "That crew member");
+          renderDone(data.member ? data.member.name : "That crew member", data);
         })
         .catch(function (e) {
           showError(e.message);
           btn.disabled = false;
-          btn.textContent = "Set the new code";
+          btn.textContent = label;
         });
     });
   }
@@ -212,7 +260,7 @@
         pin: pin
       })
         .then(function (data) {
-          renderDone(data.member ? data.member.name : "The new owner");
+          renderDone(data.member ? data.member.name : "The new owner", data);
         })
         .catch(function (e) {
           showError(e.message);
@@ -222,10 +270,17 @@
     });
   }
 
-  function renderDone(name) {
+  function renderDone(name, data) {
     setupKey = "";
+    var temp = data && data.tempPin ? String(data.tempPin) : "";
     body().innerHTML =
-      '<p class="setup-note"><strong>' + esc(name) + "</strong> can sign in with that code now.</p>" +
+      (temp
+        ? '<div class="temp-code"><p class="setup-note">Temporary code for <strong>' +
+          esc(name) +
+          "</strong> — write it down now. It is shown once and cannot be looked up again.</p>" +
+          '<p class="temp-code-value">' + esc(temp) + "</p>" +
+          '<p class="setup-note">Give it to them in person. They will be asked to choose their own code the first time they sign in, and this one stops working at that moment.</p></div>'
+        : '<p class="setup-note"><strong>' + esc(name) + "</strong> can sign in with that code now.</p>") +
       '<p class="setup-note">Two things to finish up: delete the <strong>MANAGER_SETUP_KEY</strong> environment variable in Netlify so this page closes again, and use the <strong>Crew</strong> tab in the app for any further code changes.</p>' +
       '<a class="btn btn-primary" href="/manager">Go to sign in</a>';
   }

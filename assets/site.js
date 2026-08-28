@@ -9,6 +9,151 @@
 
   var DRAFT_KEY = "dca-booking-draft";
 
+  /* Every special is looked up by its code, so a page or a link names an offer
+     the same way a customer does. The two the site refers to by role rather
+     than by code — the banner promotion and the entry carpet special — are
+     resolved once here. */
+  function special(code) {
+    if (!pricing || !pricing.specials) return null;
+    for (var i = 0; i < pricing.specials.length; i += 1) {
+      if (pricing.specials[i].code === code) return pricing.specials[i];
+    }
+    return null;
+  }
+
+  var bannerPromotion = special("VENTS199");
+  var entryCarpetSpecial = special("CARPET199");
+
+  /* A special's comparison price: whatever it publishes as its own regular
+     price, and otherwise the catalog's price for the same work. Returning 0
+     means there is no honest comparison to draw, and the page shows none. */
+  function specialRegularPrice(offer) {
+    if (!offer || !pricing) return 0;
+    if (offer.regularPrice) return toCents(offer.regularPrice);
+
+    var services = pricing.services;
+    if (offer.kind === "carpet" && offer.includedAreas) {
+      return toCents(offer.includedAreas * services.carpetRoom.price);
+    }
+    if (offer.includedVents) {
+      return toCents(services.airDuctBase.price + offer.includedVents * services.airVent.price);
+    }
+    return 0;
+  }
+
+  function specialSavings(offer) {
+    var regular = specialRegularPrice(offer);
+    return regular > offer.price ? toCents(regular - offer.price) : 0;
+  }
+
+  /* Which quantity a special is counted in, and which of the booking form's
+     registered fields carries it.
+     A future offer can name its own quantity outright — quantityField and the
+     labels beside it — and the booking page adopts it without a code change.
+     An offer that is a flat price with nothing to count says so by declaring
+     none of these, and the page hides the counters rather than inventing one. */
+  function specialQuantity(offer) {
+    if (!offer) return null;
+    if (offer.quantityField) {
+      return {
+        field: offer.quantityField,
+        label: offer.quantityLabel || "Quantity",
+        noun: offer.quantityNoun || "items",
+        included: offer.includedQuantity,
+        max: offer.maxQuantity
+      };
+    }
+    if (offer.kind === "carpet") {
+      return { field: "carpet_rooms", label: "Carpeted areas", noun: "areas", included: offer.includedAreas, max: 40 };
+    }
+    if (offer.additionalUnitPrice) {
+      return { field: "hvac_units", label: "HVAC units / systems", noun: "units", included: 1, max: offer.maxUnits };
+    }
+    if (offer.includedVents) {
+      return { field: "air_vents", label: "Supply vents", noun: "vents", included: offer.includedVents, max: 60 };
+    }
+    return { field: null, label: "Not applicable", noun: "items", included: 1, max: 0 };
+  }
+
+  function specialQuantities(offer) {
+    if (offer && offer.kind === "combo") {
+      return [
+        { field: "carpet_rooms", label: "Carpeted areas", noun: "areas", included: offer.includedAreas || 5, max: 40 },
+        { field: "hvac_units", label: "HVAC units / systems", noun: "units", included: offer.includedUnits || 1, max: 3 }
+      ];
+    }
+    return [specialQuantity(offer)];
+  }
+
+  /* The estimate for one special at a given quantity. Each shape of offer is
+     priced the way its own terms describe, so the figure on the page and the
+     sentence in the terms cannot disagree. */
+  function specialEstimate(offer, quantity, secondaryQuantity) {
+    var lines = [];
+    var total = 0;
+
+    function add(label, detail, amount) {
+      lines.push({ label: label, detail: detail, total: amount });
+      total += amount;
+    }
+
+    if (!offer || !pricing || quantity <= 0) return { lines: lines, total: 0 };
+
+    if (offer.kind === "combo") {
+      var carpetResult = specialEstimate(special("CARPET199"), quantity);
+      var ductResult = specialEstimate(special("DUCT299"), secondaryQuantity || offer.includedUnits || 1);
+      return {
+        lines: carpetResult.lines.concat(ductResult.lines),
+        total: toCents(carpetResult.total + ductResult.total)
+      };
+    }
+
+    var services = pricing.services;
+    var title = offer.name + " (" + offer.code + ")";
+
+    if (offer.kind === "carpet") {
+      add(title, "Up to " + offer.includedAreas + " areas", offer.price);
+      var extraAreas = Math.max(0, quantity - offer.includedAreas);
+      if (extraAreas > 0) {
+        add(
+          "Additional areas beyond the special",
+          extraAreas + " × " + formatPrice(services.carpetRoom.price),
+          extraAreas * services.carpetRoom.price
+        );
+      }
+    } else if (offer.additionalUnitPrice) {
+      var units = offer.maxUnits ? Math.min(quantity, offer.maxUnits) : quantity;
+      var baseUnits = Math.min(units, offer.additionalUnitFrom - 1);
+      add(title, baseUnits + " × " + formatPrice(offer.price) + " per HVAC unit", baseUnits * offer.price);
+
+      var extraUnits = units - baseUnits;
+      if (extraUnits > 0) {
+        add(
+          "Additional HVAC unit",
+          extraUnits + " × " + formatPrice(offer.additionalUnitPrice),
+          extraUnits * offer.additionalUnitPrice
+        );
+      }
+    } else if (offer.includedVents) {
+      add(title, "Up to " + offer.includedVents + " vents", offer.price);
+      var extraVents = Math.max(0, quantity - offer.includedVents);
+      if (extraVents > 0) {
+        add(
+          "Additional vents beyond the promotion",
+          extraVents + " × " + formatPrice(services.airVent.price),
+          extraVents * services.airVent.price
+        );
+      }
+    } else {
+      /* An offer that counts nothing — a flat promotional price. Priced here
+         rather than left at zero so a future catalog entry of that shape is
+         bookable the day it is added. */
+      add(title, "Flat promotional rate", offer.price);
+    }
+
+    return { lines: lines, total: toCents(total) };
+  }
+
   var QUANTITY_FIELDS = [
     "carpet_rooms",
     "air_vents",
@@ -22,8 +167,12 @@
     "customer_name",
     "phone",
     "email",
+    "service_address",
+    "city",
+    "state",
     "zip_code",
     "preferred_date",
+    "preferred_time",
     "contact_method",
     "job_description"
   ];
@@ -39,6 +188,14 @@
 
   function toCents(value) {
     return Math.round((Number(value) || 0) * 100) / 100;
+  }
+
+  /* "carpetPromoField" -> "carpet-promo-field", so a dataset key and the
+     attribute selector that finds it are written once rather than twice. */
+  function dashed(key) {
+    return key.replace(/[A-Z]/g, function (letter) {
+      return "-" + letter.toLowerCase();
+    });
   }
 
   /* ---------------------------------------------------------------- pricing */
@@ -80,7 +237,7 @@
   function computed(name) {
     if (!pricing) return 0;
     var services = pricing.services;
-    var promotion = pricing.promotion;
+    var promotion = bannerPromotion;
 
     switch (name) {
       case "promoPrice":
@@ -89,6 +246,12 @@
         return services.airDuctBase.price + promotion.includedVents * services.airVent.price;
       case "promoSavings":
         return computed("promoRegular") - promotion.price;
+      case "carpetPromoPrice":
+        return entryCarpetSpecial.price;
+      case "carpetPromoRegular":
+        return specialRegularPrice(entryCarpetSpecial);
+      case "carpetPromoSavings":
+        return specialSavings(entryCarpetSpecial);
       case "ductTypicalLow":
         return services.airDuctBase.price + 8 * services.airVent.price;
       case "ductTypicalHigh":
@@ -122,6 +285,90 @@
     }
   }
 
+  /* A checklist of catalog sentences — terms, inclusions — built the same way
+     everywhere it appears. */
+  function fillCheckList(list, entries) {
+    list.innerHTML = "";
+    (entries || []).forEach(function (entry) {
+      var item = document.createElement("li");
+      var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+      svg.setAttribute("class", "icon");
+      svg.setAttribute("aria-hidden", "true");
+      use.setAttribute("href", "/assets/icons.svg#icon-check");
+      svg.appendChild(use);
+      var text = document.createElement("span");
+      text.textContent = entry;
+      item.append(svg, text);
+      list.appendChild(item);
+    });
+  }
+
+  /* Any block that names a special by code fills itself from that record: its
+     figures, its terms, what it includes, and the link that books it. A card
+     is therefore written once as markup and never carries a number of its
+     own. */
+  function renderSpecials(scope) {
+    scope.querySelectorAll("[data-special]").forEach(function (block) {
+      var offer = special(block.dataset.special);
+      if (!offer) return;
+
+      block.querySelectorAll("[data-special-field]").forEach(function (element) {
+        var key = element.dataset.specialField;
+        var value;
+
+        if (key === "price") value = formatPrice(offer.price);
+        else if (key === "regularPrice") value = formatPrice(specialRegularPrice(offer));
+        else if (key === "savings") value = formatPrice(specialSavings(offer));
+        else if (key === "additionalUnitPrice") value = formatPrice(offer.additionalUnitPrice);
+        else value = offer[key];
+
+        if (value !== undefined && value !== null) element.textContent = String(value);
+      });
+
+      block.querySelectorAll("[data-special-terms]").forEach(function (list) {
+        fillCheckList(list, offer.terms);
+      });
+
+      /* A published total at a given quantity — the "1 unit / 2 units / 3
+         units" table on the promotions page is this, so the totals are the
+         same arithmetic the quote form runs rather than three typed figures. */
+      block.querySelectorAll("[data-special-total]").forEach(function (element) {
+        var quantity = Number(element.dataset.specialTotal) || 0;
+        element.textContent = formatPrice(specialEstimate(offer, quantity).total);
+      });
+
+      block.querySelectorAll("[data-special-includes]").forEach(function (list) {
+        fillCheckList(list, offer.includes);
+      });
+
+      /* Every Book This Special button points at the quote form with its own
+         code attached, which is what carries the code onto the request. */
+      block.querySelectorAll("[data-special-link]").forEach(function (link) {
+        link.setAttribute("href", "/quote?code=" + encodeURIComponent(offer.code));
+      });
+
+      /* No published comparison price means no savings claim on the card. */
+      block.querySelectorAll("[data-special-savings]").forEach(function (element) {
+        element.hidden = specialSavings(offer) <= 0;
+      });
+    });
+  }
+
+  /* How carpeted areas are counted, published from the one record that
+     defines it for every carpet special. */
+  function renderAreaRules(scope) {
+    if (!pricing.carpetAreaRules) return;
+
+    scope.querySelectorAll("[data-area-rules]").forEach(function (list) {
+      fillCheckList(list, pricing.carpetAreaRules.rules);
+    });
+
+    scope.querySelectorAll("[data-area-example]").forEach(function (element) {
+      element.textContent = pricing.carpetAreaRules.example;
+    });
+  }
+
   function renderPrices(root) {
     if (!pricing) return;
     var scope = root || document;
@@ -149,28 +396,28 @@
       }
     });
 
-    scope.querySelectorAll("[data-promo-field]").forEach(function (element) {
-      var value = pricing.promotion[element.dataset.promoField];
-      if (value !== undefined && value !== null) element.textContent = String(value);
-    });
+    /* The two specials the site refers to by role rather than by code render
+       through their own attributes, so a page picks the record it wants and
+       neither one can drift from the catalog. */
+    [
+      { record: bannerPromotion, field: "promoField", terms: "promoTerms" },
+      { record: entryCarpetSpecial, field: "carpetPromoField", terms: "carpetPromoTerms" }
+    ].forEach(function (offer) {
+      if (!offer.record) return;
 
-    /* The promotion terms live in the catalog too, so one edit updates them all. */
-    scope.querySelectorAll("[data-promo-terms]").forEach(function (list) {
-      list.innerHTML = "";
-      pricing.promotion.terms.forEach(function (term) {
-        var item = document.createElement("li");
-        var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-        var use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-        svg.setAttribute("class", "icon");
-        svg.setAttribute("aria-hidden", "true");
-        use.setAttribute("href", "/assets/icons.svg#icon-check");
-        svg.appendChild(use);
-        var text = document.createElement("span");
-        text.textContent = term;
-        item.append(svg, text);
-        list.appendChild(item);
+      scope.querySelectorAll("[data-" + dashed(offer.field) + "]").forEach(function (element) {
+        var value = offer.record[element.dataset[offer.field]];
+        if (value !== undefined && value !== null) element.textContent = String(value);
+      });
+
+      /* The terms live in the catalog too, so one edit updates them all. */
+      scope.querySelectorAll("[data-" + dashed(offer.terms) + "]").forEach(function (list) {
+        fillCheckList(list, offer.record.terms);
       });
     });
+
+    renderSpecials(scope);
+    renderAreaRules(scope);
 
     /* Package breakdown rows that are unique to a tier. The rows built from
        catalog rates stay in the markup as compute spans; these are the tier's
@@ -227,7 +474,7 @@
 
     var services = pricing.services;
     var treatments = pricing.treatments;
-    var promotion = pricing.promotion;
+    var promotion = bannerPromotion;
 
     function add(label, detail, amount) {
       lines.push({ label: label, detail: detail, total: amount });
@@ -448,7 +695,7 @@
         return item ? item.label : key;
       }).join("; ") || "None selected");
 
-      setHidden("promotion_code", draft.promo_applied ? pricing.promotion.code : "Not applied");
+      setHidden("promotion_code", draft.promo_applied ? bannerPromotion.code : "Not applied");
       setHidden("planning_estimate", formatPrice(result.total));
       setHidden("estimate_breakdown", describe(draft) || "No priced services selected");
       setHidden("pricing_version", pricing.version);
@@ -456,6 +703,486 @@
 
     form.addEventListener("input", sync);
     form.addEventListener("change", sync);
+    sync();
+  }
+
+  /* --------------------------------------------------- netlify submission */
+
+  /*
+   * One place where a form on this site is handed to Netlify Forms, so every
+   * promotion that uses the booking system submits the same way and a new
+   * offer needs no submission code of its own.
+   *
+   * Netlify records a submission for a POST to any real path on the site as
+   * long as the body carries the `form-name` of a form registered at deploy
+   * time, and answers with that form's success page. The site root is the
+   * default target because it is the one path that always exists and cannot be
+   * renamed out from under the pages that post to it.
+   */
+  var NETLIFY_FORM_ENDPOINT = "/";
+
+  function netlifySubmit(form) {
+    var body = new URLSearchParams();
+
+    /* Built field by field rather than handed straight to URLSearchParams: a
+       File value would otherwise be stringified into the body as
+       "[object File]" and quietly replace the customer's answer. */
+    new FormData(form).forEach(function (value, key) {
+      if (typeof value === "string") body.append(key, value);
+    });
+
+    return fetch(form.dataset.netlifySubmit || NETLIFY_FORM_ENDPOINT, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: body.toString()
+    }).then(function (response) {
+      if (!response.ok) throw new Error("Netlify Forms answered " + response.status);
+      return response;
+    });
+  }
+
+  /* The first control the browser will refuse to submit on, if there is one.
+     Read from the live validity state rather than by calling checkValidity():
+     that call fires an `invalid` event of its own, and anything listening for
+     invalid controls would then be asking the same question from inside its
+     own answer. */
+  function firstInvalidControl(form) {
+    var controls = form.querySelectorAll("input, select, textarea");
+    for (var index = 0; index < controls.length; index += 1) {
+      var control = controls[index];
+      if (control.willValidate && control.validity && !control.validity.valid) return control;
+    }
+    return null;
+  }
+
+  function isVisible(element) {
+    return Boolean(element && (element.offsetWidth || element.offsetHeight || element.getClientRects().length));
+  }
+
+  /* ------------------------------------------------------ special requests */
+
+  /*
+   * The request form behind every "Book This Special" button. It is a second
+   * entry point into the same `quick-estimate` Netlify form the booking flow
+   * submits to, so a promotion request and a full booking request land in one
+   * submission list rather than two. Every field it sends is declared on the
+   * booking review form, which is the page Netlify parses at deploy time to
+   * register the form and its fields. The AJAX request carries that registered
+   * name in `form-name` and posts through the shared submitter above, while the
+   * ordinary form action remains the no-JavaScript fallback.
+   *
+   * Which special is being requested is carried by the promotion_code select,
+   * a registered field in its own right, and the menu is built from the shared
+   * catalog. The code therefore travels with the request whether or not
+   * JavaScript ran, a link of the form /quote?code=CARPET350 only has to
+   * preselect it, and a promotion added to the catalog later is bookable and
+   * submittable through this same form without a line of code of its own.
+   */
+  function setupQuoteForm() {
+    var form = document.querySelector("[data-quote-form]");
+    if (!form || !pricing) return;
+
+    var confirmation = document.querySelector("[data-quote-confirmation]");
+    var panel = document.querySelector("[data-quote-panel]");
+    var status = form.querySelector("[data-quote-status]");
+    var button = form.querySelector("button[type='submit']");
+    var codeField = form.elements.promotion_code;
+    var submitting = false;
+
+    var dateInput = form.elements.preferred_date;
+    if (dateInput) {
+      var today = new Date();
+      dateInput.min = today.getFullYear()
+        + "-" + String(today.getMonth() + 1).padStart(2, "0")
+        + "-" + String(today.getDate()).padStart(2, "0");
+    }
+
+    /* Build the menu from the shared catalog. Existing markup remains a useful
+       no-JavaScript fallback, while new catalog promotions automatically join
+       the same booking and submission flow. */
+    if (codeField && codeField.options) {
+      var selectedCode = codeField.value;
+      codeField.innerHTML = "";
+      pricing.specials.filter(function (listed) {
+        return listed.kind !== "move";
+      }).forEach(function (listed) {
+        var option = document.createElement("option");
+        option.value = listed.code;
+        option.textContent = listed.code + " — " + listed.name + " · " + formatPrice(listed.price);
+        codeField.appendChild(option);
+      });
+      if (hasOption(selectedCode)) codeField.value = selectedCode;
+    }
+
+    function hasOption(code) {
+      if (!codeField || !codeField.options) return false;
+      return Array.prototype.some.call(codeField.options, function (option) {
+        return option.value === code;
+      });
+    }
+
+    /* A "Book This Special" button is just a link to this page carrying its
+       own code, which is what attaches the right offer to the request. */
+    var requested = new URLSearchParams(window.location.search).get("code");
+    if (requested && codeField && hasOption(requested.toUpperCase())) {
+      codeField.value = requested.toUpperCase();
+    }
+
+    function currentOffer() {
+      return (codeField && special(codeField.value))
+        || entryCarpetSpecial
+        || (pricing.specials && pricing.specials[0])
+        || null;
+    }
+
+    function setHidden(name, value) {
+      var field = form.elements[name];
+      if (field) field.value = value;
+    }
+
+    function setStatus(message) {
+      if (!status) return;
+      status.textContent = message || "";
+      status.hidden = !message;
+    }
+
+    /*
+     * A control the customer cannot see must never be the thing that stops the
+     * form. A hidden number input left at 0 while its markup says min="1" is
+     * invalid for as long as it is on the page, and the browser then refuses to
+     * submit while showing nothing at all: there is no visible field to point
+     * the message at, and the submit event never fires. That is what made
+     * "Book This Special" look dead — the offer the customer filled in was
+     * fine, and a counter belonging to a different offer was quietly vetoing
+     * it. Clearing the floor on the counters that are not in play is what keeps
+     * the form sendable, and it is re-asserted on every click because it has to
+     * be true at the moment the browser validates.
+     */
+    function relaxIdleQuantities() {
+      form.querySelectorAll("[data-quantity-group]").forEach(function (group) {
+        var field = form.elements[group.dataset.quantityGroup];
+        if (!field || !group.hidden) return;
+        field.required = false;
+        field.min = "0";
+        if (toCount(field.value) <= 0) field.value = "0";
+      });
+    }
+
+    /*
+     * Point the page at the selected offer: its card, its terms, what it
+     * includes, and the one quantity it is counted in. The quantities it is
+     * not counted in are zeroed, their required flag dropped and their minimum
+     * cleared, so a carpet request never carries a stray HVAC count and a
+     * hidden counter can never block submission.
+     */
+    function applyOffer() {
+      var offer = currentOffer();
+      if (!offer) return;
+      var quantities = specialQuantities(offer);
+
+      document.querySelectorAll("[data-quote-offer]").forEach(function (block) {
+        block.dataset.special = offer.code;
+      });
+      renderSpecials(document);
+
+      document.querySelectorAll("[data-quote-code]").forEach(function (element) {
+        element.textContent = offer.code;
+      });
+
+      /* How areas are counted only applies to the carpet specials. */
+      document.querySelectorAll("[data-quote-carpet-only]").forEach(function (element) {
+        element.hidden = offer.kind !== "carpet" && offer.kind !== "combo";
+      });
+
+      document.querySelectorAll("[data-quote-includes-card]").forEach(function (element) {
+        element.hidden = !offer.includes || !offer.includes.length;
+      });
+
+      form.querySelectorAll("[data-quantity-group]").forEach(function (group) {
+        var name = group.dataset.quantityGroup;
+        var field = form.elements[name];
+        var quantity = quantities.find(function (listed) { return listed && listed.field === name; });
+        var active = Boolean(quantity);
+
+        group.hidden = !active;
+        if (!field) return;
+
+        if (active) {
+          /* The counter in play is required and counts from one: an offer for
+             nothing is not an offer, and the field is on screen, so the browser
+             can show the customer exactly what it wants. */
+          field.required = true;
+          field.min = "1";
+          if (quantity.max) field.max = String(quantity.max);
+          if (toCount(field.value) <= 0) field.value = String(quantity.included || 1);
+        } else {
+          field.required = false;
+          field.min = "0";
+          field.value = "0";
+        }
+      });
+    }
+
+    /* Keeps the visible figure and the hidden fields that get submitted in
+       step with each other, so the estimate in the submission is the estimate
+       the customer was looking at when they sent it. */
+    function sync() {
+      var offer = currentOffer();
+      if (!offer) return { lines: [], total: 0 };
+      var quantities = specialQuantities(offer);
+      var quantity = quantities[0];
+      var field = quantity.field ? form.elements[quantity.field] : null;
+      /* An offer whose counter is not on this page — a flat-rate promotion, or
+         one naming a quantity the markup has no control for — is still priced
+         and still bookable, at the quantity its own catalog record includes. */
+      var count = field ? toCount(field.value) : (quantity.included || 1);
+      var secondary = quantities[1] && form.elements[quantities[1].field]
+        ? toCount(form.elements[quantities[1].field].value)
+        : 0;
+      var result = specialEstimate(offer, count, secondary);
+
+      document.querySelectorAll("[data-quote-total]").forEach(function (element) {
+        element.textContent = formatPrice(result.total);
+      });
+
+      document.querySelectorAll("[data-quote-breakdown]").forEach(function (list) {
+        list.innerHTML = "";
+
+        if (!result.lines.length) {
+          var empty = document.createElement("li");
+          empty.className = "estimate-empty";
+          empty.textContent = "Enter the number of " + quantity.noun + " to see the figure.";
+          list.appendChild(empty);
+          return;
+        }
+
+        result.lines.forEach(function (line) {
+          var item = document.createElement("li");
+          var description = document.createElement("span");
+          var value = document.createElement("strong");
+          description.textContent = line.label + " · " + line.detail;
+          value.textContent = formatPrice(line.total);
+          item.append(description, value);
+          list.appendChild(item);
+        });
+      });
+
+      setHidden("planning_estimate", formatPrice(result.total));
+      setHidden("estimate_breakdown", result.lines.map(function (line) {
+        return line.label + ": " + formatPrice(line.total);
+      }).join("; ") || "No quantity entered");
+      setHidden("pricing_version", pricing.version);
+      setHidden("promotion_name", offer.name);
+      setHidden("promotion_quantity", offer.kind === "combo" ? "1" : String(count));
+      setHidden("promotion_quantity_label", offer.kind === "combo" ? "Combined appointment" : quantity.label);
+      setHidden("notes", form.elements.job_description ? form.elements.job_description.value : "");
+
+      return result;
+    }
+
+    form.addEventListener("input", sync);
+    form.addEventListener("change", function (event) {
+      if (codeField && event.target === codeField) applyOffer();
+      sync();
+    });
+
+    /* Validation that fails has to say so. The browser points at the first
+       visible control itself; this puts the reason in the page as well, so a
+       customer who scrolled past it is not left looking at a button that
+       appears to do nothing. */
+    form.addEventListener("invalid", function (event) {
+      setStatus("Please complete the highlighted fields, then send again.");
+      if (event.target === firstInvalidControl(form) && isVisible(event.target)) {
+        try {
+          event.target.scrollIntoView({ block: "center" });
+        } catch (error) {
+          event.target.scrollIntoView();
+        }
+      }
+    }, true);
+
+    /* Runs before the browser validates, which is the only moment left to make
+       sure nothing invisible is holding the form back. */
+    if (button) button.addEventListener("click", relaxIdleQuantities);
+
+    form.addEventListener("submit", function (event) {
+      /* Without JavaScript this listener never runs and the browser posts the
+         form the ordinary way: Netlify still records the submission, the
+         promotion_code select carries the offer, and the action attribute
+         carries the visitor to the confirmation page. */
+      event.preventDefault();
+      if (submitting) return;
+
+      /* Belt and braces: the submit event only fires on a valid form, but a
+         programmatic submit() skips validation entirely, and a request that is
+         missing the customer's phone number is worse than one that is refused.
+         reportValidity both re-checks and shows the browser's own message. */
+      relaxIdleQuantities();
+      var validate = form.reportValidity || form.checkValidity;
+      if (typeof validate === "function" && !validate.call(form)) {
+        setStatus("Please complete the highlighted fields, then send again.");
+        return;
+      }
+
+      submitting = true;
+
+      /* Normalise the count once, at the point of sending, rather than on
+         every keystroke — rewriting the field as it is typed makes it fiddly
+         to clear and retype. */
+      var offer = currentOffer();
+      specialQuantities(offer).forEach(function (quantity) {
+        var countField = quantity && quantity.field ? form.elements[quantity.field] : null;
+        if (countField) countField.value = String(toCount(countField.value));
+      });
+
+      var result = sync();
+      var original = button ? button.textContent : "";
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Sending…";
+      }
+      setStatus("");
+
+      netlifySubmit(form).then(function () {
+        if (panel) panel.hidden = true;
+        if (confirmation) {
+          confirmation.querySelectorAll("[data-quote-total]").forEach(function (element) {
+            element.textContent = formatPrice(result.total);
+          });
+          confirmation.hidden = false;
+          confirmation.setAttribute("tabindex", "-1");
+          confirmation.focus();
+          confirmation.scrollIntoView({ block: "start" });
+        } else {
+          setStatus("Request received. We will be in touch to confirm the scope.");
+        }
+      }).catch(function (error) {
+        /* Never fail silently: the button comes back, the reason is on the
+           page, and there is a way to reach us that does not depend on it. */
+        submitting = false;
+        if (button) {
+          button.disabled = false;
+          button.textContent = original;
+        }
+        setStatus("That did not send — please try again, or call (404) 716-2720 and quote "
+          + offer.code + ".");
+        if (window.console && window.console.error) window.console.error(error);
+      });
+    });
+
+    applyOffer();
+    sync();
+    setStatus("");
+  }
+
+  /* --------------------------------------------- move-cleaning promotions */
+
+  function setupMovePromotionForm() {
+    var form = document.querySelector("[data-move-promotion-form]");
+    if (!form || !pricing) return;
+
+    var panel = document.querySelector("[data-move-promotion-panel]");
+    var confirmation = document.querySelector("[data-move-promotion-confirmation]");
+    var status = form.querySelector("[data-move-promotion-status]");
+    var button = form.querySelector("button[type='submit']");
+    var submitting = false;
+
+    var requestedCode = new URLSearchParams(window.location.search).get("code");
+    if (requestedCode) {
+      var requestedOption = form.querySelector(
+        "input[name='promotion_code'][value='" + requestedCode.toUpperCase().replace(/[^A-Z0-9]/g, "") + "']"
+      );
+      if (requestedOption) requestedOption.checked = true;
+    }
+
+    var dateInput = form.elements.preferred_date;
+    if (dateInput) {
+      var today = new Date();
+      dateInput.min = today.getFullYear()
+        + "-" + String(today.getMonth() + 1).padStart(2, "0")
+        + "-" + String(today.getDate()).padStart(2, "0");
+    }
+
+    function selectedOffer() {
+      var selected = form.querySelector("input[name='promotion_code']:checked");
+      return selected ? special(selected.value) : null;
+    }
+
+    function setHidden(name, value) {
+      var field = form.elements[name];
+      if (field) field.value = value;
+    }
+
+    function setStatus(message) {
+      if (!status) return;
+      status.textContent = message || "";
+      status.hidden = !message;
+    }
+
+    function sync() {
+      var offer = selectedOffer();
+      if (!offer) return;
+      var formatted = formatPrice(offer.price);
+      var breakdown = offer.name + " (" + offer.code + ") — starting planning estimate: " + formatted;
+
+      setHidden("promotion_name", offer.name);
+      setHidden("promotion_quantity", "1");
+      setHidden("promotion_quantity_label", "Cleaning package");
+      setHidden("planning_estimate", formatted);
+      setHidden("estimate_breakdown", breakdown);
+      setHidden("pricing_version", pricing.version);
+
+      document.querySelectorAll("[data-move-selected-name]").forEach(function (element) {
+        element.textContent = offer.name;
+      });
+      document.querySelectorAll("[data-move-selected-code]").forEach(function (element) {
+        element.textContent = offer.code;
+      });
+      document.querySelectorAll("[data-move-selected-price]").forEach(function (element) {
+        element.textContent = formatted;
+      });
+    }
+
+    form.addEventListener("input", sync);
+    form.addEventListener("change", sync);
+    form.addEventListener("invalid", function (event) {
+      setStatus("Please complete the highlighted fields, then send again.");
+      if (event.target === firstInvalidControl(form) && isVisible(event.target)) {
+        event.target.scrollIntoView({ block: "center" });
+      }
+    }, true);
+
+    form.addEventListener("submit", function (event) {
+      event.preventDefault();
+      if (submitting || !form.reportValidity()) return;
+
+      sync();
+      submitting = true;
+      setStatus("Sending your request…");
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Sending…";
+      }
+
+      netlifySubmit(form).then(function () {
+        setStatus("");
+        if (panel) panel.hidden = true;
+        if (confirmation) {
+          confirmation.hidden = false;
+          confirmation.scrollIntoView({ block: "start" });
+        } else {
+          window.location.href = form.action || "/thank-you";
+        }
+      }).catch(function () {
+        submitting = false;
+        setStatus("We could not send the request. Please try again or call (404) 716-2720.");
+        if (button) {
+          button.disabled = false;
+          button.textContent = "Request my planning estimate";
+        }
+      });
+    });
+
     sync();
   }
 
@@ -495,11 +1222,23 @@
     });
   }
 
+  /* The shared promotion maths, exposed under one name so it can be exercised
+     without a browser and so anything added later reads the same catalog
+     rather than re-deriving a price of its own. */
+  window.DCA_BOOKING = {
+    special: special,
+    specialQuantity: specialQuantity,
+    specialEstimate: specialEstimate,
+    formatPrice: formatPrice
+  };
+
   renderPrices();
   setupNavigation();
   setupCompareSliders();
   setupClearDraft();
   setupStepForm();
   setupReviewForm();
+  setupQuoteForm();
+  setupMovePromotionForm();
   setupSummaryOnly();
 })();

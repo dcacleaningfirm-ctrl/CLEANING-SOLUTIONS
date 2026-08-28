@@ -7,14 +7,11 @@
  *
  * Bump VERSION to push a new shell to every installed phone.
  */
-var VERSION = "dca-manager-v8";
+var VERSION = "dca-manager-v19";
 var SHELL = [
   "/manager/",
   "/manager/manager.css",
   "/manager/manager.js",
-  // Maps, routing and address checking. Google's own library is left to the
-  // network: it is versioned and keyed on their side, and a cached copy of it
-  // would be the one thing here that could go stale badly.
   "/manager/maps.js",
   "/manager/offline.html",
   "/manager/manifest.webmanifest",
@@ -24,6 +21,23 @@ var SHELL = [
   "/data/pricing.js",
   "/logo.svg"
 ];
+
+// The app's own code, as opposed to the icons and artwork around it. These are
+// the files that change when the console gains a screen or a button, so they
+// are always asked of the network first and only fall back to the stored copy
+// when there is no signal. Serving these from cache first is what left a phone
+// running a build that was replaced days ago.
+var APP_CODE = [
+  "/manager/manager.js",
+  "/manager/maps.js",
+  "/manager/manager.css",
+  "/manager/setup/setup.js",
+  "/data/pricing.js"
+];
+
+function isAppCode(pathname) {
+  return APP_CODE.indexOf(pathname) !== -1;
+}
 
 self.addEventListener("install", function (event) {
   event.waitUntil(
@@ -103,6 +117,29 @@ self.addEventListener("fetch", function (event) {
               })
             );
           });
+        })
+    );
+    return;
+  }
+
+  // The app's own code: network first, so opening the console online always
+  // runs the build that is currently deployed. The stored copy is kept only as
+  // the answer for a phone with no signal. ignoreSearch lets a request for
+  // manager.js?v=11 be answered by the plain manager.js put there at install.
+  if (isAppCode(url.pathname)) {
+    event.respondWith(
+      fetch(req)
+        .then(function (res) {
+          if (isCacheable(res)) {
+            var copy = res.clone();
+            caches.open(VERSION).then(function (cache) {
+              cache.put(req, copy);
+            });
+          }
+          return res;
+        })
+        .catch(function () {
+          return caches.match(req, { ignoreSearch: true });
         })
     );
     return;

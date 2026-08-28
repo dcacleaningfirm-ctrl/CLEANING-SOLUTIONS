@@ -54,15 +54,36 @@
           <input type="hidden" name="form-name" value="quick-estimate">
           <input type="hidden" name="carpet_rooms" value="0">
           <input type="hidden" name="air_vents" value="0">
+          <!--
+            Not collected by the booking steps, which count vents rather than
+            systems. It is declared here because this page is the one Netlify
+            parses to register the `quick-estimate` form and its fields, and
+            the DUCT299 request on /quote — which is priced per HVAC unit —
+            submits into this same form. A field absent here is dropped there.
+          -->
+          <input type="hidden" name="hvac_units" value="0">
           <input type="hidden" name="armchairs" value="0">
           <input type="hidden" name="sofas" value="0">
           <input type="hidden" name="sectionals" value="0">
           <input type="hidden" name="move_packages" value="0">
           <input type="hidden" name="selected_add_ons" value="None selected">
           <input type="hidden" name="promotion_code" value="Not applied">
+          <input type="hidden" name="promotion_name" value="Not applied">
+          <input type="hidden" name="promotion_quantity" value="0">
+          <input type="hidden" name="promotion_quantity_label" value="Not applicable">
           <input type="hidden" name="planning_estimate" value="$0.00">
           <input type="hidden" name="estimate_breakdown" value="No priced services selected">
+          <input type="hidden" name="move_type" value="">
+          <input type="hidden" name="bedrooms" value="0">
+          <input type="hidden" name="bathrooms" value="0">
+          <input type="hidden" name="approximate_square_footage" value="0">
+          <input type="hidden" name="carpeted_areas" value="0">
+          <input type="hidden" name="property_condition" value="">
+          <input type="hidden" name="customer_notes" value="">
           <input type="hidden" name="pricing_version" value="">
+          <input type="hidden" name="notes" value="">
+            <input type="hidden" name="service_area_status" value="extended_area_sales_lead">
+            <input type="hidden" name="service_area_match" value="location_unconfirmed">
           <p class="honeypot"><label>Do not fill this out: <input name="bot-field"></label></p>
 
           <section class="form-card" aria-labelledby="review-heading">
@@ -83,8 +104,12 @@
               <div class="field"><label for="customer-name">Name</label><input id="customer-name" name="customer_name" autocomplete="name" required></div>
               <div class="field"><label for="phone">Phone</label><input id="phone" name="phone" type="tel" autocomplete="tel" required></div>
               <div class="field"><label for="email">Email</label><input id="email" name="email" type="email" autocomplete="email" required></div>
+              <div class="field field-full"><label for="service-address">Service address <span class="field-optional">optional</span></label><input id="service-address" name="service_address" autocomplete="street-address" placeholder="Street address where the work happens"></div>
+              <div class="field"><label for="city">City <span class="field-optional">optional</span></label><input id="city" name="city" autocomplete="address-level2"></div>
+              <div class="field"><label for="state">State <span class="field-optional">optional</span></label><input id="state" name="state" autocomplete="address-level1" maxlength="20" placeholder="GA"></div>
               <div class="field"><label for="zip">Service ZIP code</label><input id="zip" name="zip_code" inputmode="numeric" autocomplete="postal-code" pattern="[0-9]{5}(-[0-9]{4})?" required></div>
               <div class="field"><label for="preferred-date">Preferred date</label><input id="preferred-date" name="preferred_date" type="date"></div>
+              <div class="field"><label for="preferred-time">Preferred arrival</label><select id="preferred-time" name="preferred_time"><option value="">No preference</option><option value="Morning (8am–12pm)">Morning (8am–12pm)</option><option value="Afternoon (12pm–4pm)">Afternoon (12pm–4pm)</option><option value="Late afternoon (4pm–6pm)">Late afternoon (4pm–6pm)</option></select></div>
               <div class="field"><label for="contact-method">Best way to reach you</label><select id="contact-method" name="contact_method"><option value="Phone">Phone</option><option value="Text">Text</option><option value="Email">Email</option></select></div>
             </div>
           </section>
@@ -97,6 +122,7 @@
               <div class="field field-full"><label for="media"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-camera"></use></svg> Photo or short video</label><input id="media" name="job_media" type="file" accept="image/*,video/*"><small>Optional, and the single most useful thing you can send us. One clear photo of the area usually settles the scope before we arrive. Files up to 8 MB.</small></div>
               <div class="field field-full"><label class="consent-check"><input type="checkbox" name="terms_acknowledged" value="Yes" required><span>I understand this is a non-binding planning estimate, and that the final scope and price are confirmed before work begins. I have read the <a href="/service-terms" target="_blank" rel="noopener">service terms and limitations</a>.</span></label></div>
               <div class="field field-full"><label class="consent-check"><input type="checkbox" name="contact_consent" value="Yes" required><span>I authorize DCA Cleaning Solutions to contact me about this estimate by phone, text or email. Consent is not a condition of purchase.</span></label></div>
+              <div class="field field-full"><label class="consent-check"><input type="checkbox" name="sms_marketing_consent" value="Yes"><span>Text me occasional DCA Cleaning Solutions offers and service reminders at this number <span class="field-optional">optional</span>. Promotional texts are not required to purchase service, message and data rates may apply, and you can reply STOP at any time to stop them.</span></label></div>
             </div>
 
             <div class="workmanship">
@@ -128,6 +154,7 @@
 
   <footer class="site-footer"><div class="container"><div class="footer-bottom"><span>© 2026 Deluxe Carpet &amp; Air Duct Cleaning Solutions LLC, operating as DCA Cleaning Solutions. Atlanta, Georgia.</span><span><a href="/privacy">Privacy</a> · <a href="/service-terms">Service terms</a></span></div><p style="max-width:80ch; margin:1.25rem 0 0; color:#aaa59d; font-size:0.75rem; line-height:1.7;">Prices shown are planning estimates drawn from one shared catalog. Final scope and price are confirmed before work begins after dimensions, material condition and accessibility are reviewed. Cleaning removes soil and improves appearance; permanent dye loss, bleaching, sun fading, wear and existing material damage may not improve. Sanitizing and antimicrobial products are applied to compatible surfaces according to the manufacturer's EPA-registered label directions, and we make no claim beyond the label; this is not mold remediation. We stand behind the quality of our workmanship and will address concerns related to the agreed scope of service. See our <a href="/service-terms" style="color:#cbd5e1;">service terms and cleaning limitations</a>.</p></div></footer>
   <script src="/data/pricing.js" defer></script>
+  <script src="/assets/service-area.js" defer></script>
   <script src="/assets/site.js" defer></script>
 </body>
 </html>

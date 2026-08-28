@@ -1,22 +1,31 @@
 import type { Config, Context } from "@netlify/functions";
-import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../../db/index.js";
 import {
   customers,
   employees,
+  intakeFailures,
   jobEvents,
   jobItems,
   jobs,
+  leadEvents,
+  leads,
   notifications,
-  payments
+  payments,
+  securityEvents
 } from "../../db/schema.js";
-import { newPinRecord, validatePin, verifyPin } from "../../lib/manager-pin.js";
+import {
+  generateTempPin,
+  newPinRecord,
+  validatePin,
+  verifyPin
+} from "../../lib/manager-pin.js";
 import {
   computeRoute,
   geocodeAddress,
   joinAddress,
-  mapsSettings,
+  mapsSettings as fullMapsSettings,
   placeDetails,
   readCoordinate,
   suggestAddresses,
@@ -24,10 +33,47 @@ import {
 } from "../../lib/maps.js";
 import {
   CREW_ROLES,
+  type Permission,
+  can,
+  canAdministerAccount,
   canManageCrew,
   clearedCookie,
-  readSessionCookie
+  defaultViewFor,
+  isManagementSpecialist,
+  isOwner,
+  navigationFor,
+  permissionsFor,
+  readSessionCookie,
+  roleLabel
 } from "../../lib/manager-session.js";
+import {
+  LOCKOUT_MINUTES,
+  MAX_FAILED_ATTEMPTS,
+  SECURITY_EVENTS,
+  isLockedOut,
+  lockoutUntil,
+  minutesRemaining,
+  recordSecurityEvent,
+  securityEventLabel
+} from "../../lib/security-log.js";
+import {
+  addressKey,
+  backfill,
+  cleanRow,
+  emailKey,
+  mapHeaders,
+  phoneKey,
+  usableHeaders,
+  type CleanCustomer,
+  type HeaderMap
+} from "../../lib/customer-import.js";
+import {
+  checkCloverCustomerAccess,
+  cloverCustomerSettings,
+  mapWithConcurrency,
+  syncCustomerToClover,
+  type CloverSyncResult
+} from "../../lib/clover-customers.js";
 import {
   PAYMENT_METHODS,
   bookingConfirmation,
@@ -43,6 +89,31 @@ import {
   type AppointmentSummary,
   type NotifyChannel
 } from "../../lib/notify.js";
+import {
+  LEAD_SOURCES,
+  LEAD_SOURCE_VALUES,
+  LEAD_STATUSES,
+  LEAD_STATUS_VALUES,
+  genericAdapter,
+  ingestLead,
+  isTestLead,
+  leadSourceLabel,
+  leadStatusLabel,
+  retryIntakeFailure
+} from "../../lib/lead-intake.js";
+import { handleMarketingRoute } from "../../lib/marketing-routes.js";
+import {
+  SERVICE_NOTE_FIELDS,
+  createServiceNote,
+  listServiceNotes,
+  noteBelongsTo,
+  readServiceNoteInput,
+  serviceNoteById,
+  serviceNoteHistory,
+  updateServiceNote
+} from "../../lib/service-notes.js";
+import { customerMarketingProfile } from "../../lib/customer-marketing.js";
+import { PROMOTIONS, promotionByCode } from "../../lib/promotions.js";
 
 // Read + write API for the DCA Pro Manager app. Login lives in a separate
 // function (manager-login); everything here requires a valid session cookie.
@@ -67,9 +138,591 @@ const MAX_DURATION_MINUTES = 12 * 60;
 const DEFAULT_DURATION_MINUTES = 120;
 const MAX_BACKDATE_DAYS = 30;
 const MAX_LEAD_DAYS = 540;
+
+const CORE_SERVICE_CITIES = [
+  "stone mountain", "riverdale", "south clayton", "jonesboro", "morrow", "stockbridge"
+];
+const CORE_SERVICE_ZIPS = [
+  "30083", "30087", "30088", "30236", "30238", "30250", "30260",
+  "30273", "30274", "30281", "30296"
+];
+
+function serviceAreaZone(row: { city?: string | null; state?: string | null; zip?: string | null }) {
+  const city = String(row.city || "").trim().toLowerCase();
+  const state = String(row.state || "").trim().toLowerCase();
+  const zip = (String(row.zip || "").match(/\d{5}/) || [""])[0];
+  const georgia = !state || state === "ga" || state === "georgia";
+  return georgia && (CORE_SERVICE_CITIES.includes(city) || CORE_SERVICE_ZIPS.includes(zip))
+    ? "core_service_area"
+    : "extended_area_sales_lead";
+}
+
+function leadAttention(row: {
+  status: string;
+  submittedAt?: Date | null;
+  updatedAt?: Date | null;
+  nextFollowUpAt?: Date | null;
+}) {
+  if (["scheduled", "completed", "lost"].includes(row.status)) return "closed";
+  const now = Date.now();
+  if (row.nextFollowUpAt) {
+    return new Date(row.nextFollowUpAt).getTime() <= now ? "due" : "scheduled";
+  }
+  const anchor = new Date(row.updatedAt || row.submittedAt || 0).getTime();
+  const wait = row.status === "new" ? 15 * 60 * 1000 : row.status === "contacted" ? 24 * 60 * 60 * 1000 : 48 * 60 * 60 * 1000;
+  return anchor && anchor + wait <= now ? "due" : "waiting";
+}
 const MAX_LINE_ITEMS = 40;
 const MAX_UNIT_PRICE_CENTS = 1000000;
 const MAX_JOB_TOTAL_CENTS = 5000000;
+
+// Bulk import guard rails. A browser sends the file up in slices so no single
+// request has to hold a whole spreadsheet, and so the progress bar on screen is
+// telling the truth rather than guessing. The commit slice is smaller than the
+// preview slice because each committed row can also cost a call to Clover.
+const MAX_IMPORT_COLUMNS = 80;
+const MAX_IMPORT_ROWS_PER_REQUEST = 250;
+const MAX_IMPORT_CELL = 600;
+// How many keys the browser may carry forward between preview slices, so a
+// household repeated on line 3 and line 900 is still counted once.
+const MAX_IMPORT_SEEN_KEYS = 40000;
+// Clover is a shared service. A handful of its calls at a time keeps an import
+// well inside the merchant's rate limit.
+const CLOVER_SYNC_CONCURRENCY = 4;
+// A booking must never wait on Clover. If the directory has not answered by
+// then the customer is filed as pending and the office can retry.
+const CLOVER_INLINE_TIMEOUT_MS = 4500;
+
+interface SyncableCustomer {
+  id: number;
+  name: string;
+  phone: string | null;
+  email: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+  zip: string | null;
+  cloverCustomerId: string | null;
+}
+
+// Sync one customer to Clover and write down how it went. Clover never gets a
+// say in whether the DCA record survives: a failure here is recorded against
+// the account and can be retried, and the caller carries on regardless.
+async function syncCustomerAndRecord(
+  customer: SyncableCustomer,
+  options: { timeoutMs?: number } = {}
+): Promise<CloverSyncResult> {
+  const settings = cloverCustomerSettings();
+  const run = syncCustomerToClover(
+    {
+      name: customer.name,
+      phone: customer.phone,
+      email: customer.email,
+      address: customer.address,
+      city: customer.city,
+      state: customer.state,
+      zip: customer.zip
+    },
+    customer.cloverCustomerId,
+    { settings }
+  );
+
+  let result: CloverSyncResult;
+  if (options.timeoutMs) {
+    const timedOut: CloverSyncResult = {
+      ok: false,
+      cloverCustomerId: customer.cloverCustomerId || null,
+      action: "skipped",
+      error: "Clover did not answer in time — queued for retry",
+      permission: false
+    };
+    result = await Promise.race([
+      run.catch((err) => ({
+        ok: false,
+        cloverCustomerId: customer.cloverCustomerId || null,
+        action: "skipped" as const,
+        error: String((err as Error)?.message || "Clover sync failed").slice(0, 300),
+        permission: false
+      })),
+      new Promise<CloverSyncResult>((resolve) =>
+        setTimeout(() => resolve(timedOut), options.timeoutMs)
+      )
+    ]);
+  } else {
+    result = await run.catch((err) => ({
+      ok: false,
+      cloverCustomerId: customer.cloverCustomerId || null,
+      action: "skipped" as const,
+      error: String((err as Error)?.message || "Clover sync failed").slice(0, 300),
+      permission: false
+    }));
+  }
+
+  await db
+    .update(customers)
+    .set(cloverSyncColumns(result, settings.enabled, customer.cloverCustomerId))
+    .where(eq(customers.id, customer.id))
+    .catch((err) => {
+      console.error("could not record clover sync status", err);
+    });
+
+  return result;
+}
+
+// What the customers table should say after a sync attempt. An account with no
+// Clover configuration sits at "pending" rather than "error": nothing is broken,
+// the office simply has not switched the connection on yet.
+function cloverSyncColumns(
+  result: CloverSyncResult,
+  configured: boolean,
+  previousId: string | null | undefined
+) {
+  return {
+    cloverCustomerId: result.cloverCustomerId || previousId || null,
+    cloverSyncStatus: result.ok ? "synced" : configured ? "error" : "pending",
+    cloverSyncError: result.ok ? null : (result.error || "").slice(0, 300) || null,
+    cloverSyncedAt: result.ok ? new Date() : undefined
+  };
+}
+
+// Keys the browser carries from one slice to the next so a household written
+// twice in the same file is counted once even when the two rows land in
+// different requests.
+function readKeySet(raw: unknown): Set<string> {
+  const list = Array.isArray(raw) ? raw : [];
+  const keys = new Set<string>();
+  for (const value of list.slice(0, MAX_IMPORT_SEEN_KEYS)) {
+    const key = String(value ?? "").slice(0, 200);
+    if (key) keys.add(key);
+  }
+  return keys;
+}
+
+// The last ten digits of whatever is written in the phone column, which is how
+// the lookup below compares numbers in SQL. Kept separate from phoneKey() so a
+// stored number this app cannot parse still matches the row SQL found.
+function storedPhoneKey(raw: string | null | undefined): string | null {
+  const digits = String(raw || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : null;
+}
+
+// Everything the importer needs to decide whether an account is already on file
+// and what is missing from it.
+const IMPORT_LOOKUP_COLUMNS = {
+  id: customers.id,
+  name: customers.name,
+  phone: customers.phone,
+  altPhone: customers.altPhone,
+  email: customers.email,
+  address: customers.address,
+  city: customers.city,
+  state: customers.state,
+  zip: customers.zip,
+  leadSource: customers.leadSource,
+  service: customers.service,
+  notes: customers.notes,
+  cloverCustomerId: customers.cloverCustomerId,
+  cloverSyncStatus: customers.cloverSyncStatus
+};
+
+type ExistingCustomer = Awaited<ReturnType<typeof findCustomersByKeys>>[number];
+
+// One query for the whole slice rather than two per row. Phones are compared on
+// their last ten digits, emails in lower case and addresses on their letters
+// with the spacing evened out, which is the same test the importer applies to
+// the incoming file.
+async function findCustomersByKeys(phones: string[], emails: string[], addresses: string[]) {
+  if (!phones.length && !emails.length && !addresses.length) return [];
+  const tests = [];
+  if (phones.length) {
+    tests.push(
+      inArray(
+        sql`right(regexp_replace(coalesce(${customers.phone}, ''), '[^0-9]', '', 'g'), 10)`,
+        phones
+      )
+    );
+  }
+  if (emails.length) tests.push(inArray(sql`lower(${customers.email})`, emails));
+  if (addresses.length) {
+    tests.push(
+      inArray(
+        sql`lower(regexp_replace(btrim(coalesce(${customers.address}, '')), '[[:space:]]+', ' ', 'g'))`,
+        addresses
+      )
+    );
+  }
+  return db.select(IMPORT_LOOKUP_COLUMNS).from(customers).where(or(...tests));
+}
+
+const IMPORT_SAMPLE_LIMIT = 10;
+// A slice can only report so many problems before the list stops being useful.
+const IMPORT_ERROR_LIMIT = 400;
+
+interface ImportSample {
+  line: number;
+  status: "new" | "duplicate" | "invalid";
+  name: string;
+  phone: string;
+  email: string;
+  city: string;
+  detail: string;
+}
+
+// One line of the downloadable error report. The original cells are not sent
+// back — the browser still holds the file it parsed and joins on the line
+// number, so nothing has to make a second trip across the wire.
+interface ImportProblem {
+  line: number;
+  name: string;
+  phone: string;
+  email: string;
+  reason: string;
+  imported: boolean;
+  cloverSynced: boolean;
+}
+
+interface ImportRequest {
+  mode: "preview" | "commit";
+  headers: string[];
+  map: HeaderMap;
+  rows: string[][];
+  firstLine: number;
+  seenPhones: Set<string>;
+  seenEmails: Set<string>;
+  seenAddresses: Set<string>;
+  syncClover: boolean;
+  actorName: string;
+}
+
+// The importer proper. Preview and commit walk the identical path; only the
+// writing at the end is different, so what the office approves on screen is
+// what the file will do.
+async function runCustomerImport(request: ImportRequest) {
+  const { mode, map, rows, firstLine, seenPhones, seenEmails, seenAddresses } = request;
+
+  const counts = {
+    rows: 0,
+    blank: 0,
+    valid: 0,
+    duplicate: 0,
+    invalid: 0,
+    created: 0,
+    existing: 0,
+    updated: 0,
+    failed: 0,
+    cloverCreated: 0,
+    cloverLinked: 0,
+    cloverUpdated: 0,
+    cloverErrors: 0
+  };
+  const samples: ImportSample[] = [];
+  const problems: ImportProblem[] = [];
+  const newPhoneKeys: string[] = [];
+  const newEmailKeys: string[] = [];
+  const newAddressKeys: string[] = [];
+
+  function note(problem: ImportProblem) {
+    if (problems.length < IMPORT_ERROR_LIMIT) problems.push(problem);
+  }
+  function show(sample: ImportSample) {
+    if (samples.length < IMPORT_SAMPLE_LIMIT) samples.push(sample);
+  }
+
+  const verdicts = rows.map((cells, i) => ({ line: firstLine + i, verdict: cleanRow(cells, map) }));
+
+  const phones = new Set<string>();
+  const emails = new Set<string>();
+  const addresses = new Set<string>();
+  for (const { verdict } of verdicts) {
+    if (verdict.kind !== "ok") continue;
+    if (verdict.phoneKey) phones.add(verdict.phoneKey);
+    if (verdict.emailKey) emails.add(verdict.emailKey);
+    if (verdict.addressKey) addresses.add(verdict.addressKey);
+  }
+  const onFile = await findCustomersByKeys([...phones], [...emails], [...addresses]);
+  const byPhone = new Map<string, ExistingCustomer>();
+  const byEmail = new Map<string, ExistingCustomer>();
+  const byAddress = new Map<string, ExistingCustomer>();
+  for (const row of onFile) {
+    for (const key of [storedPhoneKey(row.phone), phoneKey(row.phone)]) {
+      if (key && !byPhone.has(key)) byPhone.set(key, row);
+    }
+    const ek = emailKey(row.email);
+    if (ek && !byEmail.has(ek)) byEmail.set(ek, row);
+    const ak = addressKey(row.address);
+    if (ak && !byAddress.has(ak)) byAddress.set(ak, row);
+  }
+
+  interface PendingInsert {
+    line: number;
+    key: string;
+    customer: CleanCustomer;
+  }
+  const inserts: PendingInsert[] = [];
+  const updates: { line: number; row: ExistingCustomer; changes: Partial<CleanCustomer> }[] = [];
+  const alreadyOnFile: { line: number; row: ExistingCustomer }[] = [];
+
+  for (const { line, verdict } of verdicts) {
+    counts.rows++;
+    if (verdict.kind === "blank") {
+      counts.blank++;
+      continue;
+    }
+    if (verdict.kind === "invalid") {
+      counts.invalid++;
+      show({ line, status: "invalid", name: "", phone: "", email: "", city: "", detail: verdict.reason });
+      note({
+        line,
+        name: "",
+        phone: "",
+        email: "",
+        reason: verdict.reason,
+        imported: false,
+        cloverSynced: false
+      });
+      continue;
+    }
+
+    const customer = verdict.customer;
+    const pk = verdict.phoneKey;
+    const ek = verdict.emailKey;
+    const ak = verdict.addressKey;
+    const repeated = Boolean(
+      (pk && seenPhones.has(pk)) || (ek && seenEmails.has(ek)) || (ak && seenAddresses.has(ak))
+    );
+    const match =
+      (pk ? byPhone.get(pk) : undefined) ||
+      (ek ? byEmail.get(ek) : undefined) ||
+      (ak ? byAddress.get(ak) : undefined) ||
+      null;
+
+    if (match || repeated) {
+      counts.duplicate++;
+      show({
+        line,
+        status: "duplicate",
+        name: customer.name,
+        phone: customer.phone || "",
+        email: customer.email || "",
+        city: customer.city || "",
+        detail: match ? `Already on file as customer #${match.id}` : "Repeated earlier in this file"
+      });
+      if (mode === "commit" && match) {
+        const changes = backfill(match as unknown as Record<string, unknown>, customer);
+        if (Object.keys(changes).length) updates.push({ line, row: match, changes });
+        else alreadyOnFile.push({ line, row: match });
+      }
+      continue;
+    }
+
+    counts.valid++;
+    if (pk) {
+      seenPhones.add(pk);
+      newPhoneKeys.push(pk);
+    }
+    if (ek) {
+      seenEmails.add(ek);
+      newEmailKeys.push(ek);
+    }
+    if (ak) {
+      seenAddresses.add(ak);
+      newAddressKeys.push(ak);
+    }
+    // A row that arrived without a name was filed under its phone number, email
+    // or address. Say so on the preview so nobody wonders where the name in the
+    // customer list came from.
+    const madeUpName =
+      verdict.nameSource === "file" ? "" : `Name made from the ${verdict.nameSource}`;
+    show({
+      line,
+      status: "new",
+      name: customer.name,
+      phone: customer.phone || "",
+      email: customer.email || "",
+      city: customer.city || "",
+      detail: [customer.service, customer.leadSource, madeUpName].filter(Boolean).join(" · ")
+    });
+    // The line a row came from is looked up again after the insert by whatever
+    // the account can be recognised by, so a row with no phone or email is keyed
+    // on the name it was given.
+    if (mode === "commit") inserts.push({ line, key: pk || ek || customer.name, customer });
+  }
+
+  const syncTargets: { line: number; row: SyncableCustomer }[] = [];
+
+  if (mode === "commit") {
+    const stamp = `Imported from a customer file by ${request.actorName}`;
+    const toRow = (pending: PendingInsert) => ({
+      ...pending.customer,
+      notes: [pending.customer.notes, stamp].filter(Boolean).join("\n\n").slice(0, 2000),
+      // Every imported account starts owing Clover a sync, so one that never
+      // gets there is visible on screen instead of quietly missing.
+      cloverSyncStatus: "pending"
+    });
+
+    if (inserts.length) {
+      let created: SyncableCustomer[] = [];
+      try {
+        created = await db
+          .insert(customers)
+          .values(inserts.map(toRow))
+          .returning(IMPORT_LOOKUP_COLUMNS);
+      } catch (err) {
+        // A batch insert is all-or-nothing, so one unusable row would cost the
+        // office the rest of the slice. Fall back to one at a time and let the
+        // single bad row be the only casualty.
+        console.error("batched customer insert failed, retrying row by row", err);
+        for (const pending of inserts) {
+          try {
+            const [row] = await db.insert(customers).values(toRow(pending)).returning(IMPORT_LOOKUP_COLUMNS);
+            if (row) created.push(row);
+          } catch (rowErr) {
+            counts.failed++;
+            const reason = String((rowErr as Error)?.message || "Could not be saved").slice(0, 200);
+            note({
+              line: pending.line,
+              name: pending.customer.name,
+              phone: pending.customer.phone || "",
+              email: pending.customer.email || "",
+              reason,
+              imported: false,
+              cloverSynced: false
+            });
+          }
+        }
+      }
+      counts.created = created.length;
+      const lineByKey = new Map(inserts.map((pending) => [pending.key, pending.line]));
+      for (const row of created) {
+        const key = storedPhoneKey(row.phone) || emailKey(row.email) || row.name || "";
+        syncTargets.push({ line: lineByKey.get(key) ?? firstLine, row });
+      }
+    }
+
+    for (const update of updates) {
+      try {
+        await db.update(customers).set(update.changes).where(eq(customers.id, update.row.id));
+        counts.updated++;
+        syncTargets.push({ line: update.line, row: { ...update.row, ...update.changes } });
+      } catch (err) {
+        counts.failed++;
+        note({
+          line: update.line,
+          name: update.row.name,
+          phone: update.row.phone || "",
+          email: update.row.email || "",
+          reason: String((err as Error)?.message || "Could not be updated").slice(0, 200),
+          imported: false,
+          cloverSynced: false
+        });
+      }
+    }
+
+    // An account already on file with nothing to add is only worth a Clover call
+    // if Clover has not seen it yet.
+    for (const seen of alreadyOnFile) {
+      if (!seen.row.cloverCustomerId || seen.row.cloverSyncStatus !== "synced") {
+        syncTargets.push({ line: seen.line, row: seen.row });
+      }
+    }
+    counts.existing = counts.duplicate;
+  }
+
+  let clover: {
+    ok: boolean;
+    configured: boolean;
+    permission: boolean;
+    missing: string[];
+    message: string | null;
+  } | null = null;
+
+  if (mode === "commit" && request.syncClover && syncTargets.length) {
+    const access = await checkCloverCustomerAccess();
+    clover = {
+      ok: access.ok,
+      configured: access.configured,
+      permission: access.permission,
+      missing: access.missing,
+      message: access.error
+    };
+
+    if (!access.ok) {
+      // The connection is off or the token cannot see customers. Say so once and
+      // stop — several hundred rows each failing the same way helps nobody, and
+      // hammering a permission error is how a merchant gets rate limited.
+      const reason = (access.error || "Clover customer sync unavailable").slice(0, 300);
+      await Promise.all(
+        syncTargets.map((target) =>
+          db
+            .update(customers)
+            .set({
+              cloverSyncStatus: access.configured ? "error" : "pending",
+              cloverSyncError: reason
+            })
+            .where(eq(customers.id, target.row.id))
+            .catch(() => undefined)
+        )
+      );
+      if (access.configured) {
+        counts.cloverErrors += syncTargets.length;
+        for (const target of syncTargets) {
+          note({
+            line: target.line,
+            name: target.row.name,
+            phone: target.row.phone || "",
+            email: target.row.email || "",
+            reason,
+            imported: true,
+            cloverSynced: false
+          });
+        }
+      }
+    } else {
+      const results = await mapWithConcurrency(syncTargets, CLOVER_SYNC_CONCURRENCY, (target) =>
+        syncCustomerAndRecord(target.row)
+      );
+      results.forEach((result, i) => {
+        const target = syncTargets[i];
+        if (result.ok) {
+          if (result.action === "created") counts.cloverCreated++;
+          else if (result.action === "updated") counts.cloverUpdated++;
+          else counts.cloverLinked++;
+          return;
+        }
+        counts.cloverErrors++;
+        if (result.permission && clover) {
+          clover.ok = false;
+          clover.permission = false;
+          clover.message = result.error;
+        }
+        note({
+          line: target.line,
+          name: target.row.name,
+          phone: target.row.phone || "",
+          email: target.row.email || "",
+          reason: (result.error || "Clover sync failed").slice(0, 300),
+          imported: true,
+          cloverSynced: false
+        });
+      });
+    }
+  }
+
+  const matched: Record<string, string> = {};
+  for (const [field, at] of Object.entries(map.columns)) {
+    if (typeof at === "number") matched[field] = String(request.headers[at] || "").trim();
+  }
+
+  return {
+    mode,
+    columns: { matched, ignored: map.ignored },
+    counts,
+    samples,
+    problems,
+    newKeys: { phones: newPhoneKeys, emails: newEmailKeys, addresses: newAddressKeys },
+    clover
+  };
+}
 
 interface BookingItem {
   kind: string;
@@ -80,11 +733,25 @@ interface BookingItem {
   amountCents: number;
 }
 
+const ENVMT_LABEL = "Environmental Waste Fee (ENVMT)";
+const ENVMT_CENTS = 2500;
+
+function withRequiredEnvmt(items: BookingItem[]): BookingItem[] {
+  return [
+    ...items.filter((item) => item.kind !== "fee" && item.label.toUpperCase() !== ENVMT_LABEL.toUpperCase()),
+    { kind: "fee", label: ENVMT_LABEL, detail: "Required on every order", quantity: 1,
+      unitPriceCents: ENVMT_CENTS, amountCents: ENVMT_CENTS }
+  ];
+}
+
 // The account details the office can correct from the app, with the length each
 // one is stored at. A customer's name is the only field that cannot be blanked.
 const CUSTOMER_FIELDS = [
   { key: "name", label: "name", max: 120 },
   { key: "phone", label: "phone number", max: 40 },
+  // Imported lists routinely carry a second number. It is editable for the same
+  // reason the first one is: it is usually wrong before it is right.
+  { key: "altPhone", label: "alternate phone", max: 40 },
   { key: "email", label: "email", max: 160 },
   { key: "address", label: "street address", max: 200 },
   { key: "city", label: "city", max: 80 },
@@ -122,7 +789,7 @@ function readBookingItems(raw: unknown): { items: BookingItem[]; error?: string 
 
     const kind = String(entry?.kind || "service").trim().toLowerCase();
     items.push({
-      kind: ["service", "addon", "custom"].includes(kind) ? kind : "service",
+      kind: ["service", "addon", "custom", "fee", "tax"].includes(kind) ? kind : "service",
       label: label.slice(0, 160),
       detail: String(entry?.detail || "").trim().slice(0, 200) || null,
       quantity,
@@ -266,6 +933,18 @@ export default async (req: Request, context: Context) => {
     { status: 403 }
   );
 
+  // Management Specialist accounts are the owner's to run, and so is the owner
+  // role itself — an admin who could mint an owner would hold every Management
+  // Specialist power one sign-in later. An admin or a manager keeps the rest of
+  // the crew list.
+  const ownerOnly = json(
+    {
+      error:
+        "Only the owner can create, change or reset an owner or Management Specialist account"
+    },
+    { status: 403 }
+  );
+
   try {
     // Reading the cookie is inside the try: it verifies a signature, and any
     // failure there must come back as a clean 500 rather than a stack trace.
@@ -277,12 +956,17 @@ export default async (req: Request, context: Context) => {
     // The session cookie is stateless, so the account is re-read on every
     // request. Turning someone's access off, or changing their role, then takes
     // effect immediately instead of whenever their 12-hour session runs out.
+    //
+    // It is also what settles what this session may do: permissions come from
+    // the role on this row and never from anything the browser sent, so a code
+    // typed at the login screen can only ever open the account it belongs to.
     const [account] = await db
       .select({
         id: employees.id,
         name: employees.name,
         role: employees.role,
-        active: employees.active
+        active: employees.active,
+        mustChangePin: employees.mustChangePin
       })
       .from(employees)
       .where(eq(employees.id, session.employeeId));
@@ -295,13 +979,37 @@ export default async (req: Request, context: Context) => {
     }
 
     // --- Session ---------------------------------------------------------
+    // Every check below reads the role off the row just loaded, never off the
+    // cookie or the request body. Hiding a tab in the browser is a courtesy;
+    // this is the thing that actually decides what a role can reach, so a
+    // hand-written request to a route the screen never offered is refused here.
+    const allows = (permission: Permission) => can(account.role, permission);
+    const denied = (what: string) =>
+      json(
+        { error: `Your role does not have access to ${what}.`, forbidden: true },
+        { status: 403 }
+      );
+
+    // A technician sees the work assigned to them and nothing else. The test is
+    // the operational-overview permission: an account that cannot see the board
+    // for the whole business has no business reading rows off it either.
+    // Applied as a SQL filter rather than by trimming the response, so somebody
+    // else's jobs are never read out of the database in the first place.
+    const ownJobsOnly = !allows("dashboard");
+
     if (path === "session" && method === "GET") {
       return json({
         employee: {
           id: account.id,
           name: account.name,
           role: account.role,
-          canManageCrew: canManageCrew(account.role)
+          roleLabel: roleLabel(account.role),
+          permissions: permissionsFor(account.role),
+          navigation: navigationFor(account.role),
+          defaultView: defaultViewFor(account.role),
+          canManageCrew: canManageCrew(account.role),
+          isOwner: isOwner(account.role),
+          mustChangePin: Boolean(account.mustChangePin)
         }
       });
     }
@@ -310,14 +1018,40 @@ export default async (req: Request, context: Context) => {
       return json({ ok: true }, { headers: { "set-cookie": clearedCookie() } });
     }
 
+    // A temporary code gets its holder as far as this line and no further. The
+    // only thing an account with one may do is replace it, so a code somebody
+    // else knows can never be used to work in the app.
+    if (account.mustChangePin && path !== "pin") {
+      return json(
+        {
+          error: "Choose your own login code before using the app.",
+          mustChangePin: true
+        },
+        { status: 403 }
+      );
+    }
+
     // --- Dashboard -------------------------------------------------------
+    // Two audiences on one screen. Everybody entitled to the operational view
+    // gets the board — what is on today, what is still open, who is out. The
+    // money on it (pipeline, collected, outstanding, how many accounts are on
+    // file) is sales and financial reporting, so it is assembled only for a
+    // role holding that permission and is absent from the response otherwise
+    // rather than merely unrendered.
     if (path === "dashboard" && method === "GET") {
-      return json(await buildDashboard());
+      if (!allows("dashboard")) return denied("the dashboard");
+      return json(
+        await buildDashboard({
+          reports: allows("reports"),
+          leads: allows("leads"),
+          contacts: allows("customer_contacts")
+        })
+      );
     }
 
     // --- Custom charges ---------------------------------------------------
     if (path === "custom-charges" && method === "GET") {
-      if (!canManageCrew(account.role)) return forbidden;
+      if (!allows("charges")) return denied("invoicing and payments");
       const settings = cloverSettings();
       const rows = await db
         .select({
@@ -350,7 +1084,7 @@ export default async (req: Request, context: Context) => {
     }
 
     if (path === "custom-charges" && method === "POST") {
-      if (!canManageCrew(account.role)) return forbidden;
+      if (!allows("charges")) return denied("invoicing and payments");
       const settings = cloverSettings();
       if (settings.missing.length) {
         return json(
@@ -465,10 +1199,15 @@ export default async (req: Request, context: Context) => {
             name: customerName,
             email: customerEmail,
             phone: customerPhone,
-            notes: "Added through a custom charge"
+            notes: "Added through a custom charge",
+            cloverSyncStatus: "pending"
           })
           .returning();
         customer = inserted[0];
+        // Clover is told about the new account, but it is never allowed to hold
+        // up taking the money: the sync is raced against a short timeout and a
+        // miss leaves the account pending for the office to retry.
+        await syncCustomerAndRecord(customer, { timeoutMs: CLOVER_INLINE_TIMEOUT_MS });
       }
 
       const insertedJobs = await db
@@ -510,13 +1249,18 @@ export default async (req: Request, context: Context) => {
       return json({ ok: true, chargeId: chargeData.id });
     }
 
-    // --- What this app can collect and send ------------------------------
-    // The browser is told which payment methods are available and whether card
-    // charging and customer messaging are set up. Only variable names ever
-    // travel with the answer — never their values.
+    // --- What this app can collect, send and show -------------------------
+    // The browser is told which payment methods are available, whether card
+    // charging and customer messaging are set up, and whether the map has a key.
+    // Secrets stay behind: only variable names travel with the answer. The two
+    // exceptions are the keys that are published by design and useless without
+    // their own referrer restrictions — Clover's public key and the Maps browser
+    // key — because the scripts that use them run in the browser.
     if (path === "settings" && method === "GET") {
       const clover = cloverSettings();
       const notify = notifySettings();
+      const maps = mapsSettings();
+      const cloverCustomers = cloverCustomerSettings();
       return json({
         payments: {
           methods: PAYMENT_METHODS,
@@ -530,6 +1274,15 @@ export default async (req: Request, context: Context) => {
             sdkUrl: clover.sdkUrl
           }
         },
+        // Whether the customer directory is wired up, and which variables are
+        // still unset. Names only — no token, key or secret is ever sent to a
+        // browser.
+        customerSync: {
+          enabled: cloverCustomers.enabled,
+          missing: cloverCustomers.missing,
+          environment: cloverCustomers.environment,
+          tokenSource: cloverCustomers.tokenSource
+        },
         notifications: {
           email: {
             configured: notify.email.configured,
@@ -538,27 +1291,21 @@ export default async (req: Request, context: Context) => {
           },
           sms: { configured: notify.sms.configured, missing: notify.sms.missing }
         },
-        // Mapping is the one part of the app that needs a credential inside the
-        // page: a Google map cannot be drawn without a browser key. Every
-        // address lookup and every route still runs on the server, and this key
-        // only ever reaches a signed-in crew member.
-        maps: mapsSettings()
+        maps: {
+          enabled: maps.missing.length === 0,
+          missing: maps.missing,
+          browserKey: maps.browserKey || null
+        }
       });
     }
 
-    // --- Address lookup ---------------------------------------------------
-    // Suggestions as the office types an address. The search runs on the server
-    // with the site's own key, so the searching credential is never in the page
-    // and what is typed can be tidied up first — commas, lower case, "st" for
-    // "street", a missing city — before Google ever sees it.
+    // --- Verified addresses and route planning ---------------------------
     if (path === "places/suggest" && method === "GET") {
+      if (!allows("jobs")) return denied("checking service addresses");
       const maps = mapsSettings();
-      if (!maps.enabled) {
-        return json({ suggestions: [], missing: maps.missing, enabled: false });
-      }
+      if (!maps.enabled) return json({ suggestions: [], missing: maps.missing, enabled: false });
       const query = (url.searchParams.get("q") || "").trim().slice(0, 200);
       if (query.length < 3) return json({ suggestions: [], enabled: true });
-
       const session = (url.searchParams.get("session") || "").trim().slice(0, 64) || undefined;
       const result = await suggestAddresses(query, session);
       if (result.error && !result.suggestions.length) {
@@ -567,46 +1314,26 @@ export default async (req: Request, context: Context) => {
       return json({ suggestions: result.suggestions, enabled: true });
     }
 
-    // One address, resolved to the exact spot Google holds for it. Answers with
-    // how sure Google is: the app puts a marker down for a property and asks for
-    // more detail for anything vaguer, rather than dropping a pin on a street
-    // and letting a crew member find out at the door.
     if (path === "places/resolve" && method === "GET") {
+      if (!allows("jobs")) return denied("checking service addresses");
       const maps = mapsSettings();
-      if (!maps.enabled) {
-        return json({ error: "Google Maps is not set up on this site yet", missing: maps.missing }, { status: 503 });
-      }
-
+      if (!maps.enabled) return json({ error: "Google Maps is not set up", missing: maps.missing }, { status: 503 });
       const placeId = (url.searchParams.get("placeId") || "").trim();
       if (placeId) {
         const found = await placeDetails(placeId);
-        if (!found.place) {
-          return json({ error: found.error || "That address could not be found" }, { status: 404 });
-        }
-        return json({ place: found.place });
+        return found.place
+          ? json({ place: found.place })
+          : json({ error: found.error || "That address could not be found" }, { status: 404 });
       }
-
       const query = (url.searchParams.get("q") || "").trim().slice(0, 250);
       if (!query) return json({ error: "Type an address to look up" }, { status: 400 });
-      const geocoded = await geocodeAddress(query);
-      if (!geocoded.places.length) {
-        return json(
-          {
-            error:
-              geocoded.error ||
-              "Google could not find that address. Check the house number, street and ZIP."
-          },
-          { status: 404 }
-        );
-      }
-      return json({ place: geocoded.places[0], alternatives: geocoded.places.slice(1) });
+      const found = await geocodeAddress(query);
+      if (!found.places.length) return json({ error: found.error || "That address could not be found" }, { status: 404 });
+      return json({ place: found.places[0], alternatives: found.places.slice(1) });
     }
 
-    // --- Stops on the map -------------------------------------------------
-    // Everything scheduled between two instants, with the coordinates each stop
-    // is drawn at. A job whose address has never been verified comes back with
-    // no coordinates and is listed separately rather than guessed at.
     if (path === "map/jobs" && method === "GET") {
+      if (!allows("jobs")) return denied("viewing routes");
       const from = new Date(url.searchParams.get("from") || "");
       const to = new Date(url.searchParams.get("to") || "");
       if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) {
@@ -615,8 +1342,7 @@ export default async (req: Request, context: Context) => {
       if (to.getTime() - from.getTime() > 15 * 86400000) {
         return json({ error: "Ask for a shorter date range" }, { status: 400 });
       }
-
-      const assignee = employees;
+      const assignee = alias(employees, "map_assignee");
       const rows = await db
         .select({
           id: jobs.id,
@@ -629,7 +1355,6 @@ export default async (req: Request, context: Context) => {
           address: jobs.address,
           latitude: jobs.latitude,
           longitude: jobs.longitude,
-          placeId: jobs.placeId,
           formattedAddress: jobs.formattedAddress,
           customerId: customers.id,
           customerName: customers.name,
@@ -646,28 +1371,12 @@ export default async (req: Request, context: Context) => {
         .from(jobs)
         .innerJoin(customers, eq(jobs.customerId, customers.id))
         .leftJoin(assignee, eq(jobs.assignedTo, assignee.id))
-        .where(
-          and(
-            gte(jobs.scheduledFor, from),
-            lt(jobs.scheduledFor, to),
-            ne(jobs.status, "cancelled")
-          )
-        )
+        .where(and(gte(jobs.scheduledFor, from), lt(jobs.scheduledFor, to), ne(jobs.status, "cancelled")))
         .orderBy(asc(jobs.scheduledFor));
 
-      // A job is drawn at its own verified spot when it has one, and otherwise
-      // at the customer's — the same house, saved from the account.
       const stops = rows.map((row) => {
         const onJob = validLocation(row.latitude, row.longitude);
         const onCustomer = validLocation(row.customerLatitude, row.customerLongitude);
-        const address =
-          row.address ||
-          joinAddress({
-            address: row.customerAddress || "",
-            city: row.customerCity || "",
-            state: row.customerState || "",
-            zip: row.customerZip || ""
-          });
         return {
           id: row.id,
           serviceType: row.serviceType,
@@ -676,122 +1385,51 @@ export default async (req: Request, context: Context) => {
           durationMinutes: row.durationMinutes,
           priceCents: row.priceCents,
           notes: row.notes,
-          address,
+          address: row.address || joinAddress({ address: row.customerAddress || "", city: row.customerCity || "", state: row.customerState || "", zip: row.customerZip || "" }),
           formattedAddress: row.formattedAddress || row.customerFormattedAddress || null,
           latitude: onJob ? row.latitude : onCustomer ? row.customerLatitude : null,
           longitude: onJob ? row.longitude : onCustomer ? row.customerLongitude : null,
-          locationFrom: onJob ? "job" : onCustomer ? "customer" : null,
           customerId: row.customerId,
           customerName: row.customerName,
           customerPhone: row.customerPhone,
           assignedName: row.assignedName
         };
       });
-
-      return json({
-        jobs: stops,
-        mapped: stops.filter((s) => s.latitude !== null).length,
-        maps: mapsSettings()
-      });
+      return json({ jobs: stops, mapped: stops.filter((s) => s.latitude !== null).length, maps: mapsSettings() });
     }
 
-    // Putting a job that was booked before addresses were verified onto the map.
-    // Its stored address is geocoded once and kept, so it never has to be looked
-    // up again — and a result Google is unsure about is handed back for someone
-    // to confirm instead of being saved as fact.
     const locateMatch = path.match(/^jobs\/(\d+)\/locate$/);
     if (locateMatch && method === "POST") {
-      const maps = mapsSettings();
-      if (!maps.enabled) {
-        return json(
-          { error: "Google Maps is not set up on this site yet", missing: maps.missing },
-          { status: 503 }
-        );
-      }
-
+      if (!allows("jobs")) return denied("updating a service address");
       const id = Number(locateMatch[1]);
-      const [existing] = await db
-        .select({
-          id: jobs.id,
-          address: jobs.address,
-          customerId: jobs.customerId
-        })
-        .from(jobs)
-        .where(eq(jobs.id, id));
+      const [existing] = await db.select().from(jobs).where(eq(jobs.id, id));
       if (!existing) return json({ error: "Job not found" }, { status: 404 });
-
       const [customer] = await db.select().from(customers).where(eq(customers.id, existing.customerId));
-      const lookup =
-        existing.address ||
-        joinAddress({
-          address: customer?.address || "",
-          city: customer?.city || "",
-          state: customer?.state || "",
-          zip: customer?.zip || ""
-        });
-      if (!lookup) {
-        return json({ error: "This job has no address to look up yet" }, { status: 400 });
-      }
-
-      const geocoded = await geocodeAddress(lookup);
-      const place = geocoded.places[0];
-      if (!place) {
-        return json(
-          { error: geocoded.error || `Google could not find “${lookup}”` },
-          { status: 404 }
-        );
-      }
-      if (place.precision !== "exact") {
-        // Deliberately not saved: a pin in the middle of a street looks exactly
-        // like a verified address once it is on the map.
-        return json({ place, saved: false, needsReview: true });
-      }
-
-      await db
-        .update(jobs)
-        .set({
-          latitude: place.latitude,
-          longitude: place.longitude,
-          placeId: place.placeId,
-          formattedAddress: place.formattedAddress
-        })
-        .where(eq(jobs.id, id));
-
+      const lookup = existing.address || joinAddress({ address: customer?.address || "", city: customer?.city || "", state: customer?.state || "", zip: customer?.zip || "" });
+      if (!lookup) return json({ error: "This job has no address" }, { status: 400 });
+      const found = await geocodeAddress(lookup);
+      const place = found.places[0];
+      if (!place) return json({ error: found.error || "That address could not be found" }, { status: 404 });
+      if (place.precision !== "exact") return json({ place, saved: false, needsReview: true });
+      await db.update(jobs).set({ latitude: place.latitude, longitude: place.longitude, placeId: place.placeId, formattedAddress: place.formattedAddress }).where(eq(jobs.id, id));
       return json({ place, saved: true, needsReview: false });
     }
 
-    // --- Build a driving route -------------------------------------------
-    // The selected stops, in the order they should be driven. Google is asked
-    // for the quickest order when the office wants it; otherwise the order it is
-    // handed — appointment time — is kept and only the drawn line comes back.
     if (path === "route" && method === "POST") {
-      const maps = mapsSettings();
-      if (!maps.enabled) {
-        return json(
-          { error: "Google Maps is not set up on this site yet", missing: maps.missing },
-          { status: 503 }
-        );
-      }
-
+      if (!allows("jobs")) return denied("building routes");
       const body = (await req.json().catch(() => ({}))) as {
         jobIds?: unknown;
         origin?: { latitude?: unknown; longitude?: unknown } | null;
         originAddress?: string;
         optimize?: boolean;
       };
-
       const ids = Array.isArray(body.jobIds)
-        ? body.jobIds.map((v) => Number(v)).filter((v) => Number.isInteger(v) && v > 0)
+        ? body.jobIds.map(Number).filter((id) => Number.isInteger(id) && id > 0)
         : [];
-      if (!ids.length) return json({ error: "Pick the stops to route" }, { status: 400 });
-      if (ids.length > 20) {
-        return json({ error: "Route up to 20 stops at a time" }, { status: 400 });
-      }
-
+      if (!ids.length || ids.length > 20) return json({ error: "Pick between 1 and 20 stops" }, { status: 400 });
       const rows = await db
         .select({
           id: jobs.id,
-          scheduledFor: jobs.scheduledFor,
           address: jobs.address,
           latitude: jobs.latitude,
           longitude: jobs.longitude,
@@ -806,108 +1444,44 @@ export default async (req: Request, context: Context) => {
         .from(jobs)
         .innerJoin(customers, eq(jobs.customerId, customers.id))
         .where(inArray(jobs.id, ids));
-
-      // Kept in the order the app asked for, which is the order shown on screen.
-      const byId = new Map(rows.map((r) => [r.id, r]));
-      const chosen = ids.map((id) => byId.get(id)).filter(Boolean) as typeof rows;
-      const stops = chosen.map((row) => {
-        const onJob = validLocation(row.latitude, row.longitude);
-        const onCustomer = validLocation(row.customerLatitude, row.customerLongitude);
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      const stops = ids.map((id) => byId.get(id)).filter(Boolean).map((row) => {
+        const item = row!;
+        const onJob = validLocation(item.latitude, item.longitude);
+        const onCustomer = validLocation(item.customerLatitude, item.customerLongitude);
         return {
-          jobId: row.id,
-          customerName: row.customerName,
-          address:
-            row.address ||
-            joinAddress({
-              address: row.customerAddress || "",
-              city: row.customerCity || "",
-              state: row.customerState || "",
-              zip: row.customerZip || ""
-            }),
-          latitude: onJob ? Number(row.latitude) : onCustomer ? Number(row.customerLatitude) : null,
-          longitude: onJob ? Number(row.longitude) : onCustomer ? Number(row.customerLongitude) : null
+          jobId: item.id,
+          customerName: item.customerName,
+          address: item.address || joinAddress({ address: item.customerAddress || "", city: item.customerCity || "", state: item.customerState || "", zip: item.customerZip || "" }),
+          latitude: onJob ? Number(item.latitude) : onCustomer ? Number(item.customerLatitude) : null,
+          longitude: onJob ? Number(item.longitude) : onCustomer ? Number(item.customerLongitude) : null
         };
       });
+      const unmapped = stops.filter((stop) => stop.latitude === null);
+      if (unmapped.length) return json({ error: "Some stops need a verified address", unmapped: unmapped.map((stop) => stop.jobId) }, { status: 409 });
 
-      const unmapped = stops.filter((s) => s.latitude === null);
-      if (unmapped.length) {
-        return json(
-          {
-            error:
-              "These stops have no verified address yet: " +
-              unmapped.map((s) => s.customerName).join(", "),
-            unmapped: unmapped.map((s) => s.jobId)
-          },
-          { status: 409 }
-        );
-      }
-
-      // Where the drive starts: the crew member's own position, an address they
-      // typed, or — failing both — the first stop.
       let origin: { latitude: number; longitude: number } | null = null;
       let originLabel: string | null = null;
-      let originPrecision: string | null = null;
-
       if (body.origin && validLocation(body.origin.latitude, body.origin.longitude)) {
-        origin = {
-          latitude: Number(body.origin.latitude),
-          longitude: Number(body.origin.longitude)
-        };
+        origin = { latitude: Number(body.origin.latitude), longitude: Number(body.origin.longitude) };
         originLabel = "My location";
-        originPrecision = "device";
-      } else if (String(body.originAddress || "").trim()) {
-        const geocoded = await geocodeAddress(String(body.originAddress).trim());
-        const place = geocoded.places[0];
-        if (!place) {
-          return json(
-            {
-              error:
-                geocoded.error ||
-                "That starting address could not be found — check the street and ZIP"
-            },
-            { status: 400 }
-          );
-        }
+      } else if ((body.originAddress || "").trim()) {
+        const found = await geocodeAddress(body.originAddress!.trim());
+        const place = found.places[0];
+        if (!place) return json({ error: found.error || "Starting address not found" }, { status: 400 });
         origin = { latitude: place.latitude, longitude: place.longitude };
         originLabel = place.formattedAddress;
-        originPrecision = place.precision;
       }
-
       const routeStops = origin ? stops : stops.slice(1);
-      if (!routeStops.length) {
-        return json(
-          { error: "Pick two or more stops, or set where the drive starts from" },
-          { status: 400 }
-        );
-      }
-      const routeOrigin = origin || {
-        latitude: stops[0].latitude as number,
-        longitude: stops[0].longitude as number
-      };
-
-      const built = await computeRoute(
-        routeOrigin,
-        routeStops.map((s) => ({ latitude: s.latitude as number, longitude: s.longitude as number })),
-        body.optimize === true
-      );
-      if (!built.route) {
-        return json({ error: built.error || "Google could not build that route" }, { status: 502 });
-      }
-
+      if (!routeStops.length) return json({ error: "Pick two stops or set a starting point" }, { status: 400 });
+      const routeOrigin = origin || { latitude: stops[0].latitude!, longitude: stops[0].longitude! };
+      const built = await computeRoute(routeOrigin, routeStops.map((stop) => ({ latitude: stop.latitude!, longitude: stop.longitude! })), body.optimize === true);
+      if (!built.route) return json({ error: built.error || "Google could not build that route" }, { status: 502 });
       const ordered = built.route.order.map((index) => routeStops[index]).filter(Boolean);
-      const finalStops = origin ? ordered : [stops[0], ...ordered];
-
       return json({
-        route: {
-          optimize: body.optimize === true,
-          optimized: built.route.optimized,
-          polyline: built.route.polyline,
-          distanceMeters: built.route.distanceMeters,
-          durationSeconds: built.route.durationSeconds,
-          legs: built.route.legs
-        },
-        origin: origin ? { ...origin, label: originLabel, precision: originPrecision } : null,
-        stops: finalStops.map((s, i) => ({ ...s, position: i + 1 }))
+        route: { ...built.route, optimize: body.optimize === true },
+        origin: origin ? { ...origin, label: originLabel } : null,
+        stops: (origin ? ordered : [stops[0], ...ordered]).map((stop, index) => ({ ...stop, position: index + 1 }))
       });
     }
 
@@ -918,6 +1492,7 @@ export default async (req: Request, context: Context) => {
     // balance, the dashboard and the customer's receipt all agree.
     const jobPaymentsMatch = path.match(/^jobs\/(\d+)\/payments$/);
     if (jobPaymentsMatch && method === "POST") {
+      if (!allows("charges")) return denied("taking payments");
       const jobId = Number(jobPaymentsMatch[1]);
       const body = (await req.json().catch(() => ({}))) as {
         method?: string;
@@ -1115,9 +1690,13 @@ export default async (req: Request, context: Context) => {
     // read it back — or copy it into its own phone when no provider is set up.
     const confirmationMatch = path.match(/^jobs\/(\d+)\/confirmation$/);
     if (confirmationMatch && (method === "GET" || method === "POST")) {
+      if (!allows("jobs")) return denied("jobs");
       const jobId = Number(confirmationMatch[1]);
       const detail = await loadJob(jobId);
       if (!detail) return json({ error: "Job not found" }, { status: 404 });
+      if (ownJobsOnly && detail.job.assignedTo !== account.id) {
+        return denied("a job assigned to somebody else");
+      }
 
       const body =
         method === "POST"
@@ -1206,11 +1785,83 @@ export default async (req: Request, context: Context) => {
           role: employees.role,
           active: employees.active,
           // Whether a login code has been issued — never the code material.
-          hasCode: sql<boolean>`${employees.pinHash} is not null`
+          hasCode: sql<boolean>`${employees.pinHash} is not null`,
+          mustChangePin: employees.mustChangePin,
+          lockedUntil: employees.lockedUntil,
+          lastLoginAt: employees.lastLoginAt
         })
         .from(employees)
         .orderBy(employees.name);
-      return json({ crew: rows, canManageCrew: canManageCrew(account.role) });
+
+      const viewerIsOwner = isOwner(account.role);
+
+      // An account without the crew permission — a Management Specialist or a
+      // technician — still reaches this route, because the job and lead screens
+      // fill their "assigned to" list from it. It gets the roster as it always
+      // has, minus every field describing a login code: no code state, no
+      // lockouts, no sign-in times, for any row. The trimming happens here
+      // rather than on the screen, so those fields are absent from the response
+      // instead of merely unrendered. Contact columns go too unless the account
+      // is entitled to contact details, so the roster cannot be read as a
+      // phone list by a role that is not allowed one.
+      if (!canManageCrew(account.role)) {
+        const contacts = allows("customer_contacts");
+        return json({
+          crew: rows.map((row) => ({
+            id: row.id,
+            name: row.name,
+            email: contacts ? row.email : null,
+            phone: contacts ? row.phone : null,
+            role: row.role,
+            roleLabel: roleLabel(row.role),
+            active: row.active,
+            isManagementSpecialist: isManagementSpecialist(row.role),
+            canAdminister: false
+          })),
+          canManageCrew: false,
+          isOwner: false,
+          roles: []
+        });
+      }
+
+      const crew = rows.map((row) => {
+        const specialist = isManagementSpecialist(row.role);
+        // A Management Specialist row is a name and a role to anybody but the
+        // owner. Its code state — issued, temporary, locked — is part of what
+        // an admin must not be able to read, so it is dropped from the payload
+        // rather than merely hidden by the screen that renders it.
+        const visible = viewerIsOwner || !specialist;
+        return {
+          id: row.id,
+          name: row.name,
+          email: row.email,
+          phone: row.phone,
+          role: row.role,
+          roleLabel: roleLabel(row.role),
+          active: row.active,
+          isManagementSpecialist: specialist,
+          hasCode: visible ? row.hasCode : null,
+          mustChangePin: visible ? Boolean(row.mustChangePin) : null,
+          locked: visible ? isLockedOut(row.lockedUntil) : null,
+          lockedMinutes: visible ? minutesRemaining(row.lockedUntil) : null,
+          lastLoginAt: visible ? row.lastLoginAt : null,
+          // What this viewer may do to this row, decided on the server and
+          // repeated to the screen so it shows the buttons that will work.
+          canAdminister: canAdministerAccount(account.role, row.role)
+        };
+      });
+
+      return json({
+        crew,
+        canManageCrew: canManageCrew(account.role),
+        isOwner: viewerIsOwner,
+        roles: CREW_ROLES.map((r) => ({
+          value: r,
+          label: roleLabel(r),
+          // Only the owner may hand out or take away the specialist role.
+          allowed: canAdministerAccount(account.role, r)
+        }))
+      });
     }
 
     // Add a crew member and issue their first login code.
@@ -1226,13 +1877,24 @@ export default async (req: Request, context: Context) => {
 
       const name = (body.name || "").trim();
       const role = (body.role || "technician").trim().toLowerCase();
-      const pin = String(body.pin || "");
       if (!name) return json({ error: "Enter a name" }, { status: 400 });
       if (!CREW_ROLES.includes(role)) {
         return json({ error: "Choose a valid role" }, { status: 400 });
       }
-      const pinProblem = validatePin(pin);
-      if (pinProblem) return json({ error: pinProblem }, { status: 400 });
+      if (!canAdministerAccount(account.role, role)) return ownerOnly;
+
+      const specialist = isManagementSpecialist(role);
+
+      // A Management Specialist never has a code chosen for them. The app draws
+      // a temporary one from the operating system's random source, stores only
+      // its hash, and shows the digits to the owner once — after which the
+      // account has to replace it before it can do anything.
+      const tempPin = specialist ? generateTempPin() : "";
+      const pin = specialist ? tempPin : String(body.pin || "");
+      if (!specialist) {
+        const pinProblem = validatePin(pin);
+        if (pinProblem) return json({ error: pinProblem }, { status: 400 });
+      }
 
       const email = (body.email || "").trim() || null;
       if (email) {
@@ -1253,15 +1915,55 @@ export default async (req: Request, context: Context) => {
           email,
           phone: (body.phone || "").trim() || null,
           active: true,
+          mustChangePin: specialist,
+          pinUpdatedAt: new Date(),
+          createdByEmployeeId: account.id,
           ...newPinRecord(pin)
         })
         .returning({ id: employees.id, name: employees.name, role: employees.role });
 
-      console.log(`crew member ${created.id} added by employee ${session.employeeId}`);
-      return json({ member: created }, { status: 201 });
+      // The function log records that an account was created and by whom. It
+      // never records the code — not here and not anywhere else.
+      console.log(
+        `crew member ${created.id} (${role}) added by employee ${session.employeeId}`
+      );
+      await recordSecurityEvent({
+        event: SECURITY_EVENTS.accountCreated,
+        employeeId: created.id,
+        employeeName: created.name,
+        employeeRole: created.role,
+        actorEmployeeId: account.id,
+        actorName: account.name,
+        actorRole: account.role,
+        detail: specialist
+          ? "Management Specialist account created with a temporary code"
+          : `Account created as ${roleLabel(role)}`,
+        outcome: "success",
+        req
+      });
+
+      return json(
+        {
+          member: { ...created, roleLabel: roleLabel(created.role) },
+          // Returned exactly once, to the owner who just created the account,
+          // over the same authenticated request. It is never stored in plain
+          // text and cannot be retrieved again — a lost temporary code is
+          // replaced by issuing a new one.
+          ...(specialist
+            ? {
+                tempPin,
+                mustChangePin: true,
+                tempPinNotice:
+                  "Give this code to the Management Specialist in person. It is shown once, and they must choose their own code the first time they sign in."
+              }
+            : {})
+        },
+        { status: 201 }
+      );
     }
 
-    // Change your own login code. Available to every signed-in crew member.
+    // Change your own login code. Available to every signed-in crew member, and
+    // the one thing an account holding a temporary code is allowed to do.
     if (path === "pin" && method === "POST") {
       const body = (await req.json().catch(() => ({}))) as {
         currentPin?: string;
@@ -1280,7 +1982,52 @@ export default async (req: Request, context: Context) => {
       if (!me || !me.pinHash || !me.pinSalt) {
         return json({ error: "Not authenticated" }, { status: 401 });
       }
+
+      // This is the one route an account holding a temporary code can reach, so
+      // it gets the same brake the login screen has: guessing the current code
+      // from behind a session is no cheaper than guessing it from the front.
+      if (isLockedOut(me.lockedUntil)) {
+        return json(
+          {
+            error: `Too many incorrect codes. Try again in ${minutesRemaining(me.lockedUntil)} minute(s).`
+          },
+          { status: 429 }
+        );
+      }
+
       if (!verifyPin(currentPin, me.pinHash, me.pinSalt)) {
+        const attempts = Number(me.failedPinAttempts || 0) + 1;
+        const locking = attempts >= MAX_FAILED_ATTEMPTS;
+        await db
+          .update(employees)
+          .set({
+            failedPinAttempts: locking ? 0 : attempts,
+            lastFailedPinAt: new Date(),
+            ...(locking ? { lockedUntil: lockoutUntil() } : {})
+          })
+          .where(eq(employees.id, me.id));
+        await recordSecurityEvent({
+          event: locking
+            ? SECURITY_EVENTS.loginLocked
+            : SECURITY_EVENTS.loginFailed,
+          employeeId: me.id,
+          employeeName: me.name,
+          employeeRole: me.role,
+          actorEmployeeId: me.id,
+          actorName: me.name,
+          actorRole: me.role,
+          detail: locking
+            ? `Locked after ${MAX_FAILED_ATTEMPTS} incorrect codes while changing own code`
+            : `Wrong current code given while changing own code (attempt ${attempts} of ${MAX_FAILED_ATTEMPTS})`,
+          outcome: locking ? "locked" : "rejected",
+          req
+        });
+        if (locking) {
+          return json(
+            { error: `Too many incorrect codes. Try again in ${LOCKOUT_MINUTES} minute(s).` },
+            { status: 429 }
+          );
+        }
         return json({ error: "Current code is incorrect" }, { status: 403 });
       }
       if (currentPin === newPin) {
@@ -1291,10 +2038,32 @@ export default async (req: Request, context: Context) => {
 
       await db
         .update(employees)
-        .set(newPinRecord(newPin))
+        .set({
+          ...newPinRecord(newPin),
+          // Whatever brought them here — a routine change or a temporary code
+          // they were handed — they now hold a code nobody else knows.
+          mustChangePin: false,
+          pinUpdatedAt: new Date(),
+          failedPinAttempts: 0,
+          lockedUntil: null
+        })
         .where(eq(employees.id, me.id));
       console.log(`employee ${me.id} changed their own login code`);
-      return json({ ok: true });
+      await recordSecurityEvent({
+        event: SECURITY_EVENTS.pinChanged,
+        employeeId: me.id,
+        employeeName: me.name,
+        employeeRole: me.role,
+        actorEmployeeId: me.id,
+        actorName: me.name,
+        actorRole: me.role,
+        detail: me.mustChangePin
+          ? "Replaced a temporary code with their own"
+          : "Changed their own login code",
+        outcome: "success",
+        req
+      });
+      return json({ ok: true, mustChangePin: false });
     }
 
     // Issue a new login code for another crew member.
@@ -1302,23 +2071,68 @@ export default async (req: Request, context: Context) => {
     if (crewPinMatch && method === "POST") {
       if (!canManageCrew(account.role)) return forbidden;
       const id = Number(crewPinMatch[1]);
-      const body = (await req.json().catch(() => ({}))) as { newPin?: string };
-      const newPin = String(body.newPin || "");
-      const problem = validatePin(newPin);
-      if (problem) return json({ error: problem }, { status: 400 });
 
       const [target] = await db
-        .select({ id: employees.id, name: employees.name })
+        .select({ id: employees.id, name: employees.name, role: employees.role })
         .from(employees)
         .where(eq(employees.id, id));
       if (!target) return json({ error: "Unknown crew member" }, { status: 404 });
+      if (!canAdministerAccount(account.role, target.role)) return ownerOnly;
+
+      const specialist = isManagementSpecialist(target.role);
+      const body = (await req.json().catch(() => ({}))) as { newPin?: string };
+
+      // Resetting a Management Specialist code works the same way as issuing
+      // the first one: the app draws it, the owner reads it once and hands it
+      // over, and the specialist replaces it at the next sign-in. The owner
+      // never sets a code they would then know permanently.
+      const tempPin = specialist ? generateTempPin() : "";
+      const newPin = specialist ? tempPin : String(body.newPin || "");
+      if (!specialist) {
+        const problem = validatePin(newPin);
+        if (problem) return json({ error: problem }, { status: 400 });
+      }
 
       await db
         .update(employees)
-        .set(newPinRecord(newPin))
+        .set({
+          ...newPinRecord(newPin),
+          mustChangePin: specialist,
+          pinUpdatedAt: new Date(),
+          // A reset also clears a lockout: the person whose code was just
+          // replaced should not have to wait out somebody else's guessing.
+          failedPinAttempts: 0,
+          lockedUntil: null
+        })
         .where(eq(employees.id, id));
       console.log(`login code reissued for employee ${id} by employee ${session.employeeId}`);
-      return json({ ok: true, member: target });
+      await recordSecurityEvent({
+        event: SECURITY_EVENTS.pinReset,
+        employeeId: target.id,
+        employeeName: target.name,
+        employeeRole: target.role,
+        actorEmployeeId: account.id,
+        actorName: account.name,
+        actorRole: account.role,
+        detail: specialist
+          ? "Management Specialist code reset to a new temporary code"
+          : "Login code reissued",
+        outcome: "success",
+        req
+      });
+
+      return json({
+        ok: true,
+        member: { id: target.id, name: target.name },
+        ...(specialist
+          ? {
+              tempPin,
+              mustChangePin: true,
+              tempPinNotice:
+                "Give this code to the Management Specialist in person. It is shown once, and they must choose their own code the next time they sign in."
+            }
+          : {})
+      });
     }
 
     // Change a crew member's role, or turn their access on and off.
@@ -1334,12 +2148,17 @@ export default async (req: Request, context: Context) => {
       const [target] = await db.select().from(employees).where(eq(employees.id, id));
       if (!target) return json({ error: "Unknown crew member" }, { status: 404 });
 
+      // Owner-only in both directions: an admin can neither touch an existing
+      // Management Specialist nor promote somebody into the role.
+      if (!canAdministerAccount(account.role, target.role)) return ownerOnly;
+
       const updates: { role?: string; active?: boolean } = {};
       if (typeof body.role === "string") {
         const role = body.role.trim().toLowerCase();
         if (!CREW_ROLES.includes(role)) {
           return json({ error: "Choose a valid role" }, { status: 400 });
         }
+        if (!canAdministerAccount(account.role, role)) return ownerOnly;
         updates.role = role;
       }
       if (typeof body.active === "boolean") {
@@ -1370,18 +2189,148 @@ export default async (req: Request, context: Context) => {
       }
 
       if (Object.keys(updates).length > 0) {
-        await db.update(employees).set(updates).where(eq(employees.id, id));
+        // Changing somebody into or out of the specialist role starts them on
+        // a code the owner has to reissue, rather than carrying the old one
+        // across a change in what it unlocks.
+        const becomingSpecialist =
+          updates.role !== undefined &&
+          isManagementSpecialist(updates.role) &&
+          !isManagementSpecialist(target.role);
+
+        await db
+          .update(employees)
+          .set({
+            ...updates,
+            ...(becomingSpecialist ? { mustChangePin: true } : {})
+          })
+          .where(eq(employees.id, id));
         console.log(`crew member ${id} updated by employee ${session.employeeId}`);
+
+        if (updates.role !== undefined && updates.role !== target.role) {
+          await recordSecurityEvent({
+            event: SECURITY_EVENTS.roleChanged,
+            employeeId: target.id,
+            employeeName: target.name,
+            employeeRole: updates.role,
+            actorEmployeeId: account.id,
+            actorName: account.name,
+            actorRole: account.role,
+            detail: `Role changed from ${roleLabel(target.role)} to ${roleLabel(updates.role)}`,
+            outcome: "success",
+            req
+          });
+        }
+        if (updates.active !== undefined && updates.active !== target.active) {
+          await recordSecurityEvent({
+            event: SECURITY_EVENTS.accessChanged,
+            employeeId: target.id,
+            employeeName: target.name,
+            employeeRole: target.role,
+            actorEmployeeId: account.id,
+            actorName: account.name,
+            actorRole: account.role,
+            detail: updates.active
+              ? "App access turned on"
+              : "App access turned off",
+            outcome: "success",
+            req
+          });
+        }
       }
-      return json({ ok: true });
+      return json({
+        ok: true,
+        ...(updates.role !== undefined &&
+        isManagementSpecialist(updates.role) &&
+        !isManagementSpecialist(target.role)
+          ? {
+              notice:
+                "Issue a new login code for this account — a Management Specialist starts on a temporary code."
+            }
+          : {})
+      });
+    }
+
+    // --- Security audit log ----------------------------------------------
+    //
+    // Owner-only. It records who signed in, who failed, whose code was reset
+    // and who changed a role, so the movement of access can be reviewed after
+    // the fact by the one person entitled to review it.
+    if (path === "security-log" && method === "GET") {
+      if (!allows("security_log")) {
+        return json(
+          { error: "Only the owner can read the security log" },
+          { status: 403 }
+        );
+      }
+      const limit = Math.min(
+        Math.max(Number(url.searchParams.get("limit")) || 100, 1),
+        300
+      );
+      const wantEvent = (url.searchParams.get("event") || "").trim();
+      const wantEmployee = Number(url.searchParams.get("employeeId")) || 0;
+
+      const conditions: Array<SQL | undefined> = [];
+      if (wantEvent) conditions.push(eq(securityEvents.event, wantEvent));
+      if (wantEmployee) conditions.push(eq(securityEvents.employeeId, wantEmployee));
+      const filters = conditions.filter((c): c is SQL => Boolean(c));
+
+      const rows = await db
+        .select()
+        .from(securityEvents)
+        .where(filters.length ? and(...filters) : undefined)
+        .orderBy(desc(securityEvents.createdAt), desc(securityEvents.id))
+        .limit(limit);
+
+      return json({
+        events: rows.map((row) => ({
+          id: row.id,
+          event: row.event,
+          label: securityEventLabel(row.event),
+          employeeId: row.employeeId,
+          employeeName: row.employeeName,
+          employeeRole: row.employeeRole,
+          employeeRoleLabel: row.employeeRole ? roleLabel(row.employeeRole) : null,
+          actorName: row.actorName,
+          actorRole: row.actorRole ? roleLabel(row.actorRole) : null,
+          detail: row.detail,
+          outcome: row.outcome,
+          ip: row.ip,
+          createdAt: row.createdAt
+        }))
+      });
+    }
+
+    // --- Grow / Marketing ------------------------------------------------
+    //
+    // One gate in front of the whole section rather than a check inside each
+    // route. Marketing is the only place in the app that reads the entire
+    // contact list at once and the only place that can send to it, so the
+    // permission is tested before the request is even routed: a path this
+    // branch does not recognise is refused for a role without the permission
+    // just the same, and no new marketing route can be added later that
+    // accidentally forgets its own check.
+    if (path === "marketing" || path.startsWith("marketing/")) {
+      if (!allows("marketing")) return denied("marketing campaigns");
+      return await handleMarketingRoute({
+        path,
+        method,
+        req,
+        url,
+        account: { id: account.id, name: account.name, role: account.role }
+      });
     }
 
     // --- Customers -------------------------------------------------------
     if (path === "customers" && method === "GET") {
+      // The customer database. Gated on its own permission rather than on
+      // "runs the office": an admin books callers in all day without ever being
+      // able to page through, search or export the list of everyone on file.
+      if (!allows("customers")) return denied("the customer database");
       // `q` powers the lookup box on the booking screen: an agent types part of
       // a name, a phone number as the caller says it, or a street, and gets the
       // matching account back without leaving the call.
       const q = (url.searchParams.get("q") || "").trim();
+      const type = (url.searchParams.get("type") || "").trim().toLowerCase();
       let filter;
       if (q) {
         const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
@@ -1401,7 +2350,7 @@ export default async (req: Request, context: Context) => {
       const rows = await db
         .select()
         .from(customers)
-        .where(filter)
+        .where(and(filter, ["residential", "business"].includes(type) ? eq(customers.customerType, type) : undefined))
         .orderBy(customers.name)
         .limit(q ? 25 : 500);
       const jobCounts = await db
@@ -1418,9 +2367,33 @@ export default async (req: Request, context: Context) => {
     }
 
     // --- One customer account --------------------------------------------
+    //
+    // Reaching a single account is not the same as reaching the database. An
+    // account with the customer permission may open any of them. Everybody else
+    // may only open one they are already working: a customer attached to a job
+    // on their board, which for a technician means a job assigned to them. That
+    // is what lets a crew member standing at the door fix a misheard street name
+    // without also handing the office floor a searchable contact list.
+    async function mayReachCustomer(customerId: number): Promise<boolean> {
+      if (allows("customers")) return true;
+      if (!allows("jobs")) return false;
+      const [linked] = await db
+        .select({ id: jobs.id })
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.customerId, customerId),
+            ownJobsOnly ? eq(jobs.assignedTo, account.id) : undefined
+          )
+        )
+        .limit(1);
+      return Boolean(linked);
+    }
+
     const customerMatch = path.match(/^customers\/(\d+)$/);
     if (customerMatch && method === "GET") {
       const id = Number(customerMatch[1]);
+      if (!(await mayReachCustomer(id))) return denied("that customer account");
       const [customer] = await db.select().from(customers).where(eq(customers.id, id));
       if (!customer) return json({ error: "That customer no longer exists" }, { status: 404 });
       const [count] = await db
@@ -1431,11 +2404,12 @@ export default async (req: Request, context: Context) => {
     }
 
     // Correcting what is on file. A wrong phone number or a misheard street name
-    // is the single most common thing a crew member finds at the door, so any
-    // signed-in crew member can fix it — and the job they were looking at when
-    // they did keeps a line in its history saying so.
+    // is the single most common thing a crew member finds at the door, so anyone
+    // who can already reach the account may fix it — and the job they were
+    // looking at when they did keeps a line in its history saying so.
     if (customerMatch && method === "PATCH") {
       const id = Number(customerMatch[1]);
+      if (!(await mayReachCustomer(id))) return denied("that customer account");
       const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
 
       const [existing] = await db.select().from(customers).where(eq(customers.id, id));
@@ -1443,6 +2417,16 @@ export default async (req: Request, context: Context) => {
 
       const updates: Record<string, string | number | null> = {};
       const changed: string[] = [];
+      if (typeof body.customerType === "string") {
+        const type = body.customerType.trim().toLowerCase();
+        if (!["residential", "business"].includes(type)) {
+          return json({ error: "Choose Residential or Business / Commercial" }, { status: 400 });
+        }
+        if (existing.customerType !== type) {
+          updates.customerType = type;
+          changed.push("customer type");
+        }
+      }
       for (const field of CUSTOMER_FIELDS) {
         const raw = body[field.key];
         if (typeof raw !== "string") continue;
@@ -1503,7 +2487,16 @@ export default async (req: Request, context: Context) => {
       }
 
       await db.update(customers).set(updates).where(eq(customers.id, id));
-      const [updated] = await db.select().from(customers).where(eq(customers.id, id));
+      let [updated] = await db.select().from(customers).where(eq(customers.id, id));
+
+      // Pass the correction on to Clover when it touched something Clover keeps.
+      // Only gaps in Clover's own record are filled, so an address corrected
+      // there is never flattened by one edited here.
+      const CLOVER_FIELDS = ["name", "phone", "email", "address", "city", "state", "zip"];
+      if (updated && CLOVER_FIELDS.some((field) => updates[field] !== undefined)) {
+        await syncCustomerAndRecord(updated, { timeoutMs: CLOVER_INLINE_TIMEOUT_MS });
+        [updated] = await db.select().from(customers).where(eq(customers.id, id));
+      }
 
       // Edited from a job? Say so on that job's trail, so a changed address or
       // number is traceable to the visit it came from.
@@ -1526,10 +2519,319 @@ export default async (req: Request, context: Context) => {
       return json({ customer: updated, changed });
     }
 
+    // --- Service history and notes ---------------------------------------
+    //
+    // What was actually done at the house. Who may read and write it follows the
+    // same rule as the account itself: management reaches any customer's
+    // history, and a crew member reaches the history of a household they are
+    // working — a job on their own board — so the person who did the work is the
+    // person who can write it up, without that handing them the customer
+    // database.
+    //
+    // Money is separate again. What the house was charged is a management figure,
+    // so it is left out of the response entirely for a role without reporting
+    // access rather than sent down and hidden in the browser.
+    const notesMatch = path.match(/^customers\/(\d+)\/service-notes$/);
+    if (notesMatch && method === "GET") {
+      const id = Number(notesMatch[1]);
+      if (!(await mayReachCustomer(id))) return denied("that customer account");
+      const showMoney = allows("reports");
+      // The appointments a note can be attached to, so a write-up hangs off the
+      // visit it describes. Narrowed to a technician's own jobs the same way the
+      // job board is, so this cannot become a way to read somebody else's work.
+      const attachable = await db
+        .select({
+          id: jobs.id,
+          serviceType: jobs.serviceType,
+          status: jobs.status,
+          scheduledFor: jobs.scheduledFor,
+          completedAt: jobs.completedAt
+        })
+        .from(jobs)
+        .where(
+          and(
+            eq(jobs.customerId, id),
+            ownJobsOnly ? eq(jobs.assignedTo, account.id) : undefined
+          )
+        )
+        .orderBy(desc(jobs.scheduledFor))
+        .limit(50);
+      return json({
+        notes: await listServiceNotes(id, { money: showMoney }),
+        jobs: attachable,
+        // The trail of who wrote and who changed what, for the roles that
+        // supervise the work rather than do it.
+        history: allows("customers") ? await serviceNoteHistory(id) : [],
+        fields: SERVICE_NOTE_FIELDS,
+        promotions: PROMOTIONS,
+        canRecordAmount: showMoney,
+        canEditAny: allows("customers")
+      });
+    }
+
+    if (notesMatch && method === "POST") {
+      const id = Number(notesMatch[1]);
+      if (!(await mayReachCustomer(id))) return denied("that customer account");
+
+      const [customer] = await db
+        .select({ id: customers.id })
+        .from(customers)
+        .where(eq(customers.id, id))
+        .limit(1);
+      if (!customer) return json({ error: "That customer no longer exists" }, { status: 404 });
+
+      const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const parsed = readServiceNoteInput(body);
+      if (!parsed.values) return json({ error: parsed.error }, { status: 400 });
+      const values = parsed.values;
+
+      // A figure only lands on the note if the person writing it is allowed to
+      // record money at all.
+      if (!allows("reports")) delete values.amountCents;
+
+      // A promotion on a note has to be one the site is actually advertising, so
+      // the marketing segments can count them and nothing here invents an offer.
+      if (values.promotionCode) {
+        const promotion = promotionByCode(values.promotionCode);
+        if (!promotion) {
+          return json(
+            { error: "That promotion code is not one the site is advertising." },
+            { status: 400 }
+          );
+        }
+        values.promotionCode = promotion.code;
+        if (!values.promotionName) values.promotionName = promotion.name;
+      }
+
+      // The job this describes must belong to the same household, or the note
+      // would read as history for the wrong customer.
+      if (values.jobId) {
+        const [job] = await db
+          .select({ id: jobs.id, customerId: jobs.customerId })
+          .from(jobs)
+          .where(eq(jobs.id, Number(values.jobId)))
+          .limit(1);
+        if (!job || job.customerId !== id) {
+          return json({ error: "That job is not on this customer's account" }, { status: 400 });
+        }
+      }
+
+      // A crew member writing up their own visit is the technician on it unless
+      // the office says otherwise, and only the office may name somebody else.
+      if (!allows("customers")) {
+        values.technicianId = account.id;
+        values.technicianName = account.name;
+      } else if (values.technicianId) {
+        const [member] = await db
+          .select({ id: employees.id, name: employees.name })
+          .from(employees)
+          .where(eq(employees.id, Number(values.technicianId)))
+          .limit(1);
+        if (!member) return json({ error: "That crew member is not on the list" }, { status: 400 });
+        values.technicianName = values.technicianName || member.name;
+      }
+
+      const row = await createServiceNote(id, values, { id: account.id, name: account.name });
+
+      // The account has had something happen on it, which is what the office
+      // sorts a quiet customer list by.
+      await db
+        .update(customers)
+        .set({ lastActivityAt: new Date() })
+        .where(eq(customers.id, id));
+
+      console.log(`service note ${row.id} added to customer ${id} by employee ${account.id}`);
+      return json({ note: allows("reports") ? row : { ...row, amountCents: undefined } });
+    }
+
+    // Editing a note keeps the note. The row is updated, the previous values are
+    // written to the trail, and the note stays on the customer it was written
+    // for — the id in the path is checked against the note's own customer, so a
+    // note can never be moved onto another household by a hand-made request.
+    const serviceNoteMatch = path.match(/^customers\/(\d+)\/service-notes\/(\d+)$/);
+    if (serviceNoteMatch && method === "PATCH") {
+      const id = Number(serviceNoteMatch[1]);
+      const noteId = Number(serviceNoteMatch[2]);
+      if (!(await mayReachCustomer(id))) return denied("that customer account");
+
+      const existing = await serviceNoteById(noteId);
+      if (!noteBelongsTo(existing, id)) {
+        return json({ error: "That service note is not on this customer" }, { status: 404 });
+      }
+
+      // Management may correct any note. Everybody else may correct one they
+      // wrote themselves, which covers the crew member who mistyped a room count
+      // without letting one technician rewrite another's account of a visit.
+      const mine = Number(existing!.createdBy) === account.id;
+      if (!allows("customers") && !mine) {
+        return denied("service notes written by somebody else");
+      }
+
+      const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const parsed = readServiceNoteInput({ serviceDate: existing!.serviceDate, ...body });
+      if (!parsed.values) return json({ error: parsed.error }, { status: 400 });
+      const values = parsed.values;
+      if (!allows("reports")) delete values.amountCents;
+      delete values.jobId;
+      delete values.technicianId;
+
+      if (values.promotionCode) {
+        const promotion = promotionByCode(values.promotionCode);
+        if (!promotion) {
+          return json(
+            { error: "That promotion code is not one the site is advertising." },
+            { status: 400 }
+          );
+        }
+        values.promotionCode = promotion.code;
+        if (!values.promotionName) values.promotionName = promotion.name;
+      }
+
+      const result = await updateServiceNote(existing as Record<string, unknown>, values, {
+        id: account.id,
+        name: account.name
+      });
+      const note = result.row as Record<string, unknown>;
+      if (!allows("reports")) delete note.amountCents;
+      return json({ note, changed: result.changedFields });
+    }
+
+    // --- The marketing view of one customer ------------------------------
+    //
+    // Last service, how much work they have had, what offer they came in on,
+    // when they are due again, whether they may be contacted, and what has
+    // already been sent to them. Management information about a household, so it
+    // is gated on the Customer Marketing permission rather than on being able to
+    // open the account: a crew member at the door needs the address and the job,
+    // not the account's spend and marketing history.
+    const profileMatch = path.match(/^customers\/(\d+)\/marketing$/);
+    if (profileMatch && method === "GET") {
+      const id = Number(profileMatch[1]);
+      if (!allows("customer_marketing")) return denied("customer marketing information");
+      const profile = await customerMarketingProfile(id, { money: allows("reports") });
+      if (!profile) return json({ error: "That customer no longer exists" }, { status: 404 });
+      return json({ marketing: profile });
+    }
+
+    // --- Bulk import from a spreadsheet ----------------------------------
+    // The browser reads the file, splits it into slices and sends the raw cells
+    // up. Every rule about what a row means — which heading is which, what a
+    // usable phone number looks like, who is already on file — is applied here,
+    // on the server, in both preview and commit. The preview the office approves
+    // is therefore produced by exactly the code that does the writing.
+    if (path === "customers/import" && method === "POST") {
+      if (!allows("imports")) return denied("customer imports");
+
+      const body = (await req.json().catch(() => ({}))) as {
+        mode?: string;
+        headers?: unknown;
+        rows?: unknown;
+        firstLine?: number;
+        seenPhones?: unknown;
+        seenEmails?: unknown;
+        seenAddresses?: unknown;
+        syncClover?: boolean;
+      };
+
+      const rawHeaders = Array.isArray(body.headers) ? body.headers : [];
+      if (!rawHeaders.length) {
+        return json({ error: "That file has no column headings on its first line" }, { status: 400 });
+      }
+      if (rawHeaders.length > MAX_IMPORT_COLUMNS) {
+        return json(
+          { error: `A customer file can have at most ${MAX_IMPORT_COLUMNS} columns` },
+          { status: 400 }
+        );
+      }
+      const headers = rawHeaders.map((h) => String(h ?? "").slice(0, 120));
+      const map = mapHeaders(headers);
+      if (!usableHeaders(map)) {
+        return json(
+          {
+            error:
+              "This file needs a phone, an email or a street address column. " +
+              "“phone_number”, “Mobile”, “email_address”, “Street Address” and similar spellings are all understood. " +
+              "A name column is welcome but not required."
+          },
+          { status: 400 }
+        );
+      }
+
+      const rawRows = Array.isArray(body.rows) ? body.rows : [];
+      if (rawRows.length > MAX_IMPORT_ROWS_PER_REQUEST) {
+        return json(
+          { error: `Send at most ${MAX_IMPORT_ROWS_PER_REQUEST} rows at a time` },
+          { status: 400 }
+        );
+      }
+      const rows: string[][] = rawRows.map((row) =>
+        Array.isArray(row)
+          ? row.slice(0, MAX_IMPORT_COLUMNS).map((c) => String(c ?? "").slice(0, MAX_IMPORT_CELL))
+          : []
+      );
+
+      const line = Number(body.firstLine);
+      const firstLine = Number.isFinite(line) ? Math.max(2, Math.round(line)) : 2;
+
+      const result = await runCustomerImport({
+        mode: body.mode === "commit" ? "commit" : "preview",
+        headers,
+        map,
+        rows,
+        firstLine,
+        seenPhones: readKeySet(body.seenPhones),
+        seenEmails: readKeySet(body.seenEmails),
+        seenAddresses: readKeySet(body.seenAddresses),
+        syncClover: body.syncClover !== false,
+        actorName: account.name
+      });
+
+      if (result.counts.created || result.counts.updated) {
+        console.log(
+          `csv import by employee ${account.id}: ${result.counts.created} created, ${result.counts.updated} updated`
+        );
+      }
+      return json(result);
+    }
+
+    // Asked once before a bulk run so a token without customer permissions is
+    // reported clearly instead of failing several hundred rows one at a time.
+    if (path === "customers/import/clover-check" && method === "GET") {
+      if (!allows("imports")) return denied("customer imports");
+      const access = await checkCloverCustomerAccess();
+      return json({
+        ok: access.ok,
+        configured: access.configured,
+        permission: access.permission,
+        // Variable names only — never their values.
+        missing: access.missing,
+        message: access.error
+      });
+    }
+
+    // Retry a customer whose Clover sync failed. Any signed-in crew member can
+    // press it: the failure is visible on the account, and retrying it cannot
+    // change anything in DCA Pro Manager.
+    const cloverSyncMatch = path.match(/^customers\/(\d+)\/clover-sync$/);
+    if (cloverSyncMatch && method === "POST") {
+      if (!allows("imports")) return denied("the customer directory sync");
+      const id = Number(cloverSyncMatch[1]);
+      const [existing] = await db.select().from(customers).where(eq(customers.id, id));
+      if (!existing) return json({ error: "That customer no longer exists" }, { status: 404 });
+
+      const result = await syncCustomerAndRecord(existing);
+      const [updated] = await db.select().from(customers).where(eq(customers.id, id));
+      return json({
+        customer: updated,
+        sync: { ok: result.ok, action: result.action, error: result.error, permission: result.permission }
+      });
+    }
+
     // --- Day schedule ----------------------------------------------------
     // Everything already on the calendar between two instants, so whoever is on
     // the phone can see what is free before offering a time.
     if (path === "schedule" && method === "GET") {
+      if (!allows("schedule")) return denied("the schedule");
       const from = new Date(url.searchParams.get("from") || "");
       const to = new Date(url.searchParams.get("to") || "");
       if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) {
@@ -1558,7 +2860,14 @@ export default async (req: Request, context: Context) => {
         .from(jobs)
         .innerJoin(customers, eq(jobs.customerId, customers.id))
         .leftJoin(assignee, eq(jobs.assignedTo, assignee.id))
-        .where(and(gte(jobs.scheduledFor, from), lt(jobs.scheduledFor, to)))
+        .where(
+          and(
+            gte(jobs.scheduledFor, from),
+            lt(jobs.scheduledFor, to),
+            // A technician's calendar is their own calendar.
+            ownJobsOnly ? eq(jobs.assignedTo, account.id) : undefined
+          )
+        )
         .orderBy(asc(jobs.scheduledFor));
 
       const crew = await db
@@ -1572,6 +2881,7 @@ export default async (req: Request, context: Context) => {
 
     // --- Book an appointment ---------------------------------------------
     if (path === "jobs" && method === "POST") {
+      if (!allows("book")) return denied("booking appointments");
       const body = (await req.json().catch(() => ({}))) as {
         customerId?: number;
         customer?: {
@@ -1582,6 +2892,7 @@ export default async (req: Request, context: Context) => {
           city?: string;
           state?: string;
           zip?: string;
+          customerType?: string;
         };
         serviceType?: string;
         scheduledFor?: string;
@@ -1608,10 +2919,14 @@ export default async (req: Request, context: Context) => {
 
       const parsedItems = readBookingItems(body.items);
       if (parsedItems.error) return json({ error: parsedItems.error }, { status: 400 });
-      const itemsTotal = parsedItems.items.reduce((sum, i) => sum + i.amountCents, 0);
-      const priceCents = parsedItems.items.length
-        ? itemsTotal
-        : Math.round(Number(body.priceCents || 0));
+      const fallbackPrice = Math.round(Number(body.priceCents || 0));
+      const orderItems = parsedItems.items.length || fallbackPrice <= 0
+        ? parsedItems.items
+        : [{ kind: "service", label: serviceType.slice(0, 160), detail: null, quantity: 1,
+             unitPriceCents: fallbackPrice, amountCents: fallbackPrice }];
+      const requiredItems = withRequiredEnvmt(orderItems);
+      const itemsTotal = requiredItems.reduce((sum, i) => sum + i.amountCents, 0);
+      const priceCents = itemsTotal;
       if (!Number.isFinite(priceCents) || priceCents < 0 || priceCents > MAX_JOB_TOTAL_CENTS) {
         return json({ error: "Check the total — it is outside the allowed range" }, { status: 400 });
       }
@@ -1632,6 +2947,10 @@ export default async (req: Request, context: Context) => {
       // below rejects the time, the 409 hands this id back so a second attempt
       // attaches to the same account instead of filing the caller twice.
       const supplied = body.customer || {};
+      const customerType = String(supplied.customerType || "residential").trim().toLowerCase();
+      if (!["residential", "business"].includes(customerType)) {
+        return json({ error: "Choose Residential or Business / Commercial" }, { status: 400 });
+      }
       const contact = {
         name: (supplied.name || "").trim(),
         phone: (supplied.phone || "").trim() || null,
@@ -1657,6 +2976,10 @@ export default async (req: Request, context: Context) => {
           .where(eq(customers.id, Number(body.customerId)));
         if (!found) return json({ error: "That customer no longer exists" }, { status: 404 });
         customer = found;
+        if (customer.customerType !== customerType) {
+          await db.update(customers).set({ customerType }).where(eq(customers.id, customer.id));
+          customer = { ...customer, customerType };
+        }
 
         // Fill in details the account was missing — a first address, a mobile
         // number — but never overwrite something already on file from a call.
@@ -1664,15 +2987,15 @@ export default async (req: Request, context: Context) => {
         for (const field of ["phone", "email", "address", "city", "state", "zip"] as const) {
           if (contact[field] && !customer[field]) backfill[field] = contact[field] as string;
         }
-        // The account gets the verified coordinates too, but only when this
-        // booking is also what filled in its address. An existing customer sent
-        // to a different property this once keeps the address on file.
         if (hasBookedLocation && backfill.address && !validLocation(customer.latitude, customer.longitude)) {
           Object.assign(backfill, bookedLocation);
         }
         if (Object.keys(backfill).length) {
           await db.update(customers).set(backfill).where(eq(customers.id, customer.id));
           customer = { ...customer, ...backfill } as typeof customers.$inferSelect;
+          // Anything new about the customer is worth passing on, but only where
+          // Clover's own record is blank.
+          await syncCustomerAndRecord(customer, { timeoutMs: CLOVER_INLINE_TIMEOUT_MS });
         }
       } else {
         if (!contact.name) {
@@ -1698,10 +3021,16 @@ export default async (req: Request, context: Context) => {
             longitude: hasBookedLocation ? bookedLocation!.longitude : null,
             placeId: hasBookedLocation ? bookedLocation!.placeId : null,
             formattedAddress: hasBookedLocation ? bookedLocation!.formattedAddress : null,
-            notes: `Added by ${account.name} while booking by phone`
+            customerType,
+            notes: `Added by ${account.name} while booking by phone`,
+            cloverSyncStatus: "pending"
           })
           .returning();
         customer = created;
+        // The booking is already safe in DCA Pro Manager by this point. Clover
+        // gets a few seconds to answer and, if it does not, the account is left
+        // pending rather than the call being held up.
+        await syncCustomerAndRecord(customer, { timeoutMs: CLOVER_INLINE_TIMEOUT_MS });
       }
 
       // Warn before double-booking a crew member. The office can still go ahead
@@ -1747,9 +3076,9 @@ export default async (req: Request, context: Context) => {
         })
         .returning({ id: jobs.id });
 
-      if (parsedItems.items.length) {
+      if (requiredItems.length) {
         await db.insert(jobItems).values(
-          parsedItems.items.map((i) => ({ ...i, jobId: job.id }))
+          requiredItems.map((i) => ({ ...i, jobId: job.id }))
         );
       }
 
@@ -1789,6 +3118,7 @@ export default async (req: Request, context: Context) => {
 
     // --- Jobs list -------------------------------------------------------
     if (path === "jobs" && method === "GET") {
+      if (!allows("jobs")) return denied("the job board");
       const status = url.searchParams.get("status");
       const assignee = employees;
       const rows = await db
@@ -1814,7 +3144,14 @@ export default async (req: Request, context: Context) => {
         .from(jobs)
         .innerJoin(customers, eq(jobs.customerId, customers.id))
         .leftJoin(assignee, eq(jobs.assignedTo, assignee.id))
-        .where(status ? eq(jobs.status, status) : undefined)
+        .where(
+          and(
+            status ? eq(jobs.status, status) : undefined,
+            // A technician's board is their own work, filtered in SQL so the
+            // rest of the day's jobs are never read out of the database.
+            ownJobsOnly ? eq(jobs.assignedTo, account.id) : undefined
+          )
+        )
         .orderBy(desc(jobs.scheduledFor));
       return json({ jobs: rows });
     }
@@ -1822,14 +3159,19 @@ export default async (req: Request, context: Context) => {
     // --- Single job (with items + events) -------------------------------
     const jobMatch = path.match(/^jobs\/(\d+)$/);
     if (jobMatch && method === "GET") {
+      if (!allows("jobs")) return denied("the job board");
       const id = Number(jobMatch[1]);
       const job = await loadJob(id);
       if (!job) return json({ error: "Job not found" }, { status: 404 });
+      if (ownJobsOnly && job.job.assignedTo !== account.id) {
+        return denied("a job assigned to somebody else");
+      }
       return json(job);
     }
 
     // --- Update a job (status / assignment / notes) ---------------------
     if (jobMatch && method === "PATCH") {
+      if (!allows("jobs")) return denied("the job board");
       const id = Number(jobMatch[1]);
       const body = (await req.json().catch(() => ({}))) as {
         status?: string;
@@ -1844,6 +3186,20 @@ export default async (req: Request, context: Context) => {
 
       const [existing] = await db.select().from(jobs).where(eq(jobs.id, id));
       if (!existing) return json({ error: "Job not found" }, { status: 404 });
+      if (ownJobsOnly && existing.assignedTo !== account.id) {
+        return denied("a job assigned to somebody else");
+      }
+      // Moving an appointment or handing it to somebody else is office work, not
+      // field work: a technician updates the status of what they were given and
+      // writes on it, but does not rearrange the calendar or reassign a visit.
+      if (
+        ownJobsOnly &&
+        (body.assignedTo !== undefined ||
+          body.scheduledFor !== undefined ||
+          body.durationMinutes !== undefined)
+      ) {
+        return denied("rescheduling or reassigning work");
+      }
 
       const updates: Record<string, unknown> = {};
       const events: { kind: string; message: string }[] = [];
@@ -1992,6 +3348,9 @@ export default async (req: Request, context: Context) => {
     // can never disagree.
     const itemsMatch = path.match(/^jobs\/(\d+)\/items$/);
     if (itemsMatch && method === "PUT") {
+      // Repricing a ticket is an office decision, not something a crew member
+      // does from the doorstep.
+      if (!allows("book")) return denied("changing what a job is priced at");
       const id = Number(itemsMatch[1]);
       const body = (await req.json().catch(() => ({}))) as {
         items?: unknown;
@@ -2010,11 +3369,12 @@ export default async (req: Request, context: Context) => {
 
       const parsed = readBookingItems(body.items);
       if (parsed.error) return json({ error: parsed.error }, { status: 400 });
-      if (!parsed.items.length) {
+      const requiredItems = withRequiredEnvmt(parsed.items);
+      if (requiredItems.length === 1) {
         return json({ error: "A ticket needs at least one line" }, { status: 400 });
       }
 
-      const priceCents = parsed.items.reduce((sum, i) => sum + i.amountCents, 0);
+      const priceCents = requiredItems.reduce((sum, i) => sum + i.amountCents, 0);
       if (priceCents > MAX_JOB_TOTAL_CENTS) {
         return json(
           { error: `A single job cannot total more than ${money(MAX_JOB_TOTAL_CENTS)}` },
@@ -2039,7 +3399,7 @@ export default async (req: Request, context: Context) => {
       const note = (body.note || "").trim().slice(0, 300) || null;
 
       await db.delete(jobItems).where(eq(jobItems.jobId, id));
-      await db.insert(jobItems).values(parsed.items.map((i) => ({ ...i, jobId: id })));
+      await db.insert(jobItems).values(requiredItems.map((i) => ({ ...i, jobId: id })));
       await db.update(jobs).set({ priceCents }).where(eq(jobs.id, id));
 
       const moved = priceCents !== previousCents;
@@ -2082,6 +3442,7 @@ export default async (req: Request, context: Context) => {
     // --- Add a note to a job --------------------------------------------
     const noteMatch = path.match(/^jobs\/(\d+)\/notes$/);
     if (noteMatch && method === "POST") {
+      if (!allows("jobs")) return denied("jobs");
       const id = Number(noteMatch[1]);
       const body = (await req.json().catch(() => ({}))) as { message?: string };
       const message = (body.message || "").trim();
@@ -2101,12 +3462,633 @@ export default async (req: Request, context: Context) => {
       return json(job);
     }
 
+    // --- Leads / requests -------------------------------------------------
+    // Everything that arrived from outside the office, whatever brought it in.
+    // The list is deliberately one table with a source column rather than a
+    // screen per channel: the office works a lead the same way whether it came
+    // from the website, a directory or a phone call.
+
+    // The vocabulary the console builds its filters from, so a source added in
+    // lib/lead-intake.ts appears in the app without a second edit here.
+    if (path === "leads/vocabulary" && method === "GET") {
+      if (!allows("leads")) return denied("the request queue");
+      return json({ sources: LEAD_SOURCES, statuses: LEAD_STATUSES });
+    }
+
+    // Requests that reached the site but could not be filed. The submission
+    // itself is never lost — Netlify keeps its own copy — so this is the queue
+    // of imports to try again.
+    if (path === "leads/failures" && method === "GET") {
+      if (!allows("leads")) return denied("the request queue");
+      const rows = await db
+        .select()
+        .from(intakeFailures)
+        .where(eq(intakeFailures.status, "open"))
+        .orderBy(desc(intakeFailures.createdAt))
+        .limit(50);
+      return json({
+        failures: rows.map((row) => ({
+          id: row.id,
+          source: row.source,
+          sourceLabel: leadSourceLabel(row.source),
+          sourceRef: row.sourceRef,
+          formName: row.formName,
+          error: row.error,
+          attempts: row.attempts,
+          createdAt: row.createdAt,
+          lastAttemptAt: row.lastAttemptAt
+        }))
+      });
+    }
+
+    const failureRetryMatch = path.match(/^leads\/failures\/(\d+)\/retry$/);
+    if (failureRetryMatch && method === "POST") {
+      if (!allows("leads")) return denied("the request queue");
+      const id = Number(failureRetryMatch[1]);
+      const [failure] = await db
+        .select()
+        .from(intakeFailures)
+        .where(eq(intakeFailures.id, id));
+      if (!failure) return json({ error: "That import is no longer listed" }, { status: 404 });
+      if (failure.status === "resolved") {
+        return json({ ok: true, leadId: failure.leadId, alreadyResolved: true });
+      }
+
+      try {
+        const result = await retryIntakeFailure(failure);
+        await db.insert(leadEvents).values({
+          leadId: result.lead.id,
+          employeeId: account.id,
+          kind: "imported",
+          message: `${account.name} retried the failed import and it came through`
+        });
+        console.log(`intake failure ${id} retried by employee ${account.id}`);
+        return json({ ok: true, leadId: result.lead.id });
+      } catch (retryError) {
+        const message =
+          retryError instanceof Error ? retryError.message : "The import failed again";
+        await db
+          .update(intakeFailures)
+          .set({
+            attempts: failure.attempts + 1,
+            error: message.slice(0, 2000),
+            lastAttemptAt: new Date()
+          })
+          .where(eq(intakeFailures.id, id));
+        return json({ error: `That import failed again: ${message}` }, { status: 502 });
+      }
+    }
+
+    if (path === "leads" && method === "GET") {
+      if (!allows("leads")) return denied("the request queue");
+      const status = (url.searchParams.get("status") || "").trim();
+      const source = (url.searchParams.get("source") || "").trim();
+      const service = (url.searchParams.get("service") || "").trim();
+      const promotion = (url.searchParams.get("promotion") || "").trim();
+      const from = (url.searchParams.get("from") || "").trim();
+      const to = (url.searchParams.get("to") || "").trim();
+      const q = (url.searchParams.get("q") || "").trim();
+      const zone = (url.searchParams.get("zone") || "").trim();
+      const attention = (url.searchParams.get("attention") || "").trim();
+
+      // Everything except the status chips, so the count on each chip says how
+      // many requests that chip would show under the filters already in force.
+      const base: Array<SQL | undefined> = [];
+      if (source && LEAD_SOURCE_VALUES.includes(source)) base.push(eq(leads.source, source));
+      if (service) base.push(ilike(leads.service, `%${service.replace(/[\\%_]/g, "\\$&")}%`));
+      if (promotion) {
+        base.push(ilike(leads.promotionCode, `%${promotion.replace(/[\\%_]/g, "\\$&")}%`));
+      }
+      // A date range the office types is read in its own calendar days: "to" is
+      // inclusive, so a range of one day shows that day's requests.
+      if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) {
+        base.push(sql`${leads.submittedAt} >= ${from + "T00:00:00"}::timestamp`);
+      }
+      if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) {
+        base.push(sql`${leads.submittedAt} < (${to + "T00:00:00"}::timestamp + interval '1 day')`);
+      }
+      if (q) {
+        const like = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
+        const digits = q.replace(/\D/g, "");
+        base.push(
+          or(
+            ilike(leads.customerName, like),
+            ilike(leads.email, like),
+            ilike(leads.address, like),
+            ilike(leads.promotionCode, like),
+            digits.length >= 3
+              ? sql`regexp_replace(coalesce(${leads.phone}, ''), '[^0-9]', '', 'g') like ${"%" + digits + "%"}`
+              : undefined
+          )
+        );
+      }
+
+      const coreAreaSql = sql`(
+        lower(trim(coalesce(${leads.state}, ''))) in ('', 'ga', 'georgia')
+        and (
+          lower(trim(coalesce(${leads.city}, ''))) in ('stone mountain','riverdale','south clayton','jonesboro','morrow','stockbridge')
+          or substring(coalesce(${leads.zip}, '') from '[0-9]{5}') in ('30083','30087','30088','30236','30238','30250','30260','30273','30274','30281','30296')
+        )
+      )`;
+      if (zone === "core_service_area") base.push(coreAreaSql);
+      if (zone === "extended_area_sales_lead") base.push(sql`not ${coreAreaSql}`);
+      if (attention === "due") {
+        base.push(sql`${leads.status} in ('new','contacted','estimate_sent') and (
+          (${leads.nextFollowUpAt} is not null and ${leads.nextFollowUpAt} <= now())
+          or (${leads.nextFollowUpAt} is null and (
+            (${leads.status} = 'new' and ${leads.submittedAt} <= now() - interval '15 minutes')
+            or (${leads.status} = 'contacted' and ${leads.updatedAt} <= now() - interval '24 hours')
+            or (${leads.status} = 'estimate_sent' and ${leads.updatedAt} <= now() - interval '48 hours')
+          ))
+        )`);
+      }
+
+      const conditions = base.filter((part): part is SQL => Boolean(part));
+      const baseFilter = conditions.length ? and(...conditions) : undefined;
+      const statusFilter =
+        status && LEAD_STATUS_VALUES.includes(status) ? eq(leads.status, status) : undefined;
+      const listFilter =
+        baseFilter && statusFilter ? and(baseFilter, statusFilter) : statusFilter || baseFilter;
+
+      const rows = await db
+        .select({
+          id: leads.id,
+          customerId: leads.customerId,
+          jobId: leads.jobId,
+          source: leads.source,
+          status: leads.status,
+          campaign: leads.campaign,
+          customerName: leads.customerName,
+          phone: leads.phone,
+          email: leads.email,
+          city: leads.city,
+          state: leads.state,
+          zip: leads.zip,
+          service: leads.service,
+          promotionCode: leads.promotionCode,
+          promotionName: leads.promotionName,
+          totalCents: leads.totalCents,
+          requestedDate: leads.requestedDate,
+          requestedTime: leads.requestedTime,
+          customerNotes: leads.customerNotes,
+          submittedAt: leads.submittedAt,
+          updatedAt: leads.updatedAt,
+          nextFollowUpAt: leads.nextFollowUpAt,
+          lastContactedAt: leads.lastContactedAt,
+          assignedName: employees.name
+        })
+        .from(leads)
+        .leftJoin(employees, eq(leads.assignedTo, employees.id))
+        .where(listFilter)
+        .orderBy(desc(leads.submittedAt))
+        .limit(300);
+
+      const countRows = await db
+        .select({ status: leads.status, count: sql<number>`cast(count(*) as int)` })
+        .from(leads)
+        .where(baseFilter)
+        .groupBy(leads.status);
+      const byStatus: Record<string, number> = {};
+      for (const row of countRows) byStatus[row.status] = row.count;
+
+      // The values actually present, so the service and promotion menus only
+      // ever offer something that will match a row.
+      const serviceRows = await db
+        .selectDistinct({ value: leads.service })
+        .from(leads)
+        .where(sql`${leads.service} is not null and ${leads.service} <> ''`)
+        .orderBy(leads.service)
+        .limit(60);
+      const promoRows = await db
+        .selectDistinct({ value: leads.promotionCode })
+        .from(leads)
+        .where(sql`${leads.promotionCode} is not null and ${leads.promotionCode} <> ''`)
+        .orderBy(leads.promotionCode)
+        .limit(60);
+
+      const [openFailures] = await db
+        .select({ count: sql<number>`cast(count(*) as int)` })
+        .from(intakeFailures)
+        .where(eq(intakeFailures.status, "open"));
+
+      return json({
+        leads: rows.map((row) => ({
+          ...row,
+          sourceLabel: leadSourceLabel(row.source),
+          statusLabel: leadStatusLabel(row.status),
+          serviceAreaZone: serviceAreaZone(row),
+          attention: leadAttention(row),
+          isTest: isTestLead(row)
+        })),
+        byStatus,
+        total: Object.values(byStatus).reduce((sum, n) => sum + n, 0),
+        services: serviceRows.map((r) => r.value).filter(Boolean),
+        promotions: promoRows.map((r) => r.value).filter(Boolean),
+        sources: LEAD_SOURCES,
+        statuses: LEAD_STATUSES,
+        openFailures: openFailures?.count || 0
+      });
+    }
+
+    // A request taken by hand: a phone call, a walk-in, a note passed across
+    // the office. Same table, same statuses, same conversion — only the source
+    // is different, which is the whole point of the intake being shared.
+    if (path === "leads" && method === "POST") {
+      if (!allows("leads")) return denied("the request queue");
+      const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const source = String(body.source || "phone").trim();
+      if (!LEAD_SOURCE_VALUES.includes(source)) {
+        return json({ error: "Choose where this request came from" }, { status: 400 });
+      }
+      if (!String(body.customerName || body.name || "").trim()) {
+        return json({ error: "Enter the customer's name" }, { status: 400 });
+      }
+      if (!String(body.phone || "").trim() && !String(body.email || "").trim()) {
+        return json(
+          { error: "Enter a phone number or an email so somebody can call them back" },
+          { status: 400 }
+        );
+      }
+
+      const draft = genericAdapter(body, { source });
+      const result = await ingestLead(draft);
+      await db.insert(leadEvents).values({
+        leadId: result.lead.id,
+        employeeId: account.id,
+        kind: "note",
+        message: `${account.name} added this request by hand`
+      });
+      console.log(`lead ${result.lead.id} added by employee ${account.id}`);
+      return json(await loadLead(result.lead.id), { status: 201 });
+    }
+
+    const leadMatch = path.match(/^leads\/(\d+)$/);
+    if (leadMatch && method === "GET") {
+      if (!allows("leads")) return denied("the request queue");
+      const detail = await loadLead(Number(leadMatch[1]));
+      if (!detail) return json({ error: "That request no longer exists" }, { status: 404 });
+      return json(detail);
+    }
+
+    // Working the lead: who owns it, where it has got to, and corrections to
+    // what was submitted. The customer's own record is edited through the
+    // customers endpoint, so one account is never described in two places.
+    if (leadMatch && method === "PATCH") {
+      if (!allows("leads")) return denied("the request queue");
+      const id = Number(leadMatch[1]);
+      const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+      const [existing] = await db.select().from(leads).where(eq(leads.id, id));
+      if (!existing) return json({ error: "That request no longer exists" }, { status: 404 });
+
+      const updates: Record<string, string | number | Date | null> = {};
+      const changed: string[] = [];
+
+      if (typeof body.status === "string" && body.status !== existing.status) {
+        if (!LEAD_STATUS_VALUES.includes(body.status)) {
+          return json({ error: "That is not a lead status" }, { status: 400 });
+        }
+        updates.status = body.status;
+        changed.push(`status to ${leadStatusLabel(body.status)}`);
+        if (["scheduled", "completed", "lost"].includes(body.status)) updates.nextFollowUpAt = null;
+      }
+
+      if (body.markContacted === true) {
+        const contactedAt = new Date();
+        updates.lastContactedAt = contactedAt;
+        updates.status = existing.status === "new" ? "contacted" : existing.status;
+        updates.nextFollowUpAt = new Date(contactedAt.getTime() + 24 * 60 * 60 * 1000);
+        changed.push("customer as contacted and follow-up for tomorrow");
+      }
+
+      if (body.nextFollowUpAt !== undefined) {
+        if (body.nextFollowUpAt === null || body.nextFollowUpAt === "") {
+          updates.nextFollowUpAt = null;
+          changed.push("follow-up reminder");
+        } else {
+          const followUp = new Date(String(body.nextFollowUpAt));
+          if (!Number.isFinite(followUp.getTime())) {
+            return json({ error: "Choose a valid follow-up time" }, { status: 400 });
+          }
+          updates.nextFollowUpAt = followUp;
+          changed.push(`follow-up for ${followUp.toLocaleString("en-US")}`);
+        }
+      }
+
+      if (body.assignedTo !== undefined) {
+        const raw = body.assignedTo;
+        if (raw === null || raw === "") {
+          if (existing.assignedTo !== null) {
+            updates.assignedTo = null;
+            changed.push("owner to nobody");
+          }
+        } else {
+          const assignedTo = Number(raw);
+          const [emp] = await db
+            .select({ id: employees.id, name: employees.name, active: employees.active })
+            .from(employees)
+            .where(eq(employees.id, assignedTo));
+          if (!emp || !emp.active) {
+            return json({ error: "Choose an active crew member" }, { status: 400 });
+          }
+          if (existing.assignedTo !== assignedTo) {
+            updates.assignedTo = assignedTo;
+            changed.push(`owner to ${emp.name}`);
+          }
+        }
+      }
+
+      const LEAD_TEXT_FIELDS = [
+        { key: "campaign", label: "campaign", max: 120 },
+        { key: "promotionCode", label: "promotion code", max: 60 },
+        { key: "promotionName", label: "promotion", max: 200 },
+        { key: "service", label: "service", max: 200 },
+        { key: "requestedDate", label: "requested date", max: 40 },
+        { key: "requestedTime", label: "requested time", max: 80 },
+        { key: "customerNotes", label: "notes", max: 4000 }
+      ] as const;
+
+      for (const field of LEAD_TEXT_FIELDS) {
+        const raw = body[field.key];
+        if (typeof raw !== "string") continue;
+        const value = raw.trim().slice(0, field.max) || null;
+        if ((existing[field.key] || null) === value) continue;
+        updates[field.key] = value;
+        changed.push(field.label);
+      }
+
+      if (!changed.length) {
+        return json(await loadLead(id));
+      }
+
+      updates.updatedAt = new Date();
+      await db.update(leads).set(updates).where(eq(leads.id, id));
+      await db.insert(leadEvents).values({
+        leadId: id,
+        employeeId: account.id,
+        kind: updates.status ? "status" : "note",
+        message: `${account.name} changed the ${changed.join(", ")}`
+      });
+      if (existing.customerId) {
+        await db
+          .update(customers)
+          .set({ lastActivityAt: new Date() })
+          .where(eq(customers.id, existing.customerId));
+      }
+
+      console.log(`lead ${id} updated by employee ${account.id}`);
+      return json(await loadLead(id));
+    }
+
+    const leadNoteMatch = path.match(/^leads\/(\d+)\/notes$/);
+    if (leadNoteMatch && method === "POST") {
+      if (!allows("leads")) return denied("the request queue");
+      const id = Number(leadNoteMatch[1]);
+      const body = (await req.json().catch(() => ({}))) as { message?: string };
+      const message = (body.message || "").trim().slice(0, 2000);
+      if (!message) return json({ error: "Note is empty" }, { status: 400 });
+      const [existing] = await db.select({ id: leads.id }).from(leads).where(eq(leads.id, id));
+      if (!existing) return json({ error: "That request no longer exists" }, { status: 404 });
+      await db.insert(leadEvents).values({
+        leadId: id,
+        employeeId: account.id,
+        kind: "note",
+        message
+      });
+      await db.update(leads).set({ updatedAt: new Date() }).where(eq(leads.id, id));
+      return json(await loadLead(id));
+    }
+
+    // Turning a request into work. This is the one place a lead touches the
+    // calendar, and it goes through the same appointment rules a phone booking
+    // does — including the double-booking warning — so a converted lead is an
+    // ordinary job from the moment it exists.
+    const convertMatch = path.match(/^leads\/(\d+)\/convert$/);
+    if (convertMatch && method === "POST") {
+      if (!allows("leads")) return denied("the request queue");
+      if (!allows("book")) return denied("booking appointments");
+      const id = Number(convertMatch[1]);
+      const body = (await req.json().catch(() => ({}))) as {
+        serviceType?: string;
+        scheduledFor?: string;
+        durationMinutes?: number;
+        assignedTo?: number | null;
+        priceCents?: number;
+        address?: string;
+        notes?: string;
+        force?: boolean;
+      };
+
+      const [lead] = await db.select().from(leads).where(eq(leads.id, id));
+      if (!lead) return json({ error: "That request no longer exists" }, { status: 404 });
+      if (lead.jobId) {
+        return json(
+          { error: `That request is already booked as job #${lead.jobId}`, jobId: lead.jobId },
+          { status: 409 }
+        );
+      }
+
+      const serviceType = (body.serviceType || lead.service || "").trim();
+      if (!serviceType) {
+        return json({ error: "Say what is being booked" }, { status: 400 });
+      }
+
+      const when = readAppointmentTime(body.scheduledFor);
+      if (!when.at) return json({ error: when.error }, { status: 400 });
+      const length = readDuration(body.durationMinutes);
+      if (!length.minutes) return json({ error: length.error }, { status: 400 });
+
+      const priceCents =
+        body.priceCents === undefined ? lead.totalCents : Math.round(Number(body.priceCents));
+      if (!Number.isFinite(priceCents) || priceCents < 0 || priceCents > MAX_JOB_TOTAL_CENTS) {
+        return json({ error: "Check the total — it is outside the allowed range" }, { status: 400 });
+      }
+
+      let assignedTo: number | null = null;
+      if (body.assignedTo !== undefined && body.assignedTo !== null && String(body.assignedTo) !== "") {
+        assignedTo = Number(body.assignedTo);
+        const [emp] = await db
+          .select({ id: employees.id, active: employees.active })
+          .from(employees)
+          .where(eq(employees.id, assignedTo));
+        if (!emp || !emp.active) {
+          return json({ error: "Choose an active crew member" }, { status: 400 });
+        }
+      }
+
+      // A request with no contact details never got an account of its own.
+      // Booking it is the moment one is owed.
+      let customer: typeof customers.$inferSelect | null = null;
+      if (lead.customerId) {
+        const [found] = await db.select().from(customers).where(eq(customers.id, lead.customerId));
+        customer = found || null;
+      }
+      if (!customer) {
+        const [created] = await db
+          .insert(customers)
+          .values({
+            name: lead.customerName.slice(0, 120),
+            phone: lead.phone,
+            email: lead.email,
+            address: lead.address,
+            city: lead.city,
+            state: lead.state,
+            zip: lead.zip,
+            leadSource: leadSourceLabel(lead.source),
+            service: lead.service,
+            notes: `Created by ${account.name} while booking a ${leadSourceLabel(lead.source)} request`,
+            cloverSyncStatus: "pending",
+            lastActivityAt: new Date()
+          })
+          .returning();
+        customer = created;
+        await db.update(leads).set({ customerId: customer.id }).where(eq(leads.id, id));
+      }
+
+      if (assignedTo !== null && !body.force) {
+        const conflicts = await findConflicts(assignedTo, when.at, length.minutes);
+        if (conflicts.length) {
+          return json(
+            { error: "That crew member is already booked at that time", conflicts },
+            { status: 409 }
+          );
+        }
+      }
+
+      const address =
+        (body.address || "").trim() ||
+        [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ") ||
+        [customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(", ") ||
+        null;
+
+      // What the customer told us, carried onto the job so the crew reads it at
+      // the door rather than in a tab nobody opens.
+      const jobNotes =
+        (body.notes || "").trim().slice(0, 2000) ||
+        [
+          lead.customerNotes,
+          lead.promotionCode ? `Promotion ${lead.promotionCode}` : null,
+          lead.serviceDetail ? `Quoted: ${lead.serviceDetail}` : null
+        ]
+          .filter(Boolean)
+          .join("\n")
+          .slice(0, 2000) ||
+        null;
+
+      const [job] = await db
+        .insert(jobs)
+        .values({
+          customerId: customer.id,
+          assignedTo,
+          serviceType: serviceType.slice(0, 120),
+          status: "scheduled",
+          priceCents,
+          scheduledFor: when.at,
+          durationMinutes: length.minutes,
+          // Where the work came from stays true all the way to the job, so the
+          // revenue a source produced can be read off the jobs table.
+          source: lead.source,
+          bookedBy: account.id,
+          address,
+          notes: jobNotes
+        })
+        .returning({ id: jobs.id });
+
+      await db.insert(jobEvents).values({
+        jobId: job.id,
+        employeeId: account.id,
+        kind: "created",
+        message:
+          `Booked by ${account.name} from a ${leadSourceLabel(lead.source)} request ` +
+          `(lead #${lead.id}) for ${spellOutAppointment(when.at)}`
+      });
+
+      await db
+        .update(leads)
+        .set({ jobId: job.id, status: "scheduled", updatedAt: new Date() })
+        .where(eq(leads.id, id));
+
+      await db.insert(leadEvents).values({
+        leadId: id,
+        employeeId: account.id,
+        kind: "converted",
+        message: `${account.name} booked this request as job #${job.id} for ${spellOutAppointment(when.at)}`
+      });
+
+      await db
+        .update(customers)
+        .set({ lastActivityAt: new Date() })
+        .where(eq(customers.id, customer.id));
+
+      console.log(`lead ${id} converted to job ${job.id} by employee ${account.id}`);
+      return json({ jobId: job.id, lead: await loadLead(id) }, { status: 201 });
+    }
+
     return json({ error: "Not found" }, { status: 404 });
   } catch (err) {
     console.error("manager-api error", err);
     return json({ error: "Server error" }, { status: 500 });
   }
 };
+
+// One request with everything the console shows around it: the account it was
+// filed under, the appointment it became, and its own trail.
+async function loadLead(id: number) {
+  const [lead] = await db
+    .select({
+      lead: leads,
+      assignedName: employees.name
+    })
+    .from(leads)
+    .leftJoin(employees, eq(leads.assignedTo, employees.id))
+    .where(eq(leads.id, id));
+  if (!lead) return null;
+
+  const [customer] = lead.lead.customerId
+    ? await db.select().from(customers).where(eq(customers.id, lead.lead.customerId))
+    : [null];
+
+  const [job] = lead.lead.jobId
+    ? await db
+        .select({
+          id: jobs.id,
+          serviceType: jobs.serviceType,
+          status: jobs.status,
+          scheduledFor: jobs.scheduledFor,
+          priceCents: jobs.priceCents
+        })
+        .from(jobs)
+        .where(eq(jobs.id, lead.lead.jobId))
+    : [null];
+
+  const events = await db
+    .select({
+      id: leadEvents.id,
+      kind: leadEvents.kind,
+      message: leadEvents.message,
+      createdAt: leadEvents.createdAt,
+      employeeName: employees.name
+    })
+    .from(leadEvents)
+    .leftJoin(employees, eq(leadEvents.employeeId, employees.id))
+    .where(eq(leadEvents.leadId, id))
+    .orderBy(desc(leadEvents.createdAt))
+    .limit(50);
+
+  return {
+    lead: {
+      ...lead.lead,
+      assignedName: lead.assignedName,
+      sourceLabel: leadSourceLabel(lead.lead.source),
+      statusLabel: leadStatusLabel(lead.lead.status),
+      serviceAreaZone: serviceAreaZone(lead.lead),
+      attention: leadAttention(lead.lead),
+      isTest: isTestLead(lead.lead)
+    },
+    customer: customer || null,
+    job: job || null,
+    events
+  };
+}
 
 async function loadJob(id: number) {
   const assignee = employees;
@@ -2426,7 +4408,44 @@ function cloverSettings() {
   };
 }
 
-async function buildDashboard() {
+// The browser map. Unlike the Clover secret key, a Maps JavaScript API key is
+// meant to travel to the browser — the Maps script cannot load without it — so
+// this is the one key the app hands out, and only to a signed-in crew member.
+// Lock it down in Google Cloud with an HTTP referrer restriction for this site's
+// domains; that, not secrecy, is what stops it being used elsewhere.
+function mapsSettings() {
+  return fullMapsSettings();
+}
+
+// One line the map can look up and a driver can read. A job carries its own
+// address when the crew is going somewhere other than the customer's home;
+// otherwise the address on file for the customer is the place.
+function serviceAddress(row: {
+  address?: string | null;
+  customerAddress?: string | null;
+  customerCity?: string | null;
+  customerState?: string | null;
+  customerZip?: string | null;
+}) {
+  const street = (row.address || row.customerAddress || "").trim();
+  if (!street) return null;
+  return [street, row.customerCity, row.customerState, row.customerZip]
+    .map((part) => (part || "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
+// The dashboard, assembled for the role asking for it.
+//
+// `view` is not a display hint — it decides which queries run. A role without
+// the reporting permission never has the revenue figures summed, so they are
+// missing from the response rather than sent and hidden, and a role without the
+// contact permission never has phone numbers selected onto the map.
+async function buildDashboard(view: {
+  reports: boolean;
+  leads: boolean;
+  contacts: boolean;
+}) {
   const startOfToday = new Date();
   startOfToday.setHours(0, 0, 0, 0);
   const startOfTomorrow = new Date(startOfToday);
@@ -2452,30 +4471,68 @@ async function buildDashboard() {
       )
     );
 
-  const [pipeline] = await db
-    .select({
-      value: sql<number>`cast(coalesce(sum(${jobs.priceCents}), 0) as int)`
-    })
-    .from(jobs)
-    .where(sql`${jobs.status} not in ('completed','cancelled')`);
+  // The money on the board. Summed only when the account asking is entitled to
+  // sales and financial reporting; left unread otherwise.
+  const money = view.reports
+    ? await (async () => {
+        const [pipeline] = await db
+          .select({
+            value: sql<number>`cast(coalesce(sum(${jobs.priceCents}), 0) as int)`
+          })
+          .from(jobs)
+          .where(sql`${jobs.status} not in ('completed','cancelled')`);
 
-  const [completedValue] = await db
-    .select({
-      value: sql<number>`cast(coalesce(sum(${jobs.priceCents}), 0) as int)`
-    })
-    .from(jobs)
-    .where(eq(jobs.status, "completed"));
+        const [completedValue] = await db
+          .select({
+            value: sql<number>`cast(coalesce(sum(${jobs.priceCents}), 0) as int)`
+          })
+          .from(jobs)
+          .where(eq(jobs.status, "completed"));
 
-  const [customerCount] = await db
-    .select({ count: sql<number>`cast(count(*) as int)` })
-    .from(customers);
+        const [customerCount] = await db
+          .select({ count: sql<number>`cast(count(*) as int)` })
+          .from(customers);
+
+        const [paid] = await db
+          .select({
+            value: sql<number>`cast(coalesce(sum(${payments.amountCents}), 0) as int)`
+          })
+          .from(payments)
+          .where(eq(payments.status, "paid"));
+
+        // What the office is still owed: everything booked and not cancelled,
+        // less everything collected against those same jobs by any method.
+        const [billed] = await db
+          .select({
+            value: sql<number>`cast(coalesce(sum(${jobs.priceCents}), 0) as int)`
+          })
+          .from(jobs)
+          .where(ne(jobs.status, "cancelled"));
+
+        const [collected] = await db
+          .select({
+            value: sql<number>`cast(coalesce(sum(${payments.amountCents}), 0) as int)`
+          })
+          .from(payments)
+          .innerJoin(jobs, eq(payments.jobId, jobs.id))
+          .where(and(eq(payments.status, "paid"), ne(jobs.status, "cancelled")));
+
+        return {
+          pipelineCents: pipeline?.value || 0,
+          completedValueCents: completedValue?.value || 0,
+          paidCents: paid?.value || 0,
+          outstandingCents: Math.max(0, (billed?.value || 0) - (collected?.value || 0)),
+          customers: customerCount?.count || 0
+        };
+      })()
+    : null;
 
   const [crewCount] = await db
     .select({ count: sql<number>`cast(count(*) as int)` })
     .from(employees)
     .where(eq(employees.active, true));
 
-  const upcoming = await db
+  const upcomingRows = await db
     .select({
       id: jobs.id,
       serviceType: jobs.serviceType,
@@ -2483,7 +4540,12 @@ async function buildDashboard() {
       scheduledFor: jobs.scheduledFor,
       priceCents: jobs.priceCents,
       customerName: customers.name,
-      assignedName: employees.name
+      assignedName: employees.name,
+      address: jobs.address,
+      customerAddress: customers.address,
+      customerCity: customers.city,
+      customerState: customers.state,
+      customerZip: customers.zip
     })
     .from(jobs)
     .innerJoin(customers, eq(jobs.customerId, customers.id))
@@ -2491,6 +4553,61 @@ async function buildDashboard() {
     .where(sql`${jobs.status} not in ('completed','cancelled')`)
     .orderBy(jobs.scheduledFor)
     .limit(8);
+
+  const upcoming = upcomingRows.map((row) => ({
+    id: row.id,
+    serviceType: row.serviceType,
+    status: row.status,
+    scheduledFor: row.scheduledFor,
+    // What a visit is worth is a sales figure, so it travels with the rest of
+    // the reporting rather than with the operational board.
+    priceCents: view.reports ? row.priceCents : null,
+    customerName: row.customerName,
+    assignedName: row.assignedName,
+    serviceAddress: serviceAddress(row)
+  }));
+
+  // Everything still on the books that has somewhere to go, for the map. A
+  // wider net than the eight rows above: the map is how a manager sees the day
+  // spread across the metro, so it wants the whole active list, not a preview.
+  const mapRows = await db
+    .select({
+      id: jobs.id,
+      serviceType: jobs.serviceType,
+      status: jobs.status,
+      scheduledFor: jobs.scheduledFor,
+      priceCents: jobs.priceCents,
+      customerName: customers.name,
+      customerPhone: customers.phone,
+      assignedName: employees.name,
+      address: jobs.address,
+      customerAddress: customers.address,
+      customerCity: customers.city,
+      customerState: customers.state,
+      customerZip: customers.zip
+    })
+    .from(jobs)
+    .innerJoin(customers, eq(jobs.customerId, customers.id))
+    .leftJoin(employees, eq(jobs.assignedTo, employees.id))
+    .where(sql`${jobs.status} not in ('completed','cancelled')`)
+    .orderBy(jobs.scheduledFor)
+    .limit(60);
+
+  const mapJobs = mapRows
+    .map((row) => ({
+      id: row.id,
+      serviceType: row.serviceType,
+      status: row.status,
+      scheduledFor: row.scheduledFor,
+      priceCents: view.reports ? row.priceCents : null,
+      customerName: row.customerName,
+      // A pin on a map is where the crew is going. The number to ring on the
+      // way there is contact information, and only goes to a role holding it.
+      customerPhone: view.contacts ? row.customerPhone : null,
+      assignedName: row.assignedName,
+      serviceAddress: serviceAddress(row)
+    }))
+    .filter((row) => row.serviceAddress);
 
   const recentEvents = await db
     .select({
@@ -2504,42 +4621,100 @@ async function buildDashboard() {
     .orderBy(desc(jobEvents.createdAt))
     .limit(10);
 
-  const [paid] = await db
-    .select({
-      value: sql<number>`cast(coalesce(sum(${payments.amountCents}), 0) as int)`
-    })
-    .from(payments)
-    .where(eq(payments.status, "paid"));
+  // --- The intake counters ------------------------------------------------
+  // What came in today, how much of it the website produced, and how far the
+  // office has got with the rest. Every one of these rows names a caller, so
+  // the whole block belongs to the roles allowed the request queue.
+  const intake = view.leads
+    ? await (async () => {
+        const [newLeadsToday] = await db
+          .select({ count: sql<number>`cast(count(*) as int)` })
+          .from(leads)
+          .where(and(gte(leads.submittedAt, startOfToday), lt(leads.submittedAt, startOfTomorrow)));
 
-  // What the office is still owed: everything booked and not cancelled, less
-  // everything collected against those same jobs by any method.
-  const [billed] = await db
-    .select({
-      value: sql<number>`cast(coalesce(sum(${jobs.priceCents}), 0) as int)`
-    })
-    .from(jobs)
-    .where(ne(jobs.status, "cancelled"));
+        const [websiteLeads] = await db
+          .select({ count: sql<number>`cast(count(*) as int)` })
+          .from(leads)
+          .where(eq(leads.source, "website"));
 
-  const [collected] = await db
-    .select({
-      value: sql<number>`cast(coalesce(sum(${payments.amountCents}), 0) as int)`
-    })
-    .from(payments)
-    .innerJoin(jobs, eq(payments.jobId, jobs.id))
-    .where(and(eq(payments.status, "paid"), ne(jobs.status, "cancelled")));
+        const leadStatusRows = await db
+          .select({ status: leads.status, count: sql<number>`cast(count(*) as int)` })
+          .from(leads)
+          .groupBy(leads.status);
+        const leadsByStatus: Record<string, number> = {};
+        for (const row of leadStatusRows) leadsByStatus[row.status] = row.count;
+
+        const [openIntakeFailures] = await db
+          .select({ count: sql<number>`cast(count(*) as int)` })
+          .from(intakeFailures)
+          .where(eq(intakeFailures.status, "open"));
+
+        const [followUpsDue] = await db
+          .select({ count: sql<number>`cast(count(*) as int)` })
+          .from(leads)
+          .where(sql`${leads.status} in ('new','contacted','estimate_sent') and (
+            (${leads.nextFollowUpAt} is not null and ${leads.nextFollowUpAt} <= now())
+            or (${leads.nextFollowUpAt} is null and (
+              (${leads.status} = 'new' and ${leads.submittedAt} <= now() - interval '15 minutes')
+              or (${leads.status} = 'contacted' and ${leads.updatedAt} <= now() - interval '24 hours')
+              or (${leads.status} = 'estimate_sent' and ${leads.updatedAt} <= now() - interval '48 hours')
+            ))
+          )`);
+
+        // The newest requests nobody has touched yet, so the dashboard shows
+        // work to pick up rather than only work already booked.
+        const newLeads = await db
+          .select({
+            id: leads.id,
+            customerName: leads.customerName,
+            phone: leads.phone,
+            service: leads.service,
+            promotionCode: leads.promotionCode,
+            totalCents: leads.totalCents,
+            source: leads.source,
+            status: leads.status,
+            submittedAt: leads.submittedAt
+          })
+          .from(leads)
+          .where(sql`${leads.status} in ('new','contacted')`)
+          .orderBy(desc(leads.submittedAt))
+          .limit(6);
+
+        return {
+          leadStats: {
+            newToday: newLeadsToday?.count || 0,
+            website: websiteLeads?.count || 0,
+            scheduled: leadsByStatus.scheduled || 0,
+            completed: leadsByStatus.completed || 0,
+            open:
+              (leadsByStatus.new || 0) +
+              (leadsByStatus.contacted || 0) +
+              (leadsByStatus.estimate_sent || 0),
+            failedImports: openIntakeFailures?.count || 0,
+            followUpsDue: followUpsDue?.count || 0
+          },
+          newLeads: newLeads.map((row) => ({
+            ...row,
+            sourceLabel: leadSourceLabel(row.source),
+            statusLabel: leadStatusLabel(row.status)
+          }))
+        };
+      })()
+    : null;
 
   return {
+    // The counts everyone entitled to the board can see, and — only when the
+    // reporting permission is held — the money alongside them.
     stats: {
       jobsToday: today?.count || 0,
-      pipelineCents: pipeline?.value || 0,
-      completedValueCents: completedValue?.value || 0,
-      paidCents: paid?.value || 0,
-      outstandingCents: Math.max(0, (billed?.value || 0) - (collected?.value || 0)),
-      customers: customerCount?.count || 0,
-      activeCrew: crewCount?.count || 0
+      activeCrew: crewCount?.count || 0,
+      ...(money || {})
     },
+    reports: view.reports,
+    ...(intake || {}),
     byStatus,
     upcoming,
+    mapJobs,
     recentEvents
   };
 }
