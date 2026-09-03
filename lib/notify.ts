@@ -387,7 +387,7 @@ export function bookingConfirmation(appointment: AppointmentSummary) {
   if (appointment.crewName) rows.push(["Your technician", appointment.crewName]);
   if (appointment.priceCents > 0) rows.push(["Quoted total", money(appointment.priceCents)]);
   if (appointment.paidCents) {
-    rows.push(["Paid so far", money(appointment.paidCents)]);
+    rows.push([balance > 0 ? "Deposit paid" : "Paid so far", money(appointment.paidCents)]);
     rows.push(["Balance due", money(balance)]);
   }
   rows.push(["Reference", `Job #${appointment.jobId}`]);
