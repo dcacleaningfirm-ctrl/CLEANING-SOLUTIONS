@@ -1225,7 +1225,7 @@
                     </div>
 
                     <button type="submit" class="payment-submit-btn" id="paySubmitBtn">
-                        Pay Now
+                        Pay 15% Deposit
                     </button>
 
                     <div class="secure-badge">
@@ -1497,12 +1497,22 @@
             var totalLi = document.createElement('li');
             totalLi.className = 'order-total';
             var totalLabel = document.createElement('span');
-            totalLabel.textContent = 'Total';
+            totalLabel.textContent = 'Order total';
             var totalVal = document.createElement('span');
             totalVal.textContent = money(cartTotal());
             totalLi.appendChild(totalLabel);
             totalLi.appendChild(totalVal);
             list.appendChild(totalLi);
+
+            var depositLi = document.createElement('li');
+            depositLi.className = 'order-total';
+            var depositLabel = document.createElement('span');
+            depositLabel.textContent = 'Deposit due now (15%)';
+            var depositVal = document.createElement('span');
+            depositVal.textContent = money(Math.ceil(cartTotal() * 0.15));
+            depositLi.appendChild(depositLabel);
+            depositLi.appendChild(depositVal);
+            list.appendChild(depositLi);
 
             document.getElementById('paymentFormSection').style.display = 'block';
             document.getElementById('paymentSuccess').classList.remove('active');
@@ -1586,7 +1596,7 @@
             })
             .finally(function() {
                 submitBtn.disabled = false;
-                submitBtn.textContent = 'Pay Now';
+                submitBtn.textContent = 'Pay 15% Deposit';
             });
         }
 
