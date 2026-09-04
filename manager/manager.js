@@ -117,6 +117,7 @@
     { view: "book", permission: "book" },
     { view: "leads", permission: "leads" },
     { view: "jobs", permission: "jobs" },
+    { view: "maps", permission: "jobs" },
     { view: "customers", permission: "customers" },
     { view: "grow", permission: "marketing" },
     { view: "charges", permission: "charges" },
@@ -577,10 +578,20 @@
     if (name === "book") renderBook();
     if (name === "leads") renderLeads();
     if (name === "jobs") renderJobs();
+    if (name === "maps") renderMaps();
     if (name === "customers") renderCustomers();
     if (name === "grow") renderGrow();
     if (name === "charges") renderCharges();
     if (name === "crew") renderCrew();
+  }
+
+  function renderMaps() {
+    var host = document.getElementById("view-maps");
+    if (!window.DCAMaps) {
+      host.innerHTML = '<p class="empty">The map module did not load. Reload the page to try again.</p>';
+      return;
+    }
+    window.DCAMaps.renderRouteView(host);
   }
 
   function renderDashboard() {
@@ -1865,6 +1876,7 @@
   function openCustomerEditor(customerId, jobId) {
     api("customers/" + customerId).then(function (d) {
       var c = d.customer;
+      var addressField = null;
       openModal(
         "Edit " + c.name,
         '<div class="booking-fields">' +
@@ -1880,6 +1892,7 @@
           '<label class="field bk-narrow"><span>State</span><input id="cf-state" maxlength="20" value="' + esc(c.state || "") + '" /></label>' +
           '<label class="field bk-narrow"><span>ZIP</span><input id="cf-zip" maxlength="12" inputmode="numeric" value="' + esc(c.zip || "") + '" /></label>' +
           "</div>" +
+          '<div id="cf-address-verify"></div>' +
           '<label class="field"><span>Notes the office keeps</span><textarea id="cf-notes" maxlength="2000" rows="3">' +
           esc(c.notes || "") + "</textarea></label>" +
           customerOriginHtml(c) +
@@ -1899,11 +1912,14 @@
             notes: val("cf-notes")
           };
           if (!body.name) throw new Error("Enter the customer's name");
+          if (addressField) body.location = addressField.location();
           if (jobId) body.jobId = jobId;
           return api("customers/" + customerId, { method: "PATCH", body: body }).then(function (res) {
             // Anything on screen showing this customer needs the new details.
             var active = document.querySelector(".tab.active");
             if (active && active.dataset.view === "customers") renderCustomers();
+            if (active && active.dataset.view === "dashboard") renderDashboard();
+            if (active && active.dataset.view === "maps") renderMaps();
             if (jobId && state.job && state.job.job.id === jobId) openJob(jobId);
             // Edited from a request rather than a job: reopen it so the drawer
             // agrees with the account behind it.
@@ -1916,6 +1932,15 @@
           });
         }
       );
+
+      if (window.DCAMaps) {
+        addressField = window.DCAMaps.attachAddressField({
+          input: "cf-address",
+          mount: document.getElementById("cf-address-verify"),
+          fields: { city: "cf-city", state: "cf-state", zip: "cf-zip" }
+        });
+        if (addressField && c.latitude !== null && c.latitude !== undefined) addressField.preset(c);
+      }
     });
   }
 
@@ -6008,7 +6033,11 @@
       date: dateValue(new Date()),
       searchTimer: null,
       crew: [],
-      booked: null
+      booked: null,
+      // The address field's Google helper, and the property it verified. Null
+      // until someone picks an address off Google's suggestions.
+      address: null,
+      location: null
     };
   }
 
@@ -6075,7 +6104,12 @@
       '<label class="field"><span>City</span><input id="bk-city" maxlength="80" /></label>' +
       '<label class="field bk-narrow"><span>State</span><input id="bk-state" maxlength="20" placeholder="GA" /></label>' +
       '<label class="field bk-narrow"><span>ZIP</span><input id="bk-zip" maxlength="12" inputmode="numeric" /></label>' +
-      "</div></section>" +
+      "</div>" +
+      // Google's own suggestions for the address, and the property on a map once
+      // one is picked, so the booking is filed against a checked location rather
+      // than whatever was heard down the phone.
+      '<div id="bk-address-verify"></div>' +
+      "</section>" +
 
       '<section class="booking-step"><h3 class="step-title"><span>2</span>What they are booking</h3>' +
       '<div class="booking-fields">' +
@@ -6206,6 +6240,20 @@
     });
     document.getElementById("bk-date").addEventListener("change", loadSchedule);
     document.getElementById("bk-refresh").addEventListener("click", loadSchedule);
+
+    // The address on the booking gets checked against Google as it is typed. The
+    // verified spot is kept on the booking state and saved with the appointment,
+    // so the stop can be mapped and routed without looking it up again.
+    if (window.DCAMaps) {
+      state.booking.address = window.DCAMaps.attachAddressField({
+        input: "bk-address",
+        mount: document.getElementById("bk-address-verify"),
+        fields: { city: "bk-city", state: "bk-state", zip: "bk-zip" },
+        onChange: function (location) {
+          state.booking.location = location;
+        }
+      });
+    }
     document.getElementById("bk-items").addEventListener("input", function (ev) {
       var row = ev.target.closest("[data-item-index]");
       if (!row) return;
@@ -6316,6 +6364,8 @@
       '<button type="button" class="btn btn-ghost btn-sm" data-clear-customer>Not them</button></div>';
     host.querySelector("[data-clear-customer]").addEventListener("click", function () {
       state.booking.customer = null;
+      state.booking.location = null;
+      if (state.booking.address) state.booking.address.reset();
       ["bk-name", "bk-phone", "bk-email", "bk-address", "bk-city", "bk-state", "bk-zip"].forEach(function (id) {
         setValue(id, "");
       });
@@ -6547,6 +6597,10 @@
       durationMinutes: Number(val("bk-duration")) || 120,
       assignedTo: val("bk-crew") ? Number(val("bk-crew")) : null,
       address: [contact.address, contact.city, contact.state, contact.zip].filter(Boolean).join(", "),
+      // Only ever a spot Google confirmed. An address that was typed but never
+      // picked is saved as text alone, and the map says so plainly rather than
+      // guessing where it is.
+      location: b.location || null,
       notes: val("bk-notes"),
       items: b.items.map(function (i) {
         return {
@@ -6642,6 +6696,8 @@
   function resetBookingForm() {
     state.booking.customer = null;
     state.booking.items = [];
+    state.booking.location = null;
+    if (state.booking.address) state.booking.address.reset();
     state.booking.envmtCents = 2500;
     ["bk-name", "bk-phone", "bk-email", "bk-address", "bk-city", "bk-state", "bk-zip", "bk-notes", "bk-search"].forEach(
       function (id) { setValue(id, ""); }
@@ -6669,6 +6725,82 @@
       state.crew = results[1].crew;
       renderDrawer(results[0]);
     });
+  }
+
+  // The stop as the map module wants it: the job's own verified spot when it has
+  // one, the customer's when it does not, and the address as text either way so
+  // a navigation link still works with no coordinates at all.
+  function jobStop(j) {
+    var lat = j.latitude === null || j.latitude === undefined ? j.customerLatitude : j.latitude;
+    var lng = j.longitude === null || j.longitude === undefined ? j.customerLongitude : j.longitude;
+    return {
+      latitude: lat === undefined ? null : lat,
+      longitude: lng === undefined ? null : lng,
+      formattedAddress: j.formattedAddress || null,
+      address: [j.address || j.customerAddress, j.customerCity, j.customerState, j.customerZip]
+        .filter(Boolean)
+        .join(", ")
+    };
+  }
+
+  // Navigation for the one job in front of the crew member, and a way to get it
+  // onto the map when nobody has ever checked its address.
+  function directionsRow(j) {
+    var stop = jobStop(j);
+    var url = window.DCAMaps ? window.DCAMaps.directionsUrl(stop) : null;
+    var mapped = stop.latitude !== null && stop.latitude !== undefined;
+    var buttons = [];
+    if (url) {
+      buttons.push(
+        '<a class="btn btn-primary btn-sm" href="' + esc(url) + '" target="_blank" rel="noopener">Directions</a>'
+      );
+    }
+    if (!mapped && (stop.address || stop.formattedAddress)) {
+      buttons.push(
+        '<button type="button" class="btn btn-ghost btn-sm" data-locate-job="' + j.id + '">Put this stop on the map</button>'
+      );
+    }
+    // Correcting where this one visit happens, without touching the account's
+    // own address — a tenant, a second property, a unit number that was missed.
+    buttons.push(
+      '<button type="button" class="btn btn-ghost btn-sm" data-edit-address="' + j.id + '">Change address</button>'
+    );
+    var note = "";
+    if (!stop.address && !stop.formattedAddress) {
+      note = '<p class="hint">No address on file for this job yet.</p>';
+    } else if (!mapped) {
+      note =
+        '<p class="hint">This address has not been checked with Google, so the stop is missing from the map and from routes.</p>';
+    }
+    return '<div class="contact-bar">' + buttons.join("") + "</div>" + note;
+  }
+
+  function openJobAddressEditor(j) {
+    var addressField = null;
+    var current = j.address || [j.customerAddress, j.customerCity, j.customerState, j.customerZip].filter(Boolean).join(", ");
+    openModal(
+      "Service address",
+      '<label class="field"><span>Where this visit happens</span><input id="ja-address" maxlength="200" value="' +
+        esc(current) + '" /></label><div id="ja-address-verify"></div>' +
+        '<p class="hint">Pick Google\'s suggestion to verify the stop before saving.</p>',
+      function () {
+        return api("jobs/" + j.id, {
+          method: "PATCH",
+          body: { address: val("ja-address"), location: addressField ? addressField.location() : null }
+        }).then(function (data) {
+          renderDrawer(data);
+          return "Service address updated.";
+        });
+      }
+    );
+    if (window.DCAMaps) {
+      addressField = window.DCAMaps.attachAddressField({
+        input: "ja-address",
+        mount: document.getElementById("ja-address-verify"),
+        oneLine: true
+      });
+      if (addressField && j.latitude !== null && j.latitude !== undefined) addressField.preset(j);
+    }
   }
 
   function renderDrawer(data) {
@@ -6716,6 +6848,7 @@
       "<dt>Phone</dt><dd>" + phoneText(j.customerPhone) + "</dd>" +
       "<dt>Email</dt><dd>" + emailText(j.customerEmail) + "</dd>" +
       "<dt>Address</dt><dd>" + esc(place || "—") + "</dd>" +
+      "<dt>Getting there</dt><dd>" + directionsRow(j) + "</dd>" +
       "<dt>Scheduled</dt><dd>" + fmtDate(j.scheduledFor) +
       (j.scheduledFor ? " · " + esc(fmtLength(j.durationMinutes)) : "") + "</dd>" +
       "<dt>Booked by</dt><dd>" + esc(j.bookedByName || "—") + "</dd>" +
@@ -7589,6 +7722,20 @@
   }
 
   document.addEventListener("DOMContentLoaded", function () {
+    // Mapping is a separate file so this one stays about running the business.
+    // It is handed the helpers it needs rather than reaching into this scope.
+    if (window.DCAMaps) {
+      window.DCAMaps.init({
+        api: api,
+        esc: esc,
+        toast: toast,
+        fmtTime: fmtTime,
+        fmtMoney: fmtMoney,
+        telDigits: telDigits,
+        openJob: openJob,
+        loadSettings: loadSettings
+      });
+    }
     document.getElementById("login-form").addEventListener("submit", handleLogin);
     document.getElementById("logout").addEventListener("click", function () {
       api("logout", { method: "POST" }).finally(showLogin);
@@ -7782,6 +7929,26 @@
         queueMapFocus(showOnMap.dataset.mapFocus);
         closeDrawer();
         switchView("dashboard");
+        return;
+      }
+      var editAddress = e.target.closest("[data-edit-address]");
+      if (editAddress) {
+        var addressJob = Number(editAddress.dataset.editAddress);
+        if (state.job && state.job.job.id === addressJob) openJobAddressEditor(state.job.job);
+        else api("jobs/" + addressJob).then(function (d) { openJobAddressEditor(d.job); });
+        return;
+      }
+      var locate = e.target.closest("[data-locate-job]");
+      if (locate && window.DCAMaps) {
+        var locateJob = Number(locate.dataset.locateJob);
+        locate.disabled = true;
+        window.DCAMaps.locateJob(locateJob).then(function (result) {
+          toast(result.saved ? "Address verified." : (result.place.precisionNote || "Address needs more detail."));
+          openJob(locateJob);
+        }).catch(function (err) {
+          toast(err.message || "That address could not be found");
+          locate.disabled = false;
+        });
         return;
       }
       var row = e.target.closest("[data-job]");

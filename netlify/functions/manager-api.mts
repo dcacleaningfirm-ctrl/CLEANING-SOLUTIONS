@@ -22,6 +22,16 @@ import {
   verifyPin
 } from "../../lib/manager-pin.js";
 import {
+  computeRoute,
+  geocodeAddress,
+  joinAddress,
+  mapsSettings as fullMapsSettings,
+  placeDetails,
+  readCoordinate,
+  suggestAddresses,
+  validLocation
+} from "../../lib/maps.js";
+import {
   CREW_ROLES,
   type Permission,
   can,
@@ -836,6 +846,37 @@ function readDuration(value: unknown): { minutes?: number; error?: string } {
 // service area's own clock rather than in UTC.
 const BUSINESS_TIME_ZONE = "America/New_York";
 
+// The verified spot on the map that came back with a saved address. The browser
+// only ever sends this after the office picked a suggestion Google confirmed, so
+// what is stored is what Google itself pinned — and every map and route from
+// then on reuses it instead of looking the street up again.
+//
+// Returns undefined when the request said nothing about a location (leave what
+// is on file alone), and null when it asked for it to be cleared.
+interface StoredLocation {
+  latitude: number | null;
+  longitude: number | null;
+  placeId: string | null;
+  formattedAddress: string | null;
+}
+
+function readLocationInput(raw: unknown): StoredLocation | undefined {
+  if (raw === undefined) return undefined;
+  if (raw === null) {
+    return { latitude: null, longitude: null, placeId: null, formattedAddress: null };
+  }
+  const value = raw as Record<string, unknown>;
+  if (!validLocation(value.latitude, value.longitude)) {
+    return { latitude: null, longitude: null, placeId: null, formattedAddress: null };
+  }
+  return {
+    latitude: readCoordinate(value.latitude),
+    longitude: readCoordinate(value.longitude),
+    placeId: String(value.placeId || "").trim().slice(0, 255) || null,
+    formattedAddress: String(value.formattedAddress || "").trim().slice(0, 300) || null
+  };
+}
+
 function spellOutAppointment(at: Date): string {
   return at.toLocaleString("en-US", {
     timeZone: BUSINESS_TIME_ZONE,
@@ -1267,6 +1308,192 @@ export default async (req: Request, context: Context) => {
           missing: maps.missing,
           browserKey: maps.browserKey || null
         }
+      });
+    }
+
+    // --- Verified addresses and route planning ---------------------------
+    if (path === "places/suggest" && method === "GET") {
+      if (!allows("jobs")) return denied("checking service addresses");
+      const maps = mapsSettings();
+      if (!maps.enabled) return json({ suggestions: [], missing: maps.missing, enabled: false });
+      const query = (url.searchParams.get("q") || "").trim().slice(0, 200);
+      if (query.length < 3) return json({ suggestions: [], enabled: true });
+      const session = (url.searchParams.get("session") || "").trim().slice(0, 64) || undefined;
+      const result = await suggestAddresses(query, session);
+      if (result.error && !result.suggestions.length) {
+        return json({ error: result.error, suggestions: [], enabled: true }, { status: 502 });
+      }
+      return json({ suggestions: result.suggestions, enabled: true });
+    }
+
+    if (path === "places/resolve" && method === "GET") {
+      if (!allows("jobs")) return denied("checking service addresses");
+      const maps = mapsSettings();
+      if (!maps.enabled) return json({ error: "Google Maps is not set up", missing: maps.missing }, { status: 503 });
+      const placeId = (url.searchParams.get("placeId") || "").trim();
+      if (placeId) {
+        const found = await placeDetails(placeId);
+        return found.place
+          ? json({ place: found.place })
+          : json({ error: found.error || "That address could not be found" }, { status: 404 });
+      }
+      const query = (url.searchParams.get("q") || "").trim().slice(0, 250);
+      if (!query) return json({ error: "Type an address to look up" }, { status: 400 });
+      const found = await geocodeAddress(query);
+      if (!found.places.length) return json({ error: found.error || "That address could not be found" }, { status: 404 });
+      return json({ place: found.places[0], alternatives: found.places.slice(1) });
+    }
+
+    if (path === "map/jobs" && method === "GET") {
+      if (!allows("jobs")) return denied("viewing routes");
+      const from = new Date(url.searchParams.get("from") || "");
+      const to = new Date(url.searchParams.get("to") || "");
+      if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime()) || to <= from) {
+        return json({ error: "Pick a valid date" }, { status: 400 });
+      }
+      if (to.getTime() - from.getTime() > 15 * 86400000) {
+        return json({ error: "Ask for a shorter date range" }, { status: 400 });
+      }
+      const assignee = alias(employees, "map_assignee");
+      const rows = await db
+        .select({
+          id: jobs.id,
+          serviceType: jobs.serviceType,
+          status: jobs.status,
+          scheduledFor: jobs.scheduledFor,
+          durationMinutes: jobs.durationMinutes,
+          priceCents: jobs.priceCents,
+          notes: jobs.notes,
+          address: jobs.address,
+          latitude: jobs.latitude,
+          longitude: jobs.longitude,
+          formattedAddress: jobs.formattedAddress,
+          customerId: customers.id,
+          customerName: customers.name,
+          customerPhone: customers.phone,
+          customerAddress: customers.address,
+          customerCity: customers.city,
+          customerState: customers.state,
+          customerZip: customers.zip,
+          customerLatitude: customers.latitude,
+          customerLongitude: customers.longitude,
+          customerFormattedAddress: customers.formattedAddress,
+          assignedName: assignee.name
+        })
+        .from(jobs)
+        .innerJoin(customers, eq(jobs.customerId, customers.id))
+        .leftJoin(assignee, eq(jobs.assignedTo, assignee.id))
+        .where(and(gte(jobs.scheduledFor, from), lt(jobs.scheduledFor, to), ne(jobs.status, "cancelled")))
+        .orderBy(asc(jobs.scheduledFor));
+
+      const stops = rows.map((row) => {
+        const onJob = validLocation(row.latitude, row.longitude);
+        const onCustomer = validLocation(row.customerLatitude, row.customerLongitude);
+        return {
+          id: row.id,
+          serviceType: row.serviceType,
+          status: row.status,
+          scheduledFor: row.scheduledFor,
+          durationMinutes: row.durationMinutes,
+          priceCents: row.priceCents,
+          notes: row.notes,
+          address: row.address || joinAddress({ address: row.customerAddress || "", city: row.customerCity || "", state: row.customerState || "", zip: row.customerZip || "" }),
+          formattedAddress: row.formattedAddress || row.customerFormattedAddress || null,
+          latitude: onJob ? row.latitude : onCustomer ? row.customerLatitude : null,
+          longitude: onJob ? row.longitude : onCustomer ? row.customerLongitude : null,
+          customerId: row.customerId,
+          customerName: row.customerName,
+          customerPhone: row.customerPhone,
+          assignedName: row.assignedName
+        };
+      });
+      return json({ jobs: stops, mapped: stops.filter((s) => s.latitude !== null).length, maps: mapsSettings() });
+    }
+
+    const locateMatch = path.match(/^jobs\/(\d+)\/locate$/);
+    if (locateMatch && method === "POST") {
+      if (!allows("jobs")) return denied("updating a service address");
+      const id = Number(locateMatch[1]);
+      const [existing] = await db.select().from(jobs).where(eq(jobs.id, id));
+      if (!existing) return json({ error: "Job not found" }, { status: 404 });
+      const [customer] = await db.select().from(customers).where(eq(customers.id, existing.customerId));
+      const lookup = existing.address || joinAddress({ address: customer?.address || "", city: customer?.city || "", state: customer?.state || "", zip: customer?.zip || "" });
+      if (!lookup) return json({ error: "This job has no address" }, { status: 400 });
+      const found = await geocodeAddress(lookup);
+      const place = found.places[0];
+      if (!place) return json({ error: found.error || "That address could not be found" }, { status: 404 });
+      if (place.precision !== "exact") return json({ place, saved: false, needsReview: true });
+      await db.update(jobs).set({ latitude: place.latitude, longitude: place.longitude, placeId: place.placeId, formattedAddress: place.formattedAddress }).where(eq(jobs.id, id));
+      return json({ place, saved: true, needsReview: false });
+    }
+
+    if (path === "route" && method === "POST") {
+      if (!allows("jobs")) return denied("building routes");
+      const body = (await req.json().catch(() => ({}))) as {
+        jobIds?: unknown;
+        origin?: { latitude?: unknown; longitude?: unknown } | null;
+        originAddress?: string;
+        optimize?: boolean;
+      };
+      const ids = Array.isArray(body.jobIds)
+        ? body.jobIds.map(Number).filter((id) => Number.isInteger(id) && id > 0)
+        : [];
+      if (!ids.length || ids.length > 20) return json({ error: "Pick between 1 and 20 stops" }, { status: 400 });
+      const rows = await db
+        .select({
+          id: jobs.id,
+          address: jobs.address,
+          latitude: jobs.latitude,
+          longitude: jobs.longitude,
+          customerName: customers.name,
+          customerAddress: customers.address,
+          customerCity: customers.city,
+          customerState: customers.state,
+          customerZip: customers.zip,
+          customerLatitude: customers.latitude,
+          customerLongitude: customers.longitude
+        })
+        .from(jobs)
+        .innerJoin(customers, eq(jobs.customerId, customers.id))
+        .where(inArray(jobs.id, ids));
+      const byId = new Map(rows.map((row) => [row.id, row]));
+      const stops = ids.map((id) => byId.get(id)).filter(Boolean).map((row) => {
+        const item = row!;
+        const onJob = validLocation(item.latitude, item.longitude);
+        const onCustomer = validLocation(item.customerLatitude, item.customerLongitude);
+        return {
+          jobId: item.id,
+          customerName: item.customerName,
+          address: item.address || joinAddress({ address: item.customerAddress || "", city: item.customerCity || "", state: item.customerState || "", zip: item.customerZip || "" }),
+          latitude: onJob ? Number(item.latitude) : onCustomer ? Number(item.customerLatitude) : null,
+          longitude: onJob ? Number(item.longitude) : onCustomer ? Number(item.customerLongitude) : null
+        };
+      });
+      const unmapped = stops.filter((stop) => stop.latitude === null);
+      if (unmapped.length) return json({ error: "Some stops need a verified address", unmapped: unmapped.map((stop) => stop.jobId) }, { status: 409 });
+
+      let origin: { latitude: number; longitude: number } | null = null;
+      let originLabel: string | null = null;
+      if (body.origin && validLocation(body.origin.latitude, body.origin.longitude)) {
+        origin = { latitude: Number(body.origin.latitude), longitude: Number(body.origin.longitude) };
+        originLabel = "My location";
+      } else if ((body.originAddress || "").trim()) {
+        const found = await geocodeAddress(body.originAddress!.trim());
+        const place = found.places[0];
+        if (!place) return json({ error: found.error || "Starting address not found" }, { status: 400 });
+        origin = { latitude: place.latitude, longitude: place.longitude };
+        originLabel = place.formattedAddress;
+      }
+      const routeStops = origin ? stops : stops.slice(1);
+      if (!routeStops.length) return json({ error: "Pick two stops or set a starting point" }, { status: 400 });
+      const routeOrigin = origin || { latitude: stops[0].latitude!, longitude: stops[0].longitude! };
+      const built = await computeRoute(routeOrigin, routeStops.map((stop) => ({ latitude: stop.latitude!, longitude: stop.longitude! })), body.optimize === true);
+      if (!built.route) return json({ error: built.error || "Google could not build that route" }, { status: 502 });
+      const ordered = built.route.order.map((index) => routeStops[index]).filter(Boolean);
+      return json({
+        route: { ...built.route, optimize: body.optimize === true },
+        origin: origin ? { ...origin, label: originLabel } : null,
+        stops: (origin ? ordered : [stops[0], ...ordered]).map((stop, index) => ({ ...stop, position: index + 1 }))
       });
     }
 
@@ -2200,7 +2427,7 @@ export default async (req: Request, context: Context) => {
       const [existing] = await db.select().from(customers).where(eq(customers.id, id));
       if (!existing) return json({ error: "That customer no longer exists" }, { status: 404 });
 
-      const updates: Record<string, string | null> = {};
+      const updates: Record<string, string | number | null> = {};
       const changed: string[] = [];
       if (typeof body.customerType === "string") {
         const type = body.customerType.trim().toLowerCase();
@@ -2237,6 +2464,34 @@ export default async (req: Request, context: Context) => {
       }
       if (nextEmail && !looksLikeEmail(nextEmail)) {
         return json({ error: "Check the email address" }, { status: 400 });
+      }
+
+      // Where the property is. When the address was picked off Google's own
+      // suggestions the coordinates come with it and are saved here, so every
+      // map and every route afterwards reuses what Google already confirmed.
+      const location = readLocationInput(body.location);
+      const addressTouched = ["address", "city", "state", "zip"].some(
+        (key) => updates[key] !== undefined
+      );
+      if (location) {
+        if (
+          Number(existing.latitude) !== Number(location.latitude) ||
+          Number(existing.longitude) !== Number(location.longitude)
+        ) {
+          changed.push("map location");
+        }
+        Object.assign(updates, location);
+      } else if (addressTouched && (existing.latitude !== null || existing.longitude !== null)) {
+        // The street was retyped without a verified pick. The old coordinates
+        // point at the old house, and a stale pin is worse than no pin: it sends
+        // a crew somewhere with the same confidence as a checked address.
+        Object.assign(updates, {
+          latitude: null,
+          longitude: null,
+          placeId: null,
+          formattedAddress: null
+        });
+        changed.push("map location");
       }
 
       if (!changed.length) {
@@ -2656,6 +2911,7 @@ export default async (req: Request, context: Context) => {
         durationMinutes?: number;
         assignedTo?: number | null;
         address?: string;
+        location?: unknown;
         notes?: string;
         items?: unknown;
         priceCents?: number;
@@ -2717,6 +2973,13 @@ export default async (req: Request, context: Context) => {
         zip: (supplied.zip || "").trim().slice(0, 20) || null
       };
 
+      // The verified spot behind the address that was typed on the booking
+      // screen — present only when the taker picked one of Google's suggestions.
+      // Saved with the appointment so the stop can be mapped and routed later
+      // without looking the street up a second time.
+      const bookedLocation = readLocationInput(body.location);
+      const hasBookedLocation = !!bookedLocation && bookedLocation.latitude !== null;
+
       let customer: typeof customers.$inferSelect | null = null;
       if (body.customerId) {
         const [found] = await db
@@ -2732,13 +2995,16 @@ export default async (req: Request, context: Context) => {
 
         // Fill in details the account was missing — a first address, a mobile
         // number — but never overwrite something already on file from a call.
-        const backfill: Record<string, string> = {};
+        const backfill: Record<string, string | number | null> = {};
         for (const field of ["phone", "email", "address", "city", "state", "zip"] as const) {
           if (contact[field] && !customer[field]) backfill[field] = contact[field] as string;
         }
+        if (hasBookedLocation && backfill.address && !validLocation(customer.latitude, customer.longitude)) {
+          Object.assign(backfill, bookedLocation);
+        }
         if (Object.keys(backfill).length) {
           await db.update(customers).set(backfill).where(eq(customers.id, customer.id));
-          customer = { ...customer, ...backfill };
+          customer = { ...customer, ...backfill } as typeof customers.$inferSelect;
           // Anything new about the customer is worth passing on, but only where
           // Clover's own record is blank.
           await syncCustomerAndRecord(customer, { timeoutMs: CLOVER_INLINE_TIMEOUT_MS });
@@ -2763,6 +3029,10 @@ export default async (req: Request, context: Context) => {
             city: contact.city,
             state: contact.state,
             zip: contact.zip,
+            latitude: hasBookedLocation ? bookedLocation!.latitude : null,
+            longitude: hasBookedLocation ? bookedLocation!.longitude : null,
+            placeId: hasBookedLocation ? bookedLocation!.placeId : null,
+            formattedAddress: hasBookedLocation ? bookedLocation!.formattedAddress : null,
             customerType,
             notes: `Added by ${account.name} while booking by phone`,
             cloverSyncStatus: "pending"
@@ -2810,6 +3080,10 @@ export default async (req: Request, context: Context) => {
           source: "phone",
           bookedBy: account.id,
           address,
+          latitude: hasBookedLocation ? bookedLocation!.latitude : null,
+          longitude: hasBookedLocation ? bookedLocation!.longitude : null,
+          placeId: hasBookedLocation ? bookedLocation!.placeId : null,
+          formattedAddress: hasBookedLocation ? bookedLocation!.formattedAddress : null,
           notes: (body.notes || "").trim().slice(0, 2000) || null
         })
         .returning({ id: jobs.id });
@@ -2917,6 +3191,8 @@ export default async (req: Request, context: Context) => {
         notes?: string;
         scheduledFor?: string;
         durationMinutes?: number;
+        address?: string;
+        location?: unknown;
         force?: boolean;
       };
 
@@ -2982,6 +3258,33 @@ export default async (req: Request, context: Context) => {
       if (typeof body.notes === "string" && body.notes !== (existing.notes || "")) {
         updates.notes = body.notes;
       }
+
+      // Correcting where the crew is being sent. A verified pick off Google's
+      // suggestions brings its coordinates with it; a hand-typed correction
+      // clears the old ones instead, because the pin that is already saved
+      // belongs to the address being replaced.
+      const stopLocation = readLocationInput(body.location);
+      if (typeof body.address === "string") {
+        const nextAddress = body.address.trim().slice(0, 300) || null;
+        if (nextAddress !== (existing.address || null)) {
+          updates.address = nextAddress;
+          events.push({
+            kind: "customer",
+            message: nextAddress
+              ? `Service address changed to ${nextAddress} by ${session.name}`
+              : `Service address cleared by ${session.name}`
+          });
+          if (!stopLocation) {
+            Object.assign(updates, {
+              latitude: null,
+              longitude: null,
+              placeId: null,
+              formattedAddress: null
+            });
+          }
+        }
+      }
+      if (stopLocation) Object.assign(updates, stopLocation);
 
       // Moving an appointment. The crew member it lands on is whoever it is
       // being assigned to in this same request, falling back to whoever holds
@@ -3812,6 +4115,10 @@ async function loadJob(id: number) {
       durationMinutes: jobs.durationMinutes,
       source: jobs.source,
       address: jobs.address,
+      latitude: jobs.latitude,
+      longitude: jobs.longitude,
+      placeId: jobs.placeId,
+      formattedAddress: jobs.formattedAddress,
       notes: jobs.notes,
       completedAt: jobs.completedAt,
       createdAt: jobs.createdAt,
@@ -3823,6 +4130,8 @@ async function loadJob(id: number) {
       customerCity: customers.city,
       customerState: customers.state,
       customerZip: customers.zip,
+      customerLatitude: customers.latitude,
+      customerLongitude: customers.longitude,
       assignedTo: assignee.id,
       assignedName: assignee.name,
       bookedByName: bookedBy.name
@@ -4119,10 +4428,7 @@ function cloverSettings() {
 // Lock it down in Google Cloud with an HTTP referrer restriction for this site's
 // domains; that, not secrecy, is what stops it being used elsewhere.
 function mapsSettings() {
-  const browserKey = (Netlify.env.get("GOOGLE_MAPS_BROWSER_KEY") || "").trim();
-  const missing: string[] = [];
-  if (!browserKey) missing.push("GOOGLE_MAPS_BROWSER_KEY");
-  return { browserKey, missing };
+  return fullMapsSettings();
 }
 
 // One line the map can look up and a driver can read. A job carries its own

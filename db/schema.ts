@@ -6,6 +6,7 @@
 // migration is generated for existing tables.
 import {
   boolean,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -28,6 +29,10 @@ export const customers = pgTable(
     state: text(),
     zip: text(),
     notes: text(),
+    latitude: doublePrecision(),
+    longitude: doublePrecision(),
+    placeId: text("place_id"),
+    formattedAddress: text("formatted_address"),
     customerType: text("customer_type").notNull().default("residential"),
     // A second number to try when the main one does not answer. Common on
     // imported lists, where a household gives both a mobile and a landline.
@@ -363,6 +368,14 @@ export const jobs = pgTable(
     // technician who does the work).
     bookedBy: integer("booked_by").references(() => employees.id),
     address: text(),
+    // The stop as it goes on the map: the coordinates Google verified when the
+    // address was picked. A job keeps its own copy because the crew is sent to
+    // the address on the appointment, which is not always the address on the
+    // account.
+    latitude: doublePrecision(),
+    longitude: doublePrecision(),
+    placeId: text("place_id"),
+    formattedAddress: text("formatted_address"),
     notes: text(),
     completedAt: timestamp("completed_at"),
     createdAt: timestamp("created_at").defaultNow()

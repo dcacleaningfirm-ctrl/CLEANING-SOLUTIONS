@@ -1301,3 +1301,34 @@ tbody tr.clickable:hover { background: var(--surface-2); }
   .segment-grid { grid-template-columns: 1fr; }
   .service-note-head .btn { margin-left: 0; }
 }
+
+/* Route planning and verified-address controls. */
+.route-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 18px; align-items: start; }
+.route-panel, .route-stops, .map-stop-list, .addr-verify { display: grid; gap: 10px; }
+.route-canvas { height: min(70vh, 620px); }
+.route-controls { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.route-stop, .map-stop { display: flex; gap: 10px; align-items: center; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+.route-stop-body { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.route-stop-body > span { display: grid; min-width: 0; }
+.route-stop-actions, .map-stop-actions, .map-pop-actions, .route-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.route-stop-num, .map-chip-num, .map-pop-num { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--brand); color: #fff; font-weight: 800; }
+.route-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.route-order { display: grid; gap: 6px; }
+.map-stop-strip { display: flex; gap: 8px; overflow-x: auto; padding-top: 12px; }
+.map-chip { display: inline-flex; align-items: center; gap: 8px; flex: 0 0 auto; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); color: var(--text); padding: 7px 13px 7px 7px; cursor: pointer; }
+.map-notice { background: var(--surface-2); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; margin-top: 14px; }
+.map-pop { color: #1b2430; min-width: 190px; max-width: 260px; display: grid; gap: 3px; }
+.addr-suggest { display: grid; gap: 2px; background: var(--surface-3); border: 1px solid var(--border); border-radius: 12px; padding: 6px; max-height: 260px; overflow-y: auto; }
+.addr-option { display: grid; gap: 2px; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 9px; padding: 9px 10px; color: var(--text); cursor: pointer; }
+.addr-option:hover { background: var(--surface-2); }
+.addr-status { font-size: .78rem; color: var(--faint); }
+.addr-status.ok { color: var(--green); }
+.addr-status.pending { color: var(--amber); }
+.addr-map { height: 190px; border-radius: 12px; overflow: hidden; border: 1px solid var(--border); }
+@media (max-width: 1040px) { .route-layout { grid-template-columns: 1fr; } }
+@media (max-width: 680px) {
+  .route-controls { grid-template-columns: 1fr; }
+  .route-summary { grid-template-columns: 1fr 1fr; }
+  .route-stop, .map-stop { flex-wrap: wrap; }
+  .route-stop-actions, .map-stop-actions { width: 100%; }
+}

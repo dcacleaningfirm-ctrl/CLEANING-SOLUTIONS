@@ -238,6 +238,7 @@ test("each role is only offered the sections it may open", () => {
     "book",
     "leads",
     "jobs",
+    "maps",
     "customers",
     "grow",
     "charges",
@@ -248,11 +249,12 @@ test("each role is only offered the sections it may open", () => {
     "book",
     "leads",
     "jobs",
+    "maps",
     "customers",
     "grow"
   ]);
-  assert.deepEqual(navigationFor("admin"), ["dashboard", "book", "jobs", "charges", "crew"]);
-  assert.deepEqual(navigationFor("technician"), ["jobs"]);
+  assert.deepEqual(navigationFor("admin"), ["dashboard", "book", "jobs", "maps", "charges", "crew"]);
+  assert.deepEqual(navigationFor("technician"), ["jobs", "maps"]);
 });
 
 test("everyone lands on a section they can actually open", () => {

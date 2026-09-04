@@ -56,6 +56,7 @@
 # loudly.
 /manager/*
   X-Robots-Tag: noindex, nofollow
+  Permissions-Policy: camera=(), microphone=(), geolocation=(self)
   Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://maps.googleapis.com https://maps.gstatic.com https://*.googleapis.com https://*.gstatic.com https://*.ggpht.com; script-src 'self' https://checkout.clover.com https://checkout.sandbox.dev.clover.com https://maps.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; worker-src 'self' blob:; connect-src 'self' https://checkout.clover.com https://checkout.sandbox.dev.clover.com https://maps.googleapis.com; frame-src https://checkout.clover.com https://checkout.sandbox.dev.clover.com
 
 # The worker must be revalidated every load, otherwise a cached copy keeps
