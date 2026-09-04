@@ -10,12 +10,20 @@ const migration = readFileSync(
   "utf8"
 );
 
-test("every new or repriced order receives the required $25 ENVMT fee", () => {
+test("every order defaults to $25 ENVMT and allows a per-order adjustment", () => {
   assert.match(api, /ENVMT_CENTS = 2500/);
   assert.match(api, /Environmental Waste Fee \(ENVMT\)/);
   assert.equal((api.match(/withRequiredEnvmt\(/g) || []).length, 3);
-  assert.match(manager, /ENVMT · required/);
-  assert.match(manager, /bookingTotalCents\(\)[\s\S]*?}, 2500\)/);
+  assert.match(api, /supplied\.unitPriceCents/);
+  assert.match(manager, /ENVMT · per order/);
+  assert.match(manager, /id="bk-envmt"/);
+});
+
+test("phone orders offer a 15 percent deposit and keep the remaining balance", () => {
+  assert.match(api, /DEPOSIT_PERCENT = 15/);
+  assert.match(manager, /Collect 15% deposit/);
+  assert.match(manager, /Math\.ceil\(j\.priceCents \* 0\.15\)/);
+  assert.match(manager, /Deposit paid/);
 });
 
 test("customers can be classified and filtered as residential or business", () => {

@@ -97,10 +97,11 @@ export default async (req: Request, context: Context) => {
   }
 
   // Compute the charge total on the server — never trust a client-sent total.
-  const amount = lineItems.reduce(
+  const orderTotal = lineItems.reduce(
     (sum, item) => sum + item.amount * item.quantity,
     0
   );
+  const amount = Math.ceil(orderTotal * 0.15);
 
   if (amount < 100) {
     return Response.json({ error: "Invalid amount" }, { status: 400 });
@@ -125,12 +126,15 @@ export default async (req: Request, context: Context) => {
           amount: amount,
           currency: "usd",
           source: token,
-          description: `DCA Cleaning - ${packageName}`,
+          description: `DCA Cleaning 15% deposit - ${packageName}`,
           metadata: {
             customerName,
             customerEmail: customerEmail || "",
             customerPhone: customerPhone || "",
             packageName,
+            orderTotal: String(orderTotal),
+            depositPercent: "15",
+            balanceDue: String(orderTotal - amount),
             items: JSON.stringify(lineItems),
           },
         }),
@@ -154,7 +158,10 @@ export default async (req: Request, context: Context) => {
       success: true,
       chargeId: chargeData.id,
       status: chargeData.status,
-      message: `Payment of $${(amount / 100).toFixed(2)} received for ${packageName}. A confirmation will be sent shortly.`,
+      orderTotal,
+      depositAmount: amount,
+      balanceDue: orderTotal - amount,
+      message: `Deposit of $${(amount / 100).toFixed(2)} received for ${packageName}. Remaining balance: $${((orderTotal - amount) / 100).toFixed(2)}.`,
     });
   } catch (err) {
     console.error("Payment processing error:", err);

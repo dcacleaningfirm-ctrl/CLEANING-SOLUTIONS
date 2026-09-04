@@ -735,13 +735,25 @@ interface BookingItem {
 
 const ENVMT_LABEL = "Environmental Waste Fee (ENVMT)";
 const ENVMT_CENTS = 2500;
+const MAX_ENVMT_CENTS = 100000;
+const DEPOSIT_PERCENT = 15;
 
 function withRequiredEnvmt(items: BookingItem[]): BookingItem[] {
+  const supplied = items.find(
+    (item) => item.kind === "fee" || item.label.toUpperCase() === ENVMT_LABEL.toUpperCase()
+  );
+  const envmtCents = supplied
+    ? Math.min(MAX_ENVMT_CENTS, Math.max(0, Math.round(supplied.unitPriceCents)))
+    : ENVMT_CENTS;
   return [
     ...items.filter((item) => item.kind !== "fee" && item.label.toUpperCase() !== ENVMT_LABEL.toUpperCase()),
-    { kind: "fee", label: ENVMT_LABEL, detail: "Required on every order", quantity: 1,
-      unitPriceCents: ENVMT_CENTS, amountCents: ENVMT_CENTS }
+    { kind: "fee", label: ENVMT_LABEL, detail: "Required on every order; amount set per order", quantity: 1,
+      unitPriceCents: envmtCents, amountCents: envmtCents }
   ];
+}
+
+function depositFor(totalCents: number): number {
+  return Math.ceil(Math.max(0, totalCents) * DEPOSIT_PERCENT / 100);
 }
 
 // The account details the office can correct from the app, with the length each
@@ -4197,6 +4209,8 @@ async function loadJob(id: number) {
     payments: paymentRows,
     notifications: messages,
     paidCents,
+    depositRequiredCents: depositFor(job.priceCents),
+    depositBalanceCents: Math.max(0, depositFor(job.priceCents) - paidCents),
     balanceCents: Math.max(0, job.priceCents - paidCents)
   };
 }

@@ -6029,6 +6029,7 @@
     return {
       customer: null,
       items: [],
+      envmtCents: 2500,
       date: dateValue(new Date()),
       searchTimer: null,
       crew: [],
@@ -6043,7 +6044,11 @@
   function bookingTotalCents() {
     return state.booking.items.reduce(function (sum, i) {
       return sum + i.unitPriceCents * i.quantity;
-    }, 2500);
+    }, state.booking.envmtCents == null ? 2500 : state.booking.envmtCents);
+  }
+
+  function bookingDepositCents() {
+    return Math.ceil(bookingTotalCents() * 0.15);
   }
 
   function renderBook() {
@@ -6116,7 +6121,11 @@
       '<label class="field"><span>Price list</span><select id="bk-catalog">' + catalogOptions + "</select></label>" +
       "</div>" + catalogNote +
       '<div id="bk-items" class="booking-items"></div>' +
-      '<div class="line-items"><div class="li"><span>Environmental Waste Fee <small>ENVMT · required</small></span><span class="mono">$25.00</span></div></div>' +
+      '<div class="booking-fields"><label class="field"><span>Environmental Waste Fee <small>ENVMT · per order</small></span>' +
+      '<div class="money-input"><span>$</span><input id="bk-envmt" type="number" min="0" max="1000" step="0.01" value="' +
+      ((b.envmtCents == null ? 2500 : b.envmtCents) / 100).toFixed(2) + '" /></div></label>' +
+      '<div class="field"><span>Required deposit (15%)</span><strong class="mono" id="bk-deposit">' +
+      fmtMoney(bookingDepositCents()) + "</strong></div></div>" +
       '<div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" id="bk-add-custom">Other charge</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" id="bk-clear-items">Clear list</button></div>' +
       "</section>" +
@@ -6222,6 +6231,12 @@
     document.getElementById("bk-clear-items").addEventListener("click", function () {
       state.booking.items = [];
       renderBookingItems();
+    });
+    document.getElementById("bk-envmt").addEventListener("input", function () {
+      state.booking.envmtCents = Math.max(0, Math.round((Number(this.value) || 0) * 100));
+      updateBookingTotal();
+      var deposit = document.getElementById("bk-deposit");
+      if (deposit) deposit.textContent = fmtMoney(bookingDepositCents());
     });
     document.getElementById("bk-date").addEventListener("change", loadSchedule);
     document.getElementById("bk-refresh").addEventListener("click", loadSchedule);
@@ -6437,6 +6452,8 @@
   function updateBookingTotal() {
     var total = document.getElementById("bk-total");
     if (total) total.textContent = fmtMoney(bookingTotalCents());
+    var deposit = document.getElementById("bk-deposit");
+    if (deposit) deposit.textContent = fmtMoney(bookingDepositCents());
     // Scoped to the booking list: the job drawer's ticket editor uses the same
     // row markup, and its rows keep their own totals.
     document.querySelectorAll("#bk-items [data-item-index]").forEach(function (row) {
@@ -6592,7 +6609,12 @@
           quantity: i.quantity,
           unitPriceCents: i.unitPriceCents
         };
-      }),
+      }).concat([{
+        kind: "fee",
+        label: "Environmental Waste Fee (ENVMT)",
+        quantity: 1,
+        unitPriceCents: b.envmtCents == null ? 2500 : b.envmtCents
+      }]),
       priceCents: bookingTotalCents(),
       force: force === true,
       sendConfirmation: chosenChannels("bk-send")
@@ -6676,6 +6698,7 @@
     state.booking.items = [];
     state.booking.location = null;
     if (state.booking.address) state.booking.address.reset();
+    state.booking.envmtCents = 2500;
     ["bk-name", "bk-phone", "bk-email", "bk-address", "bk-city", "bk-state", "bk-zip", "bk-notes", "bk-search"].forEach(
       function (id) { setValue(id, ""); }
     );
@@ -7022,7 +7045,7 @@
             'data-item-qty value="' + item.quantity + '"' + (item.kind === "fee" ? " disabled" : "") + ' /></label>' +
             '<label class="booking-item-price"><small>Each</small><div class="money-input"><span>$</span>' +
             '<input type="number" min="0" max="10000" step="0.01" data-item-price value="' +
-            (item.unitPriceCents / 100).toFixed(2) + '"' + (item.kind === "fee" ? " disabled" : "") + ' /></div></label>' +
+            (item.unitPriceCents / 100).toFixed(2) + '" /></div></label>' +
             '<span class="booking-item-amount mono" data-item-amount>' +
             fmtMoney(item.unitPriceCents * item.quantity) + "</span>" +
             (item.kind === "fee" ? '<span class="muted">Required</span>' : '<button type="button" class="btn btn-ghost btn-sm" data-item-remove="' + index + '" aria-label="Remove">×</button>') +
@@ -7241,14 +7264,16 @@
 
     return (
       '<h3 class="section-title" style="margin-top:20px">Payment</h3>' +
-      '<div class="pay-summary"><div><span>Collected</span><strong class="mono">' + fmtMoney(paid) + "</strong></div>" +
+      '<div class="pay-summary"><div><span>' + (paid > 0 && balance > 0 ? "Deposit paid" : "Collected") +
+      '</span><strong class="mono">' + fmtMoney(paid) + "</strong></div>" +
       '<div><span>Balance due</span><strong class="mono' + (balance ? " owing" : " clear") + '">' +
       fmtMoney(balance) + "</strong></div></div>" +
       history +
       '<div class="btn-row pay-actions">' +
       (open
         ? ""
-        : '<button type="button" class="btn btn-primary btn-sm" id="d-collect">Collect payment</button>') +
+        : '<button type="button" class="btn btn-primary btn-sm" id="d-deposit">Collect 15% deposit</button>' +
+          '<button type="button" class="btn btn-ghost btn-sm" id="d-collect">Collect other payment</button>') +
       '<button type="button" class="btn btn-ghost btn-sm" id="d-confirm">Send confirmation</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" id="d-quote">Send total</button>' +
       ((data.payments || []).length
@@ -7337,6 +7362,25 @@
 
   function wirePayments(data) {
     var j = data.job;
+
+    var deposit = document.getElementById("d-deposit");
+    if (deposit) {
+      deposit.addEventListener("click", function () {
+        loadSettings().catch(function () { return null; }).then(function () {
+          var target = data.depositBalanceCents == null
+            ? Math.max(0, Math.ceil(j.priceCents * 0.15) - (data.paidCents || 0))
+            : data.depositBalanceCents;
+          state.pay = {
+            jobId: j.id,
+            method: defaultMethod(),
+            amount: (target / 100).toFixed(2),
+            reference: "",
+            note: "15% order deposit"
+          };
+          renderDrawer(state.job);
+        });
+      });
+    }
 
     var collect = document.getElementById("d-collect");
     if (collect) {
