@@ -399,19 +399,21 @@ test("the promotional text box on the public forms is optional and starts unchec
     assert.doesNotMatch(box!, /required/, `${name} makes the box required`);
     // Said in the words the customer needs: optional, and buying service does
     // not depend on it.
-    assert.match(page, /Promotional texts are not required to purchase service/, name);
-    assert.match(page, /reply STOP at any time/, name);
-    assert.match(page, /field-optional">optional/, name);
+    assert.match(page, /Consent is not a condition of purchasing or receiving services/, name);
+    assert.match(page, /Reply STOP to opt out or HELP for help/, name);
+    assert.match(page, /<strong>Optional:<\/strong>/, name);
   }
 });
 
-test("the existing required contact consent box on those forms was left alone", () => {
+test("service requests never require agreement to receive text messages", () => {
   for (const [name, page] of [
     ["quote.html", QUOTE],
     ["book/review.html", REVIEW],
     ["move-cleaning-specials.html", MOVE]
   ] as const) {
-    assert.match(page, /name="contact_consent"[^>]*required/, `${name} lost its contact consent`);
+    assert.doesNotMatch(page, /name="contact_consent"/, `${name} still carries bundled contact consent`);
+    assert.doesNotMatch(page, /contact me[^<]*by phone, text or email/i, `${name} still requires text contact`);
+    assert.match(page, /This does not enroll you in promotional text messages/, name);
   }
 });
 
