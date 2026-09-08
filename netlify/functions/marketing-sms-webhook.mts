@@ -7,12 +7,7 @@
 // that moment will already be skipping it.
 import type { Config, Context } from "@netlify/functions";
 import crypto from "node:crypto";
-import {
-  HELP_REPLY,
-  START_REPLY,
-  STOP_REPLY,
-  readInboundIntent
-} from "../../lib/marketing.js";
+import { readInboundIntent } from "../../lib/marketing.js";
 import { applyInboundOptOut, recordDeliveryStatus } from "../../lib/marketing-store.js";
 
 // Twilio signs every webhook with the account's auth token: the full URL, then
@@ -101,10 +96,10 @@ export default async (req: Request, context: Context) => {
       detail: "Customer replied STOP to a marketing text",
       ip
     });
-    // Advanced Opt-Out already sent the customer a confirmation before this
-    // webhook ran. Returning empty TwiML prevents a duplicate reply while the
-    // fallback response still covers services where Advanced Opt-Out is off.
-    return advancedIntent ? twiml(null) : twiml(STOP_REPLY);
+    // Twilio owns every keyword confirmation for this Messaging Service.
+    // Always return empty TwiML, even if OptOutType is absent, because some
+    // carrier paths omit it while Twilio has still already sent the reply.
+    return twiml(null);
   }
 
   if (intent === "start") {
@@ -114,10 +109,10 @@ export default async (req: Request, context: Context) => {
       detail: "Customer replied START to opt back in",
       ip
     });
-    return advancedIntent ? twiml(null) : twiml(START_REPLY);
+    return twiml(null);
   }
 
-  if (intent === "help") return advancedIntent ? twiml(null) : twiml(HELP_REPLY);
+  if (intent === "help") return twiml(null);
 
   // Anything else is a customer talking to the business. It is not answered
   // automatically — a reply written by a robot to someone asking about their
