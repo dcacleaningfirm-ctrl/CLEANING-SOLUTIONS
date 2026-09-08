@@ -5,7 +5,7 @@
  * steps, the add-ons page and the promotion page at once.
  */
 window.DCA_PRICING = Object.freeze({
-  version: "2026-08-23",
+  version: "2026-09-08",
   currency: "USD",
   services: Object.freeze({
     carpetRoom: Object.freeze({ label: "Carpet cleaning — per room", price: 46.58 }),
@@ -103,6 +103,40 @@ window.DCA_PRICING = Object.freeze({
    * one names it by code; nothing about an offer is written out by hand twice.
    */
   specials: Object.freeze([
+    Object.freeze({
+      code: "CARPET109",
+      kind: "carpet",
+      name: "3-bedroom carpet cleaning special",
+      price: 109.00,
+      includedAreas: 3,
+      summary: "Up to 3 standard carpeted bedrooms plus one hallway, with deodorizer included.",
+      includes: Object.freeze(["Up to 3 standard carpeted bedrooms", "One hallway", "Deodorizer"]),
+      terms: Object.freeze([
+        "Covers up to 3 standard carpeted bedrooms and one hallway at one residential address in a single visit.",
+        "Deodorizer is included at no extra charge. Pet-odor, enzyme and heavy-stain treatments are quoted separately.",
+        "A standard bedroom is up to 250 square feet. A large master bedroom or oversized room may count as 2 areas.",
+        "Furniture must be moved or the carpeted area must be accessible before service.",
+        "Applies to residential addresses inside the published service area and cannot be combined with another offer.",
+        "Request it with the quote form or mention code CARPET109 by phone. Final scope and price are confirmed before work begins."
+      ])
+    }),
+    Object.freeze({
+      code: "CARPET149",
+      kind: "carpet",
+      name: "4-bedroom carpet cleaning special",
+      price: 149.00,
+      includedAreas: 4,
+      summary: "Up to 4 standard carpeted bedrooms plus one hallway, with deodorizer included.",
+      includes: Object.freeze(["Up to 4 standard carpeted bedrooms", "One hallway", "Deodorizer"]),
+      terms: Object.freeze([
+        "Covers up to 4 standard carpeted bedrooms and one hallway at one residential address in a single visit.",
+        "Deodorizer is included at no extra charge. Pet-odor, enzyme and heavy-stain treatments are quoted separately.",
+        "A standard bedroom is up to 250 square feet. A large master bedroom or oversized room may count as 2 areas.",
+        "Furniture must be moved or the carpeted area must be accessible before service.",
+        "Applies to residential addresses inside the published service area and cannot be combined with another offer.",
+        "Request it with the quote form or mention code CARPET149 by phone. Final scope and price are confirmed before work begins."
+      ])
+    }),
     Object.freeze({
       code: "COMBO498",
       kind: "combo",
