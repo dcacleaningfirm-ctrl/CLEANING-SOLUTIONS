@@ -467,6 +467,14 @@ test("bulk sending stays off until it is explicitly switched on", () => {
   assert.match(marketing, /ready: configured && enabled/);
 });
 
+test("marketing SMS cannot bypass the approved Messaging Service", () => {
+  const marketing = read("lib/marketing.ts");
+  assert.doesNotMatch(marketing, /env\("TWILIO_MARKETING_FROM_NUMBER"\)/);
+  assert.doesNotMatch(DISPATCH, /env\("TWILIO_MARKETING_FROM_NUMBER"\)/);
+  assert.doesNotMatch(DISPATCH, /form\.set\("From"/);
+  assert.match(DISPATCH, /MessagingServiceSid: service/);
+});
+
 test("the scheduled dispatcher does nothing while both channels are off", () => {
   const fn = read("netlify/functions/marketing-dispatch.mts");
   assert.match(fn, /schedule: "\* \* \* \* \*"/);
