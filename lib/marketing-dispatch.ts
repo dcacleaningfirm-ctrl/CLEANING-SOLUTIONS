@@ -51,14 +51,17 @@ async function sendSms(to: string, body: string): Promise<SendOutcome> {
   const token = env("TWILIO_AUTH_TOKEN");
   const service =
     env("TWILIO_MARKETING_MESSAGING_SERVICE_SID") || env("TWILIO_MESSAGING_SERVICE_SID");
-  const from = env("TWILIO_MARKETING_FROM_NUMBER") || env("TWILIO_FROM_NUMBER");
-  if (!sid || !token || (!service && !from)) {
+  if (!sid || !token || !service) {
     return { ok: false, provider: null, providerRef: null, error: "Text messaging is not set up" };
   }
 
-  const form = new URLSearchParams({ To: to, Body: body });
-  if (service) form.set("MessagingServiceSid", service);
-  else form.set("From", from);
+  // Marketing must always travel through the approved Messaging Service so its
+  // A2P registration and service-level compliance settings govern every send.
+  const form = new URLSearchParams({
+    To: to,
+    Body: body,
+    MessagingServiceSid: service
+  });
   // Twilio tells us whether the handset got it; without this the dashboard can
   // only ever say "sent", which is not the same thing as delivered.
   form.set("StatusCallback", `${siteUrl()}/api/marketing/sms/status`);

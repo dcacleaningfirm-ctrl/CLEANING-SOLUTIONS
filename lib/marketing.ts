@@ -892,9 +892,7 @@ export function marketingSmsSettings(): ChannelReadiness {
   const token = env("TWILIO_AUTH_TOKEN");
   const sender =
     env("TWILIO_MARKETING_MESSAGING_SERVICE_SID") ||
-    env("TWILIO_MARKETING_FROM_NUMBER") ||
-    env("TWILIO_MESSAGING_SERVICE_SID") ||
-    env("TWILIO_FROM_NUMBER");
+    env("TWILIO_MESSAGING_SERVICE_SID");
 
   const missing: string[] = [];
   if (!sid) missing.push("TWILIO_ACCOUNT_SID");
