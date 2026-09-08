@@ -245,13 +245,14 @@ test("Twilio's signature is checked before an inbound message is believed", () =
 
 test("Advanced Opt-Out events are recorded without duplicate replies", () => {
   const webhook = read("netlify/functions/marketing-sms-webhook.mts");
-  assert.match(webhook, /params\\.OptOutType/);
+  assert.match(webhook, /params\.OptOutType/);
   assert.match(webhook, /advancedOptOutType === "STOP"/);
   assert.match(webhook, /advancedOptOutType === "START"/);
   assert.match(webhook, /advancedOptOutType === "HELP"/);
-  assert.match(webhook, /advancedIntent \\? twiml\\(null\\) : twiml\\(STOP_REPLY\\)/);
-  assert.match(webhook, /advancedIntent \\? twiml\\(null\\) : twiml\\(START_REPLY\\)/);
-  assert.match(webhook, /advancedIntent \\? twiml\\(null\\) : twiml\\(HELP_REPLY\\)/);
+  assert.doesNotMatch(webhook, /STOP_REPLY|START_REPLY|HELP_REPLY/);
+  assert.match(webhook, /if \(intent === "stop"\)[\s\S]{0,500}?return twiml\(null\)/);
+  assert.match(webhook, /if \(intent === "start"\)[\s\S]{0,500}?return twiml\(null\)/);
+  assert.match(webhook, /if \(intent === "help"\) return twiml\(null\)/);
 });
 
 // ---------------------------------------------------------------------------
