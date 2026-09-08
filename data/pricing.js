@@ -104,37 +104,37 @@ window.DCA_PRICING = Object.freeze({
    */
   specials: Object.freeze([
     Object.freeze({
-      code: "CARPET109",
+      code: "CARPET119",
       kind: "carpet",
       name: "3-bedroom carpet cleaning special",
-      price: 109.00,
+      price: 119.00,
       includedAreas: 3,
-      summary: "Up to 3 standard carpeted bedrooms plus one hallway, with deodorizer included.",
-      includes: Object.freeze(["Up to 3 standard carpeted bedrooms", "One hallway", "Deodorizer"]),
+      summary: "Up to 3 standard carpeted bedrooms plus one hallway, with fiber rinse and deodorizer included.",
+      includes: Object.freeze(["Up to 3 standard carpeted bedrooms", "One hallway", "Fiber rinse", "Deodorizer"]),
       terms: Object.freeze([
         "Covers up to 3 standard carpeted bedrooms and one hallway at one residential address in a single visit.",
-        "Deodorizer is included at no extra charge. Pet-odor, enzyme and heavy-stain treatments are quoted separately.",
+        "Fiber rinse and deodorizer are included at no extra charge. Pet-odor, enzyme and heavy-stain treatments are quoted separately.",
         "A standard bedroom is up to 250 square feet. A large master bedroom or oversized room may count as 2 areas.",
         "Furniture must be moved or the carpeted area must be accessible before service.",
         "Applies to residential addresses inside the published service area and cannot be combined with another offer.",
-        "Request it with the quote form or mention code CARPET109 by phone. Final scope and price are confirmed before work begins."
+        "Request it with the quote form or mention code CARPET119 by phone. Final scope and price are confirmed before work begins."
       ])
     }),
     Object.freeze({
-      code: "CARPET149",
+      code: "CARPET159",
       kind: "carpet",
       name: "4-bedroom carpet cleaning special",
-      price: 149.00,
+      price: 159.00,
       includedAreas: 4,
-      summary: "Up to 4 standard carpeted bedrooms plus one hallway, with deodorizer included.",
-      includes: Object.freeze(["Up to 4 standard carpeted bedrooms", "One hallway", "Deodorizer"]),
+      summary: "Up to 4 standard carpeted bedrooms plus one hallway, with fiber rinse and deodorizer included.",
+      includes: Object.freeze(["Up to 4 standard carpeted bedrooms", "One hallway", "Fiber rinse", "Deodorizer"]),
       terms: Object.freeze([
         "Covers up to 4 standard carpeted bedrooms and one hallway at one residential address in a single visit.",
-        "Deodorizer is included at no extra charge. Pet-odor, enzyme and heavy-stain treatments are quoted separately.",
+        "Fiber rinse and deodorizer are included at no extra charge. Pet-odor, enzyme and heavy-stain treatments are quoted separately.",
         "A standard bedroom is up to 250 square feet. A large master bedroom or oversized room may count as 2 areas.",
         "Furniture must be moved or the carpeted area must be accessible before service.",
         "Applies to residential addresses inside the published service area and cannot be combined with another offer.",
-        "Request it with the quote form or mention code CARPET149 by phone. Final scope and price are confirmed before work begins."
+        "Request it with the quote form or mention code CARPET159 by phone. Final scope and price are confirmed before work begins."
       ])
     }),
     Object.freeze({
