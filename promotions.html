@@ -15,6 +15,21 @@
   src="https://www.facebook.com/tr?id=27416224901380695&amp;ev=PageView&amp;noscript=1"
   alt="" /></noscript>
   <!-- End Meta Pixel Code -->
+
+  <style>
+    .offers-overview{padding:2rem 0;background:#f7f4ec}
+    .offers-overview h2{margin:0 0 .35rem;font-size:clamp(1.6rem,3vw,2.35rem)}
+    .offers-overview-intro{margin:0 0 1.25rem;color:#4b5563}
+    .offers-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:.85rem}
+    .offer-tile{display:flex;flex-direction:column;min-width:0;padding:1rem;border:1px solid #d8bd72;border-radius:14px;background:#fff;box-shadow:0 5px 18px rgba(18,18,18,.07)}
+    .offer-tile .offer-price{margin:0;color:#a46f00;font-size:1.7rem;font-weight:800;line-height:1}
+    .offer-tile h3{margin:.55rem 0 .35rem;font-size:1rem;line-height:1.25}
+    .offer-tile p{margin:0 0 .8rem;font-size:.88rem;line-height:1.4;color:#4b5563}
+    .offer-tile .button{margin-top:auto;width:100%;padding:.7rem .6rem;text-align:center}
+    .offer-code{display:block;margin-top:.55rem;font-size:.72rem;font-weight:700;letter-spacing:.06em;color:#6b7280}
+    @media(max-width:980px){.offers-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
+    @media(max-width:640px){.page-hero{padding:2rem 0}.page-hero p:not(.eyebrow){display:none}.offers-overview{padding:1.25rem 0}.offers-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:.65rem}.offer-tile{padding:.8rem}.offer-tile .offer-price{font-size:1.45rem}.offer-tile h3{font-size:.92rem}.offer-tile p{font-size:.8rem}}
+  </style>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
@@ -30,9 +45,30 @@
     <section class="page-hero">
       <div class="container">
         <p class="eyebrow eyebrow-light">Current promotions</p>
-        <h1>Every offer. One page. One set of terms.</h1>
+        <h1>See every DCA special at a glance.</h1>
         <p>This page is the only place any of our offers are defined. The codes, the prices, the inclusions and the terms on every other page on this site are read from the same records you see here, so a banner cannot advertise a number the terms do not support. Each one has a button that carries its code straight onto your request.</p>
         <p><a class="button button-light" href="/move-cleaning-specials">See Move-In / Move-Out packages from $249</a></p>
+      </div>
+    </section>
+
+
+    <section class="offers-overview" aria-labelledby="all-specials-title">
+      <div class="container">
+        <p class="eyebrow">Choose your special</p>
+        <h2 id="all-specials-title">All promotions—lowest price first</h2>
+        <p class="offers-overview-intro">Tap any offer to book it. Full details and terms remain below.</p>
+        <div class="offers-grid">
+          <article class="offer-tile"><p class="offer-price">$199</p><h3>5 Carpeted Areas</h3><p>Professional carpet cleaning for up to five areas.</p><a class="button button-dark" href="/quote?code=CARPET199">Choose $199 Carpet</a><span class="offer-code">CARPET199</span></article>
+          <article class="offer-tile"><p class="offer-price">$199</p><h3>Air Duct Promotion</h3><p>One system, up to 10 supply vents and one return.</p><a class="button button-dark" href="/quote?code=VENTS199">Choose $199 Ducts</a><span class="offer-code">VENTS199</span></article>
+          <article class="offer-tile"><p class="offer-price">$199</p><h3>Upholstery Package</h3><p>Standard sofa, loveseat and chair with deodorizer.</p><a class="button button-dark" href="/quote?code=UPHOLSTERY199">Choose $199 Upholstery</a><span class="offer-code">UPHOLSTERY199</span></article>
+          <article class="offer-tile"><p class="offer-price">$249</p><h3>Move Cleaning</h3><p>Move-in or move-out cleaning starting package.</p><a class="button button-dark" href="/quote?code=MOVE249">Choose $249 Move</a><span class="offer-code">MOVE249</span></article>
+          <article class="offer-tile"><p class="offer-price">$299</p><h3>Unlimited-Vent Ducts</h3><p>One HVAC unit, unlimited vents and furnace cleaning.</p><a class="button button-dark" href="/quote?code=DUCT299">Choose $299 Ducts</a><span class="offer-code">DUCT299</span></article>
+          <article class="offer-tile"><p class="offer-price">$350</p><h3>10 Carpeted Areas</h3><p>Includes shampoo treatment and deodorizer.</p><a class="button button-dark" href="/quote?code=CARPET350">Choose $350 Carpet</a><span class="offer-code">CARPET350</span></article>
+          <article class="offer-tile"><p class="offer-price">$399</p><h3>Move Cleaning Plus</h3><p>Expanded move-in or move-out cleaning package.</p><a class="button button-dark" href="/quote?code=MOVE399">Choose $399 Move</a><span class="offer-code">MOVE399</span></article>
+          <article class="offer-tile"><p class="offer-price">$431</p><h3>12 Carpeted Areas</h3><p>Includes shampoo treatment and deodorizer.</p><a class="button button-dark" href="/quote?code=CARPET431">Choose $431 Carpet</a><span class="offer-code">CARPET431</span></article>
+          <article class="offer-tile"><p class="offer-price">$498</p><h3>Carpet + Air Ducts</h3><p>Five carpeted areas and one HVAC system.</p><a class="button button-dark" href="/quote?code=COMBO498">Choose $498 Combo</a><span class="offer-code">COMBO498</span></article>
+          <article class="offer-tile"><p class="offer-price">$599</p><h3>Complete Move Cleaning</h3><p>Most comprehensive move-in or move-out package.</p><a class="button button-dark" href="/quote?code=MOVE599">Choose $599 Move</a><span class="offer-code">MOVE599</span></article>
+        </div>
       </div>
     </section>
 
