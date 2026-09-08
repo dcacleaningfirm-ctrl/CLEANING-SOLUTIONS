@@ -83,7 +83,16 @@ export default async (req: Request, context: Context) => {
 
   // --- Replies --------------------------------------------------------------
   const from = params.From || "";
-  const intent = readInboundIntent(params.Body || "");
+  const advancedOptOutType = (params.OptOutType || "").trim().toUpperCase();
+  const advancedIntent =
+    advancedOptOutType === "STOP"
+      ? "stop"
+      : advancedOptOutType === "START"
+        ? "start"
+        : advancedOptOutType === "HELP"
+          ? "help"
+          : null;
+  const intent = advancedIntent || readInboundIntent(params.Body || "");
 
   if (intent === "stop") {
     await applyInboundOptOut({
@@ -92,10 +101,10 @@ export default async (req: Request, context: Context) => {
       detail: "Customer replied STOP to a marketing text",
       ip
     });
-    // Twilio's Advanced Opt-Out sends its own confirmation when it is switched
-    // on for the messaging service; the reply here covers the case where it is
-    // not, and a customer always gets an acknowledgement either way.
-    return twiml(STOP_REPLY);
+    // Advanced Opt-Out already sent the customer a confirmation before this
+    // webhook ran. Returning empty TwiML prevents a duplicate reply while the
+    // fallback response still covers services where Advanced Opt-Out is off.
+    return advancedIntent ? twiml(null) : twiml(STOP_REPLY);
   }
 
   if (intent === "start") {
@@ -105,10 +114,10 @@ export default async (req: Request, context: Context) => {
       detail: "Customer replied START to opt back in",
       ip
     });
-    return twiml(START_REPLY);
+    return advancedIntent ? twiml(null) : twiml(START_REPLY);
   }
 
-  if (intent === "help") return twiml(HELP_REPLY);
+  if (intent === "help") return advancedIntent ? twiml(null) : twiml(HELP_REPLY);
 
   // Anything else is a customer talking to the business. It is not answered
   // automatically — a reply written by a robot to someone asking about their
