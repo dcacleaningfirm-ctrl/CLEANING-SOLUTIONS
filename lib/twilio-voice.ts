@@ -25,6 +25,12 @@ export function gather(question: string, action = "/api/voice/turn"): string {
   )}</Gather>`;
 }
 
+export function gatherPayment(message: string, action = "/api/voice/turn"): string {
+  return `<Gather input="dtmf speech" action="${escapeXml(action)}" method="POST" timeout="60" speechTimeout="auto" numDigits="1" actionOnEmptyResult="true">${say(
+    message
+  )}</Gather>`;
+}
+
 export function transfer(number: string, introduction?: string): string {
   const introductionXml = introduction ? say(introduction) : "";
   return `${introductionXml}<Dial timeout="25" answerOnBridge="true"><Number>${escapeXml(number)}</Number></Dial>${say(
@@ -64,6 +70,12 @@ export function validTwilioSignature(
 
 export function likelyHumanRequest(utterance: string): boolean {
   return /\b(person|human|representative|agent|manager|shacole|office|complaint|refund|emergency)\b/i.test(
+    utterance
+  );
+}
+
+export function likelyCommercialRequest(utterance: string): boolean {
+  return /\bcommercial\b|\bapartment (?:complex|community|property)\b|\bproperty manager\b|\bfacilit(?:y|ies)\b|\boffice building\b|\bchurch\b|\bhotel\b|\brestaurant\b|\bschool\b|\bwarehouse\b|\bretail store\b/i.test(
     utterance
   );
 }

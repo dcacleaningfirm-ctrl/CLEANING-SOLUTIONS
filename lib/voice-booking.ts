@@ -8,10 +8,12 @@ import {
   jobs,
   leadEvents,
   leads,
-  notifications
+  notifications,
+  payments
 } from "../db/schema.js";
 import { ingestLead } from "./lead-intake.js";
 import { normalizePhone, sendSms } from "./notify.js";
+import { ensureVoicePaymentLink, voicePaymentUrl } from "./voice-payment.js";
 import {
   SHACOLE_NUMBER,
   appointmentTime,
@@ -135,6 +137,14 @@ async function recordSms(input: {
   return result;
 }
 
+export async function voiceDepositPaid(jobId: number, requiredCents: number): Promise<boolean> {
+  const [row] = await db
+    .select({ value: sql<number>`cast(coalesce(sum(${payments.amountCents}), 0) as int)` })
+    .from(payments)
+    .where(and(eq(payments.jobId, jobId), eq(payments.status, "paid")));
+  return Number(row?.value || 0) >= requiredCents;
+}
+
 export async function bookVoiceAppointment(state: VoiceCallState) {
   const quote = quoteForVoiceState(state);
   if (!quote) return { ok: false as const, reason: "This request needs an office quote" };
@@ -147,13 +157,26 @@ export async function bookVoiceAppointment(state: VoiceCallState) {
     .where(and(eq(leads.source, "phone"), eq(leads.sourceRef, state.callSid)))
     .limit(1);
   if (existing?.jobId) {
+    const [existingJob] = await db
+      .select({ customerId: jobs.customerId })
+      .from(jobs)
+      .where(eq(jobs.id, existing.jobId))
+      .limit(1);
+    const paymentLink = existingJob
+      ? await ensureVoicePaymentLink({
+          jobId: existing.jobId,
+          customerId: existingJob.customerId,
+          amountCents: quote.depositCents
+        })
+      : null;
     return {
       ok: true as const,
       jobId: existing.jobId,
       leadId: existing.id,
       duplicate: true,
       quote,
-      at: appointmentTime(state) || new Date()
+      at: appointmentTime(state) || new Date(),
+      paymentUrl: paymentLink ? voicePaymentUrl(paymentLink.token) : null
     };
   }
 
@@ -252,10 +275,17 @@ export async function bookVoiceAppointment(state: VoiceCallState) {
     hour: "numeric",
     minute: "2-digit"
   }).format(availability.at);
+  const paymentLink = await ensureVoicePaymentLink({
+    jobId: job.id,
+    customerId: intake.customer.id,
+    amountCents: quote.depositCents
+  });
+  const paymentUrl = voicePaymentUrl(paymentLink.token);
   const customerMessage =
     `DCA Cleaning Solutions: we are holding ${when} for ${quote.promotion.name}. ` +
     `Planning total ${money(quote.totalCents)}; required 15% deposit ${money(quote.depositCents)}. ` +
-    `The DCA office will contact you to collect the deposit. The appointment is confirmed after payment. ` +
+    `Pay the deposit securely here: ${paymentUrl} ` +
+    `After payment, the DCA office will contact you to confirm the appointment time. ` +
     `Questions: (470) 485-3123. Job #${job.id}.`;
   const officeMessage =
     `New DCA AI booking: ${state.customerName}, ${state.callerPhone}, ${state.address}, ZIP ${state.zip}. ` +
@@ -287,6 +317,7 @@ export async function bookVoiceAppointment(state: VoiceCallState) {
     quote,
     at: availability.at,
     customerSms,
-    officeSms
+    officeSms,
+    paymentUrl
   };
 }

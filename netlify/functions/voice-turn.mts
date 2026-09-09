@@ -2,6 +2,7 @@ import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { extractVoiceTurn } from "../../lib/openai-voice.js";
 import {
+  JAMES_COMMERCIAL_NUMBER,
   SHACOLE_NUMBER,
   applyVoicePatch,
   fallbackVoiceTurn,
@@ -11,9 +12,11 @@ import {
   stateIsBookable,
   type VoiceCallState
 } from "../../lib/voice-agent.js";
-import { bookVoiceAppointment } from "../../lib/voice-booking.js";
+import { bookVoiceAppointment, voiceDepositPaid } from "../../lib/voice-booking.js";
 import {
   gather,
+  gatherPayment,
+  likelyCommercialRequest,
   likelyHumanRequest,
   publicWebhookUrl,
   say,
@@ -64,6 +67,46 @@ export default async (req: Request, _context: Context) => {
   }
 
   const utterance = String(params.get("SpeechResult") || params.get("Digits") || "").trim();
+  if (state.pendingJobId && state.pendingDepositCents) {
+    if (likelyHumanRequest(utterance) || utterance === "2") {
+      return finish(
+        store,
+        callSid,
+        twiml(transfer(SHACOLE_NUMBER, "I will connect you with the DCA office for live support."))
+      );
+    }
+    const paid = await voiceDepositPaid(state.pendingJobId, state.pendingDepositCents).catch(() => false);
+    if (paid) {
+      return finish(
+        store,
+        callSid,
+        twiml(
+          `${say(
+            "Thank you! Your deposit has been received. The DCA office will contact you to confirm your exact appointment time. You will also receive a text receipt. Have a wonderful day!"
+          )}<Hangup/>`
+        )
+      );
+    }
+    state.depositChecks += 1;
+    state.updatedAt = new Date().toISOString();
+    if (state.depositChecks >= 2) {
+      return finish(
+        store,
+        callSid,
+        twiml(
+          `${say(
+            "Your secure deposit link remains active in your text messages. After payment is received, the DCA office will contact you to confirm the appointment time. Thank you for calling DCA Cleaning Solutions!"
+          )}<Hangup/>`
+        )
+      );
+    }
+    await store.setJSON(callSid, state);
+    return twiml(
+      `${gatherPayment(
+        "I do not see the deposit yet. Please complete the secure payment link in your text messages, then press 1. Press 2 for the DCA office."
+      )}<Redirect method="POST">/api/voice/turn</Redirect>`
+    );
+  }
   if (!utterance) {
     state.emptyTurns += 1;
     state.updatedAt = new Date().toISOString();
@@ -76,6 +119,19 @@ export default async (req: Request, _context: Context) => {
     }
     await store.setJSON(callSid, state);
     return twiml(`${gather("I did not hear that. Please say it again.")}<Redirect method="POST">/api/voice/turn</Redirect>`);
+  }
+
+  if (likelyCommercialRequest(utterance)) {
+    return finish(
+      store,
+      callSid,
+      twiml(
+        transfer(
+          JAMES_COMMERCIAL_NUMBER,
+          "Thank you. I will connect you with James Alston, who handles DCA commercial services and quotes."
+        )
+      )
+    );
   }
 
   if (likelyHumanRequest(utterance)) {
@@ -113,6 +169,18 @@ export default async (req: Request, _context: Context) => {
       twiml(`${say("Thanks for calling DCA Cleaning Solutions. Have a wonderful day!")}<Hangup/>`)
     );
   }
+  if (patch.wantsCommercial) {
+    return finish(
+      store,
+      callSid,
+      twiml(
+        transfer(
+          JAMES_COMMERCIAL_NUMBER,
+          "Thank you. I will connect you with James Alston, who handles DCA commercial services and quotes."
+        )
+      )
+    );
+  }
   if (patch.wantsHuman) {
     return finish(
       store,
@@ -138,13 +206,31 @@ export default async (req: Request, _context: Context) => {
     try {
       const booked = await bookVoiceAppointment(state);
       if (booked.ok) {
+        if ("customerSms" in booked && booked.customerSms && !booked.customerSms.ok) {
+          return finish(
+            store,
+            callSid,
+            twiml(
+              transfer(
+                SHACOLE_NUMBER,
+                "I saved your request, but I could not deliver the secure deposit link. I will connect you with the DCA office for live support."
+              )
+            )
+          );
+        }
+        state.pendingJobId = booked.jobId;
+        state.pendingDepositCents = booked.quote.depositCents;
+        state.depositChecks = 0;
+        state.updatedAt = new Date().toISOString();
+        await store.setJSON(callSid, state);
         const spoken =
-          `Thank you. I placed appointment number ${booked.jobId} on hold. ` +
+          `Thank you. I placed request number ${booked.jobId} on hold. ` +
           `The planning total is ${money(booked.quote.totalCents)}, and the required 15 percent deposit is ${money(
             booked.quote.depositCents
-          )}. The DCA office has been notified and will contact you to collect the deposit. ` +
-          `The appointment becomes confirmed after the deposit is received.`;
-        return finish(store, callSid, twiml(`${say(spoken)}<Hangup/>`));
+          )}. I just sent a secure payment link to the phone you are calling from. ` +
+          `Open the text and pay the deposit now. When you finish, press 1. Press 2 for the DCA office. ` +
+          `After payment, the office will contact you to confirm the appointment time.`;
+        return twiml(`${gatherPayment(spoken)}<Redirect method="POST">/api/voice/turn</Redirect>`);
       }
 
       state.requestedDate = null;
