@@ -15,6 +15,7 @@ import {
   gather,
   likelyHumanRequest,
   publicWebhookUrl,
+  say,
   transfer,
   twiml,
   validTwilioSignature
@@ -69,7 +70,7 @@ export default async (req: Request, _context: Context) => {
       return finish(
         store,
         callSid,
-        twiml(transfer(SHACOLE_NUMBER, "I could not hear a response. I will connect you with Shacole."))
+        twiml(transfer(SHACOLE_NUMBER, "I could not hear a response. I will connect you with the DCA office for live support."))
       );
     }
     await store.setJSON(callSid, state);
@@ -80,7 +81,7 @@ export default async (req: Request, _context: Context) => {
     return finish(
       store,
       callSid,
-      twiml(transfer(SHACOLE_NUMBER, "Certainly. I will connect you with Shacole in the DCA office."))
+      twiml(transfer(SHACOLE_NUMBER, "Certainly. I will connect you with the DCA office for live support."))
     );
   }
 
@@ -101,7 +102,7 @@ export default async (req: Request, _context: Context) => {
       twiml(
         transfer(
           SHACOLE_NUMBER,
-          "The automated scheduler is temporarily unavailable. I will connect you with Shacole."
+          "The automated scheduler is temporarily unavailable. I will connect you with the DCA office for live support."
         )
       )
     );
@@ -111,14 +112,14 @@ export default async (req: Request, _context: Context) => {
     return finish(
       store,
       callSid,
-      twiml('<Say voice="alice">Thank you for calling DCA Cleaning Solutions. Goodbye.</Say><Hangup/>')
+      twiml(`${say("Thanks for calling DCA Cleaning Solutions. Have a wonderful day!")}<Hangup/>`)
     );
   }
   if (patch.wantsHuman) {
     return finish(
       store,
       callSid,
-      twiml(transfer(SHACOLE_NUMBER, "I will connect you with Shacole in the DCA office."))
+      twiml(transfer(SHACOLE_NUMBER, "I will connect you with the DCA office for live support."))
     );
   }
 
@@ -131,7 +132,7 @@ export default async (req: Request, _context: Context) => {
     return finish(
       store,
       callSid,
-      twiml(transfer(SHACOLE_NUMBER, "I want to make sure this is handled correctly. I will connect you with Shacole."))
+      twiml(transfer(SHACOLE_NUMBER, "I want to make sure this is handled correctly. I will connect you with the DCA office for live support."))
     );
   }
 
@@ -143,9 +144,9 @@ export default async (req: Request, _context: Context) => {
           `Thank you. I placed appointment number ${booked.jobId} on hold. ` +
           `The planning total is ${money(booked.quote.totalCents)}, and the required 15 percent deposit is ${money(
             booked.quote.depositCents
-          )}. Shacole has been notified and will contact you to collect the deposit. ` +
+          )}. The DCA office has been notified and will contact you to collect the deposit. ` +
           `The appointment becomes confirmed after the deposit is received.`;
-        return finish(store, callSid, twiml(`<Say voice="alice">${spoken}</Say><Hangup/>`));
+        return finish(store, callSid, twiml(`${say(spoken)}<Hangup/>`));
       }
 
       state.requestedDate = null;
@@ -163,7 +164,7 @@ export default async (req: Request, _context: Context) => {
         twiml(
           transfer(
             SHACOLE_NUMBER,
-            "I could not safely place the appointment on the calendar. I will connect you with Shacole."
+            "I could not safely place the appointment on the calendar. I will connect you with the DCA office for live support."
           )
         )
       );
@@ -178,7 +179,7 @@ export default async (req: Request, _context: Context) => {
       twiml(
         transfer(
           SHACOLE_NUMBER,
-          "This request needs a custom quote. I will connect you with Shacole in the DCA office."
+          "This request needs a custom quote. I will connect you with the DCA office for live support."
         )
       )
     );

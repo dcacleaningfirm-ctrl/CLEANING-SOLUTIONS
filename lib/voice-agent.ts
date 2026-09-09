@@ -208,7 +208,7 @@ export function nextVoiceQuestion(state: VoiceCallState): string | null {
 
 export function confirmationQuestion(state: VoiceCallState): string {
   const quote = quoteForVoiceState(state);
-  if (!quote) return "I need Shacole to review this request. Would you like me to transfer you now?";
+  if (!quote) return "The DCA office needs to review this request. Would you like live support now?";
   const pet = state.petTreatment ? " including pet enzyme and odor treatment" : "";
   return `I have ${quote.promotion.name}${pet} at ${state.address}, ZIP ${state.zip}, for ${
     state.requestedDate

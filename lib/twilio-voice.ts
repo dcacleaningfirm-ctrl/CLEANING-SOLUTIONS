@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 
+export const DCA_VOICE = "Polly.Joanna-Generative";
+
 export function escapeXml(value: unknown): string {
   return String(value ?? "").replace(/[&<>"']/g, (char) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[char] as string
@@ -13,15 +15,21 @@ export function twiml(inner: string, status = 200): Response {
   });
 }
 
+export function say(message: string): string {
+  return `<Say voice="${DCA_VOICE}" language="en-US">${escapeXml(message)}</Say>`;
+}
+
 export function gather(question: string, action = "/api/voice/turn"): string {
-  return `<Gather input="speech dtmf" action="${escapeXml(action)}" method="POST" speechTimeout="auto" actionOnEmptyResult="true"><Say voice="alice">${escapeXml(
+  return `<Gather input="speech dtmf" action="${escapeXml(action)}" method="POST" speechTimeout="auto" actionOnEmptyResult="true">${say(
     question
-  )}</Say></Gather>`;
+  )}</Gather>`;
 }
 
 export function transfer(number: string, introduction?: string): string {
-  const say = introduction ? `<Say voice="alice">${escapeXml(introduction)}</Say>` : "";
-  return `${say}<Dial timeout="25" answerOnBridge="true"><Number>${escapeXml(number)}</Number></Dial><Say voice="alice">Shacole was not available. Please leave a message after the tone.</Say><Record maxLength="120" playBeep="true"/><Hangup/>`;
+  const introductionXml = introduction ? say(introduction) : "";
+  return `${introductionXml}<Dial timeout="25" answerOnBridge="true"><Number>${escapeXml(number)}</Number></Dial>${say(
+    "The DCA office was not available. Please leave a message after the tone."
+  )}<Record maxLength="120" playBeep="true"/><Hangup/>`;
 }
 
 export function publicWebhookUrl(req: Request, expectedPath?: string): string {
