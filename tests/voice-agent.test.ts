@@ -63,6 +63,26 @@ test("Twilio signature verification uses the public URL and sorted form fields",
   assert.equal(validTwilioSignature(url, params, "wrong", token), false);
 });
 
+test("Twilio signature verification uses exact case-sensitive parameter ordering", () => {
+  const url = "https://www.dcacleaningsolutions.com/api/voice/incoming";
+  const params = new URLSearchParams({
+    Called: "+14706228962",
+    CallToken: "%7B%22parentCallInfoToken%22%3A%22test%22%7D",
+    CallStatus: "ringing",
+    CallSid: "CA33fe6ac5d2f6c4bf44332e55b93975e4",
+    AccountSid: "AC11111111111111111111111111111111"
+  });
+  const token = "test_auth_token";
+  const payload =
+    `${url}AccountSidAC11111111111111111111111111111111` +
+    `CallSidCA33fe6ac5d2f6c4bf44332e55b93975e4` +
+    `CallStatusringing` +
+    `CallToken%7B%22parentCallInfoToken%22%3A%22test%22%7D` +
+    `Called+14706228962`;
+  const signature = crypto.createHmac("sha1", token).update(payload).digest("base64");
+  assert.equal(validTwilioSignature(url, params, signature, token), true);
+});
+
 test("voice XML is escaped and human requests are detected without AI", () => {
   assert.equal(escapeXml(`A&B <test> "quote"`), "A&amp;B &lt;test&gt; &quot;quote&quot;");
   assert.equal(likelyHumanRequest("Please transfer me to Shacole"), true);
