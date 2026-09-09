@@ -5151,6 +5151,12 @@
       growOption("sms", "Nobody has asked about texting", g.consent.needs) +
       growOption("email", "Nobody has asked about email", g.consent.needs) +
       "</select></label>" +
+      "</div>" +
+      '<div class="actions" style="margin-top:12px">' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-consent-select-all>Select displayed</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-consent-clear>Clear selection</button>' +
+      '<button type="button" class="btn btn-primary btn-sm" data-consent-bulk disabled>Bulk Confirm Consent</button>' +
+      '<span class="muted" data-consent-selected>0 selected</span>' +
       "</div></div>" +
       '<div id="gk-list"><div class="loading">Loading…</div></div>';
 
@@ -5181,10 +5187,14 @@
         // The three choices and the five sources, as the server spells them.
         g.consent.vocab = { smsConsentChoices: d.smsConsentChoices, consentSources: d.consentSources };
         list.innerHTML = d.customers.length
-          ? '<div class="card"><table><thead><tr><th>Customer</th><th>Text messages</th><th>Email</th>' +
+          ? '<div class="card"><table><thead><tr><th><span class="sr-only">Select</span></th><th>Customer</th><th>Text messages</th><th>Email</th>' +
             "<th></th></tr></thead><tbody>" +
             d.customers.map(function (c) {
-              return "<tr><td>" + esc(c.name) + '<br /><span class="muted">' +
+              var selectable = c.sms && c.sms.choice === "not_asked" && c.sms.textable === false &&
+                c.phone && !c.smsOptedOutAt;
+              return '<tr><td><input type="checkbox" data-consent-customer="' + c.id + '" ' +
+                (selectable ? '' : 'disabled title="Only customers awaiting consent with a phone number can be selected"') +
+                ' aria-label="Select ' + esc(c.name) + '" /></td><td>' + esc(c.name) + '<br /><span class="muted">' +
                 esc([c.phone, c.email].filter(Boolean).join(" · ") || "No contact details") + "</span></td>" +
                 "<td>" + smsConsentCell(c) + "</td>" +
                 "<td>" + consentCell(c.emailConsentStatus, c.emailConsentSource, c.emailOptedOutAt) + "</td>" +
@@ -5193,11 +5203,61 @@
             }).join("") +
             "</tbody></table></div>"
           : '<div class="card"><p class="empty">Nobody matches that.</p></div>';
+        updateBulkConsentCount();
       })
       .catch(function (e) {
         list.innerHTML = '<div class="card"><p class="empty">' + esc(e.message || "Could not load that list.") +
           "</p></div>";
       });
+  }
+
+  function selectedConsentCustomerIds() {
+    return Array.prototype.slice.call(document.querySelectorAll("[data-consent-customer]:checked"))
+      .map(function (box) { return Number(box.dataset.consentCustomer); })
+      .filter(function (id) { return Number.isInteger(id) && id > 0; });
+  }
+
+  function updateBulkConsentCount() {
+    var ids = selectedConsentCustomerIds();
+    var label = document.querySelector("[data-consent-selected]");
+    var button = document.querySelector("[data-consent-bulk]");
+    if (label) label.textContent = ids.length + " selected";
+    if (button) button.disabled = !ids.length;
+  }
+
+  function promptBulkConsent() {
+    var customerIds = selectedConsentCustomerIds();
+    if (!customerIds.length) return;
+    var vocab = growState().consent.vocab || {};
+    var sources = vocab.consentSources || ["Website Form", "Booking Form", "Written", "Verbal", "Other"];
+    openModal(
+      "Bulk confirm text consent — " + customerIds.length + " customers",
+      '<p class="hint">Use this only when every selected customer already gave DCA permission to send promotional texts. ' +
+      "This button records that permission; it does not ask the customers for it. Opt-outs remain blocked.</p>" +
+      '<label class="field"><span>Consent source</span><select id="m-bulk-source">' +
+      sources.map(function (src) { return '<option value="' + esc(src) + '">' + esc(src) + "</option>"; }).join("") +
+      "</select></label>" +
+      '<label class="field"><span>Group consent record</span><input id="m-bulk-detail" type="text" maxlength="300" ' +
+      'placeholder="Example: Signed service agreements collected July 2026" /></label>' +
+      '<label class="field"><span>Type CONSENT to confirm</span><input id="m-bulk-confirm" type="text" maxlength="7" ' +
+      'autocomplete="off" /></label>',
+      function () {
+        return api("marketing/consent/bulk", {
+          method: "POST",
+          body: {
+            customerIds: customerIds,
+            source: val("m-bulk-source"),
+            detail: val("m-bulk-detail"),
+            confirmation: val("m-bulk-confirm")
+          }
+        }).then(function (d) {
+          loadConsentList();
+          refreshGrow();
+          return d.recorded + " consent records saved" +
+            (d.skipped.length ? "; " + d.skipped.length + " skipped for safety." : ".");
+        });
+      }
+    );
   }
 
   // Text messages, described by the server so this column and the customer
@@ -8051,6 +8111,26 @@
       var consentBtn = e.target.closest("[data-grow-consent]");
       if (consentBtn) {
         promptConsent(Number(consentBtn.dataset.growConsent), consentBtn.dataset.name);
+        return;
+      }
+      if (e.target.closest("[data-consent-select-all]")) {
+        document.querySelectorAll("[data-consent-customer]:not(:disabled)").forEach(function (box) {
+          box.checked = true;
+        });
+        updateBulkConsentCount();
+        return;
+      }
+      if (e.target.closest("[data-consent-clear]")) {
+        document.querySelectorAll("[data-consent-customer]").forEach(function (box) { box.checked = false; });
+        updateBulkConsentCount();
+        return;
+      }
+      if (e.target.closest("[data-consent-bulk]")) {
+        promptBulkConsent();
+        return;
+      }
+      if (e.target.matches("[data-consent-customer]")) {
+        updateBulkConsentCount();
         return;
       }
 
