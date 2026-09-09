@@ -908,6 +908,69 @@ export async function handleMarketingRoute(request: MarketingRequest): Promise<R
     });
   }
 
+  // Record the same, already-collected SMS permission for a selected group.
+  // This is deliberately not "consent everyone": the browser must name the
+  // customer rows, the operator must give one real source, and an opt-out can
+  // never be overturned by this route. Each successful row still goes through
+  // recordConsent(), so it receives the same append-only audit event as the
+  // one-at-a-time control.
+  if (path === "consent/bulk" && method === "POST") {
+    const input = await body(req);
+    const rawIds = Array.isArray(input.customerIds) ? input.customerIds : [];
+    const customerIds = Array.from(
+      new Set(rawIds.map((value) => Number(value)).filter((id) => Number.isInteger(id) && id > 0))
+    );
+    if (!customerIds.length) return bad("Select at least one customer");
+    if (customerIds.length > 50) return bad("Bulk consent is limited to 50 selected customers at a time");
+
+    const supplied = text(input.source, 200);
+    const source = normalizeConsentSource(supplied);
+    if (!source) return bad("Pick the real source of these customers' permission to text");
+    const detail = text(input.detail, 300);
+    if (!detail) return bad("Add a note identifying when or where this group gave permission");
+    if (String(input.confirmation || "").trim().toUpperCase() !== "CONSENT") {
+      return bad("Type CONSENT to confirm that permission was already collected");
+    }
+
+    let recorded = 0;
+    const skipped: Array<{ customerId: number; reason: string }> = [];
+    for (const customerId of customerIds) {
+      const current = await smsConsentSnapshot(customerId);
+      if (!current) {
+        skipped.push({ customerId, reason: "customer no longer exists" });
+        continue;
+      }
+      if (current.choice === "opted_out" || current.suppressed) {
+        skipped.push({ customerId, reason: "opted out or suppressed" });
+        continue;
+      }
+      if (current.choice === "granted") {
+        skipped.push({ customerId, reason: "consent already recorded" });
+        continue;
+      }
+      if (!current.hasMobile) {
+        skipped.push({ customerId, reason: "no textable phone number" });
+        continue;
+      }
+
+      const result = await recordConsent({
+        customerId,
+        channel: "sms",
+        action: "granted",
+        source,
+        detail,
+        actorEmployeeId: account.id,
+        actorName: account.name,
+        ip: request.req.headers.get("x-nf-client-connection-ip"),
+        userAgent: request.req.headers.get("user-agent")
+      });
+      if (result.ok) recorded += 1;
+      else skipped.push({ customerId, reason: result.error });
+    }
+
+    return json({ ok: true, recorded, skipped, requested: customerIds.length });
+  }
+
   if (path === "consent" && method === "POST") {
     const input = await body(req);
     const customerId = Number(input.customerId);

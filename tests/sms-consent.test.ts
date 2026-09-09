@@ -124,6 +124,27 @@ test("recording that somebody consented to texts requires saying where it came f
   );
 });
 
+test("bulk consent requires selected customers, evidence and an explicit confirmation", () => {
+  assert.match(ROUTES, /if \(path === "consent\/bulk" && method === "POST"\)/);
+  assert.match(ROUTES, /Bulk consent is limited to 50 selected customers at a time/);
+  assert.match(ROUTES, /Pick the real source of these customers' permission to text/);
+  assert.match(ROUTES, /Add a note identifying when or where this group gave permission/);
+  assert.match(ROUTES, /toUpperCase\(\) !== "CONSENT"/);
+});
+
+test("bulk consent never restores an opted-out or suppressed customer", () => {
+  assert.match(ROUTES, /current\.choice === "opted_out" \|\| current\.suppressed/);
+  assert.match(ROUTES, /reason: "opted out or suppressed"/);
+  assert.match(ROUTES, /action: "granted"/);
+});
+
+test("the consent screen supports selecting displayed customers for bulk review", () => {
+  assert.match(CLIENT, /data-consent-select-all/);
+  assert.match(CLIENT, /data-consent-bulk disabled/);
+  assert.match(CLIENT, /api\("marketing\/consent\/bulk"/);
+  assert.match(CLIENT, /Type CONSENT to confirm/);
+});
+
 test("the console draws the choices and sources from the server, not from its own copy", () => {
   // One list. If a source is added later, the browser picks it up without a
   // second edit that could disagree with the first.
