@@ -24,10 +24,13 @@ export function transfer(number: string, introduction?: string): string {
   return `${say}<Dial timeout="25" answerOnBridge="true"><Number>${escapeXml(number)}</Number></Dial><Say voice="alice">Shacole was not available. Please leave a message after the tone.</Say><Record maxLength="120" playBeep="true"/><Hangup/>`;
 }
 
-export function publicWebhookUrl(req: Request): string {
+export function publicWebhookUrl(req: Request, expectedPath?: string): string {
   const override = (process.env.VOICE_PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
   const url = new URL(req.url);
-  return override ? `${override}${url.pathname}${url.search}` : url.toString();
+  // Netlify may expose its internal function route through Request.url even
+  // when the caller used a custom path. Twilio signs the exact public URL it
+  // called, so use the configured route rather than a rewritten internal one.
+  return override ? `${override}${expectedPath || url.pathname}${url.search}` : url.toString();
 }
 
 export function validTwilioSignature(

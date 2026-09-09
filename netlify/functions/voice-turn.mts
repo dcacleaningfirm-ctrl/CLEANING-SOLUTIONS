@@ -48,7 +48,7 @@ export default async (req: Request, _context: Context) => {
   const params = new URLSearchParams(body);
   const token = (process.env.TWILIO_AUTH_TOKEN || "").trim();
   const signature = req.headers.get("x-twilio-signature") || "";
-  if (!token || !validTwilioSignature(publicWebhookUrl(req), params, signature, token)) {
+  if (!token || !validTwilioSignature(publicWebhookUrl(req, "/api/voice/turn"), params, signature, token)) {
     return twiml("<Hangup/>", 403);
   }
 

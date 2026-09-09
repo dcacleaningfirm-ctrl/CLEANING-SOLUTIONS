@@ -26,7 +26,7 @@ export default async (req: Request, _context: Context) => {
       )
     );
   }
-  if (!validTwilioSignature(publicWebhookUrl(req), params, signature, token)) {
+  if (!validTwilioSignature(publicWebhookUrl(req, "/api/voice/incoming"), params, signature, token)) {
     return twiml("<Hangup/>", 403);
   }
 
