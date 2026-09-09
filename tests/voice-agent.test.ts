@@ -6,6 +6,7 @@ import {
   applyVoicePatch,
   appointmentTime,
   carpetPromotionFor,
+  fallbackVoiceTurn,
   newVoiceCall,
   quoteForVoiceState,
   stateIsBookable
@@ -22,6 +23,38 @@ test("the room count selects the published 3-, 4-, and 5-area offers", () => {
   assert.equal(carpetPromotionFor(3)?.code, "CARPET119");
   assert.equal(carpetPromotionFor(4)?.code, "CARPET159");
   assert.equal(carpetPromotionFor(5)?.code, "CARPET199");
+});
+
+test("the guided booking interview continues when the AI service is unavailable", () => {
+  const start = newVoiceCall("CA-fallback", "+14045550101");
+  assert.deepEqual(fallbackVoiceTurn(start, "My name is James Alston", "2026-09-09"), {
+    customerName: "James Alston"
+  });
+
+  const named = applyVoicePatch(start, { customerName: "James Alston" });
+  assert.deepEqual(fallbackVoiceTurn(named, "I need carpet cleaning", "2026-09-09"), { service: "carpet" });
+
+  const carpet = applyVoicePatch(named, { service: "carpet" });
+  assert.deepEqual(fallbackVoiceTurn(carpet, "four rooms", "2026-09-09"), { carpetAreas: 4 });
+  const rooms = applyVoicePatch(carpet, { carpetAreas: 4 });
+  assert.deepEqual(fallbackVoiceTurn(rooms, "yes, add odor treatment", "2026-09-09"), {
+    petTreatment: true
+  });
+});
+
+test("the outage fallback recognizes booking dates and appointment windows", () => {
+  let state = newVoiceCall("CA-date", "+14045550101");
+  state = applyVoicePatch(state, {
+    customerName: "James Alston",
+    service: "duct",
+    zip: "30314",
+    address: "123 Main Street"
+  });
+  assert.deepEqual(fallbackVoiceTurn(state, "tomorrow", "2026-09-09"), { requestedDate: "2026-09-10" });
+  state = applyVoicePatch(state, { requestedDate: "2026-09-10" });
+  assert.deepEqual(fallbackVoiceTurn(state, "late afternoon please", "2026-09-09"), {
+    requestedWindow: "late_afternoon"
+  });
 });
 
 test("pet treatment, ENVMT, and the 15 percent deposit are calculated together", () => {
