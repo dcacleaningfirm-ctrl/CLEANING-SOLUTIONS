@@ -10,7 +10,12 @@ import {
   quoteForVoiceState,
   stateIsBookable
 } from "../lib/voice-agent.ts";
-import { escapeXml, likelyHumanRequest, validTwilioSignature } from "../lib/twilio-voice.ts";
+import {
+  escapeXml,
+  likelyHumanRequest,
+  publicWebhookUrl,
+  validTwilioSignature
+} from "../lib/twilio-voice.ts";
 
 test("the room count selects the published 3-, 4-, and 5-area offers", () => {
   assert.equal(carpetPromotionFor(3)?.code, "CARPET119");
@@ -62,4 +67,19 @@ test("voice XML is escaped and human requests are detected without AI", () => {
   assert.equal(escapeXml(`A&B <test> "quote"`), "A&amp;B &lt;test&gt; &quot;quote&quot;");
   assert.equal(likelyHumanRequest("Please transfer me to Shacole"), true);
   assert.equal(likelyHumanRequest("I need three rooms cleaned"), false);
+});
+
+test("the configured public webhook path wins over a rewritten Netlify URL", () => {
+  const previous = process.env.VOICE_PUBLIC_BASE_URL;
+  process.env.VOICE_PUBLIC_BASE_URL = "https://www.dcacleaningsolutions.com";
+  try {
+    const req = new Request("https://dcacleaningfirm.netlify.app/.netlify/functions/voice-incoming");
+    assert.equal(
+      publicWebhookUrl(req, "/api/voice/incoming"),
+      "https://www.dcacleaningsolutions.com/api/voice/incoming"
+    );
+  } finally {
+    if (previous === undefined) delete process.env.VOICE_PUBLIC_BASE_URL;
+    else process.env.VOICE_PUBLIC_BASE_URL = previous;
+  }
 });
