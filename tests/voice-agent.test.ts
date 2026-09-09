@@ -14,6 +14,7 @@ import {
   escapeXml,
   likelyHumanRequest,
   publicWebhookUrl,
+  say,
   validTwilioSignature
 } from "../lib/twilio-voice.ts";
 
@@ -85,6 +86,10 @@ test("Twilio signature verification uses exact case-sensitive parameter ordering
 
 test("voice XML is escaped and human requests are detected without AI", () => {
   assert.equal(escapeXml(`A&B <test> "quote"`), "A&amp;B &lt;test&gt; &quot;quote&quot;");
+  assert.equal(
+    say("Welcome & hello!"),
+    '<Say voice="Polly.Joanna-Generative" language="en-US">Welcome &amp; hello!</Say>'
+  );
   assert.equal(likelyHumanRequest("Please transfer me to Shacole"), true);
   assert.equal(likelyHumanRequest("I need three rooms cleaned"), false);
 });

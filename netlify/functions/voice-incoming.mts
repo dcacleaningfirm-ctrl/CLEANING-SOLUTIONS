@@ -4,6 +4,7 @@ import { newVoiceCall, nextVoiceQuestion, SHACOLE_NUMBER } from "../../lib/voice
 import {
   gather,
   publicWebhookUrl,
+  say,
   transfer,
   twiml,
   validTwilioSignature
@@ -39,14 +40,16 @@ export default async (req: Request, _context: Context) => {
     await getStore({ name: STORE, consistency: "strong" }).setJSON(callSid, state);
     const firstQuestion = nextVoiceQuestion(state) || "How may I help you today?";
     return twiml(
-      `<Say voice="alice">Thank you for calling DCA Cleaning Solutions. I am the automated scheduling assistant. I can help schedule a cleaning or connect you with Shacole.</Say>${gather(
+      `${say(
+        "Thanks for calling DCA Cleaning Solutions! I am your automated scheduling assistant, and I am happy to help you book a cleaning today. I can also connect you with the DCA office for live support."
+      )}${gather(
         firstQuestion
       )}<Redirect method="POST">/api/voice/turn</Redirect>`
     );
   } catch (error) {
     console.error("voice-incoming failed", error);
     return twiml(
-      transfer(SHACOLE_NUMBER, "I am having trouble starting the scheduler. I will connect you with Shacole.")
+      transfer(SHACOLE_NUMBER, "I am having trouble starting the scheduler. I will connect you with the DCA office for live support.")
     );
   }
 };

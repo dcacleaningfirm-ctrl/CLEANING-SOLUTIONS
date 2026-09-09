@@ -255,7 +255,7 @@ export async function bookVoiceAppointment(state: VoiceCallState) {
   const customerMessage =
     `DCA Cleaning Solutions: we are holding ${when} for ${quote.promotion.name}. ` +
     `Planning total ${money(quote.totalCents)}; required 15% deposit ${money(quote.depositCents)}. ` +
-    `Shacole will contact you to collect the deposit. The appointment is confirmed after payment. ` +
+    `The DCA office will contact you to collect the deposit. The appointment is confirmed after payment. ` +
     `Questions: (470) 485-3123. Job #${job.id}.`;
   const officeMessage =
     `New DCA AI booking: ${state.customerName}, ${state.callerPhone}, ${state.address}, ZIP ${state.zip}. ` +
