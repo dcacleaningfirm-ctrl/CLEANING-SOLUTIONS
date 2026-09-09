@@ -5,6 +5,7 @@
 
 import {
   business,
+  promotion,
   disclosures,
   price,
   compute,
@@ -396,10 +397,10 @@ export function ductPage() {
                 `${compute("ductTypicalLow")} – ${compute("ductTypicalHigh")}`,
               ],
               [
-                `Current promotion, code ${pricing.promotion.code}`,
+                `Current promotion, code ${promotion.code}`,
                 `${compute("promoPrice")} <span class="rate-note">one system, up to ${
-                  pricing.promotion.includedVents
-                } vents and ${pricing.promotion.includedReturns} return</span>`,
+                  promotion.includedVents
+                } vents and ${promotion.includedReturns} return</span>`,
               ],
               [
                 "Dryer vent cleaning, on its own",

@@ -24,6 +24,8 @@ export function loadPricing() {
 }
 
 export const pricing = loadPricing();
+export const promotion = pricing.specials.find((offer) => offer.code === "VENTS199");
+if (!promotion) throw new Error("data/pricing.js is missing the VENTS199 promotion");
 
 /** Format a catalog number the way the site displays it. */
 export const money = (n) =>
@@ -47,13 +49,9 @@ export const business = {
   tagline: "Carpet · Air Duct · Upholstery",
   origin: "https://www.dcacleaningsolutions.com",
   // Primary line. Every call-to-action on the site uses this number.
-  phone: "(404) 716-2720",
-  phoneHref: "tel:4047162720",
-  phoneE164: "+1-404-716-2720",
-  // Secondary line. Listed on About and Contact only, always labeled.
-  phoneAlt: "(470) 485-3123",
-  phoneAltHref: "tel:4704853123",
-  phoneAltE164: "+1-470-485-3123",
+  phone: "(470) 485-3123",
+  phoneHref: "tel:4704853123",
+  phoneE164: "+1-470-485-3123",
   email: "info@dcacleaningsolutions.com",
   owner: "James Alston",
   city: "Atlanta",
@@ -150,7 +148,7 @@ export function rate(key, group) {
 /** Derived figures, matching the compute names assets/site.js uses. */
 export const computed = {
   get promoPrice() {
-    return pricing.promotion.price;
+    return promotion.price;
   },
   get ductTypicalLow() {
     return rate("airDuctBase") + 8 * rate("airVent");
@@ -160,11 +158,11 @@ export const computed = {
   },
   get promoRegular() {
     return (
-      rate("airDuctBase") + pricing.promotion.includedVents * rate("airVent")
+      rate("airDuctBase") + promotion.includedVents * rate("airVent")
     );
   },
   get promoSavings() {
-    return computed.promoRegular - pricing.promotion.price;
+    return computed.promoRegular - promotion.price;
   },
 };
 
@@ -212,7 +210,7 @@ export function header(current) {
 export const announcement = `  <div class="announcement">Appointments are subject to route availability. Call ${business.phone} for urgent scheduling.</div>`;
 
 export const promoStrip = `  <div class="promo-strip">
-    <span><strong data-promo-field="name">${esc(pricing.promotion.name)}</strong> — <span data-price-compute="promoPrice">${money(pricing.promotion.price)}</span> with code <span class="promo-code" data-promo-field="code">${pricing.promotion.code}</span> · <span data-promo-field="summary">${esc(pricing.promotion.summary)}</span></span>
+    <span><strong data-promo-field="name">${esc(promotion.name)}</strong> — <span data-price-compute="promoPrice">${money(promotion.price)}</span> with code <span class="promo-code" data-promo-field="code">${promotion.code}</span> · <span data-promo-field="summary">${esc(promotion.summary)}</span></span>
     <a href="/promotions">See the terms</a>
   </div>`;
 
@@ -236,7 +234,7 @@ export function footer() {
   return `  <footer class="site-footer">
     <div class="container">
       <div class="footer-grid">
-        <div><h3>${business.name}</h3><p>Professional carpet, air duct, upholstery, and move cleaning across the greater Atlanta area.</p><p><a href="${business.phoneHref}">${business.phone}</a><br><a href="${business.phoneAltHref}">${business.phoneAlt}</a> <span class="footer-note">(secondary)</span><br><a href="mailto:${business.email}">${business.email}</a></p></div>
+        <div><h3>${business.name}</h3><p>Professional carpet, air duct, upholstery, and move cleaning across the greater Atlanta area.</p><p><a href="${business.phoneHref}">${business.phone}</a><br><a href="mailto:${business.email}">${business.email}</a></p></div>
         <div><h4>Services</h4><div class="footer-links"><a href="/carpet-cleaning">Carpet cleaning</a><a href="/air-duct-cleaning">Air duct cleaning</a><a href="/upholstery-cleaning">Upholstery cleaning</a><a href="/luxury-designer-furniture-cleaning">Designer furniture</a><a href="/move-in-move-out-cleaning">Move cleaning</a></div></div>
         <div><h4>Information</h4><div class="footer-links"><a href="/book">Quick estimate</a><a href="/promotions">Promotion</a><a href="/about">About</a><a href="/contact">Contact</a><a href="/reviews">Reviews</a><a href="/service-terms">Service terms</a><a href="/privacy">Privacy</a><a href="/return-refund-policy">Returns &amp; refunds</a></div></div>
         <div><h4>Service areas</h4><div class="footer-links">${areas}<a href="/areas/atlanta-ga">All areas →</a></div></div>

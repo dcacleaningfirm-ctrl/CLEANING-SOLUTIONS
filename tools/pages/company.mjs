@@ -43,7 +43,7 @@ export function aboutPage() {
       <div class="container split-grid">
         <div>
           ${sectionHeading({ eyebrow: "Who we are", h2: "The people who show up." })}
-          <p>${business.name} is led by ${business.owner}, who runs the company out of ${business.city} and is on the majority of jobs himself. When you call <a href="${business.phoneHref}">${business.phone}</a>, you are talking to the people who will be in your home — not a call center that sells the job to whoever is nearby.</p>
+          <p>${business.name} is led by ${business.owner}, who runs the company out of ${business.city} and is on the majority of jobs himself. When you call <a href="${business.phoneHref}">${business.phone}</a>, our scheduling assistant can collect the service details and place an appointment on hold; requests that need judgment are handed to Shacole in the DCA office, not sold to another cleaning company.</p>
           <p>We clean carpet, air ducts and upholstery for homeowners, businesses and property managers across metro Atlanta. Property-management and turnover work is a meaningful part of what we do, which is why our move-in and move-out packages are priced by scope rather than by a flat guess.</p>
           <p>Our carpet work uses truck-mounted hot-water extraction — a Prochem Legend XL system, not portable consumer equipment. That means more heat, stronger recovery and shorter drying times than a rental machine can deliver. Suitable pre-treatment and spotting products are applied based on the fiber and its condition, then extracted and rinsed.</p>
           <p>We operate as a service-area business and travel to you. Our vehicles carry what a residential or commercial job needs, and we tell you what we find before we change the scope or the price.</p>
@@ -67,7 +67,6 @@ export function aboutPage() {
               <div class="rate-row"><dt>Owner</dt><dd>${business.owner}</dd></div>
               <div class="rate-row"><dt>Location</dt><dd>${business.city}, ${business.regionName} — service-area business</dd></div>
               <div class="rate-row"><dt>Primary phone</dt><dd><a href="${business.phoneHref}">${business.phone}</a></dd></div>
-              <div class="rate-row"><dt>Secondary phone</dt><dd><a href="${business.phoneAltHref}">${business.phoneAlt}</a></dd></div>
               <div class="rate-row"><dt>Email</dt><dd><a href="mailto:${business.email}">${business.email}</a></dd></div>
               <div class="rate-row"><dt>Website</dt><dd><a href="${business.origin}/">www.dcacleaningsolutions.com</a></dd></div>
             </dl>
@@ -238,7 +237,7 @@ ${ctaBand("Ready to book, or want to ask first?", "Build an estimate")}`;
 const contactFaqs = [
   [
     "Which number should I call?",
-    `Call or text <a href="${business.phoneHref}">${business.phone}</a> first — that is our primary line and every call-to-action on this site points at it. <a href="${business.phoneAltHref}">${business.phoneAlt}</a> is a secondary line that also reaches us.`,
+    `Call or text <a href="${business.phoneHref}">${business.phone}</a> — that is DCA's business line and every call-to-action on this site points at it.`,
   ],
   [
     "Do you answer 24 hours a day?",
@@ -265,7 +264,7 @@ export function contactPage() {
     trail,
     eyebrow: "Contact",
     h1: `Call, text, email, or send the form.`,
-    lead: `One primary number, one secondary, one inbox, and a form that reaches the same people. We serve metro Atlanta as a service-area business — we come to you.`,
+    lead: `One business number, one inbox, and a form that reaches the same office. We serve metro Atlanta as a service-area business — we come to you.`,
   })}
 
     <section class="section">
@@ -276,9 +275,6 @@ export function contactPage() {
             <div class="rate-row"><dt>${icon(
               "phone",
             )} Primary phone</dt><dd><a href="${business.phoneHref}">${business.phone}</a><span class="rate-note">Call or text this line first. Same-day appointments are often available, subject to route availability.</span></dd></div>
-            <div class="rate-row"><dt>${icon(
-              "phone",
-            )} Secondary phone</dt><dd><a href="${business.phoneAltHref}">${business.phoneAlt}</a><span class="rate-note">An alternate line for bookings and inquiries.</span></dd></div>
             <div class="rate-row"><dt>${icon(
               "clipboard",
             )} Email</dt><dd><a href="mailto:${business.email}">${business.email}</a><span class="rate-note">We aim to reply the same business day.</span></dd></div>
@@ -374,7 +370,7 @@ ${ctaBand("Would you rather see a number first?", "Build an estimate")}`;
   return page({
     path,
     title: `Contact ${business.name} | Call ${business.phone}`,
-    description: `Reach ${business.name} by phone, text, email or form. Primary line ${business.phone}, secondary ${business.phoneAlt}. Serving metro Atlanta as a service-area business.`,
+    description: `Reach ${business.name} by phone, text, email or form at ${business.phone}. Serving metro Atlanta as a service-area business.`,
     main,
     schema: [
       localBusiness({ url: `${business.origin}${path}` }),
