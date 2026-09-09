@@ -4,6 +4,7 @@ import { extractVoiceTurn } from "../../lib/openai-voice.js";
 import {
   SHACOLE_NUMBER,
   applyVoicePatch,
+  fallbackVoiceTurn,
   money,
   newVoiceCall,
   nextVoiceQuestion,
@@ -96,16 +97,13 @@ export default async (req: Request, _context: Context) => {
     });
   } catch (error) {
     console.error("voice-turn AI extraction failed", error);
-    return finish(
-      store,
-      callSid,
-      twiml(
-        transfer(
-          SHACOLE_NUMBER,
-          "The automated scheduler is temporarily unavailable. I will connect you with the DCA office for live support."
-        )
-      )
-    );
+    patch = fallbackVoiceTurn(state, utterance, atlantaToday());
+    if (Object.keys(patch).length === 0) {
+      await store.setJSON(callSid, state);
+      return twiml(
+        `${gather(`I am sorry, I did not understand that answer. ${currentQuestion}`)}<Redirect method="POST">/api/voice/turn</Redirect>`
+      );
+    }
   }
 
   if (patch.wantsToEnd) {

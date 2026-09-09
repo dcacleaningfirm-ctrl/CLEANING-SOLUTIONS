@@ -43,6 +43,111 @@ export interface VoiceTurnPatch {
   wantsToEnd?: boolean | null;
 }
 
+const SPOKEN_NUMBERS: Record<string, number> = {
+  one: 1,
+  two: 2,
+  three: 3,
+  four: 4,
+  five: 5,
+  six: 6,
+  seven: 7,
+  eight: 8,
+  nine: 9,
+  ten: 10,
+  eleven: 11,
+  twelve: 12
+};
+
+function spokenCount(value: string): number | null {
+  const digit = value.match(/\b([1-9]|[1-3]\d|40)\b/);
+  if (digit) return Number(digit[1]);
+  for (const [word, count] of Object.entries(SPOKEN_NUMBERS)) {
+    if (new RegExp(`\\b${word}\\b`, "i").test(value)) return count;
+  }
+  return null;
+}
+
+function fallbackDate(value: string, today: string): string | null {
+  const base = new Date(`${today}T12:00:00Z`);
+  if (Number.isNaN(base.getTime())) return null;
+  const lower = value.toLowerCase();
+  if (/\btoday\b/.test(lower)) return today;
+  if (/\btomorrow\b/.test(lower)) {
+    base.setUTCDate(base.getUTCDate() + 1);
+    return base.toISOString().slice(0, 10);
+  }
+
+  const iso = value.match(/\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b/);
+  const us = value.match(/\b(\d{1,2})[/-](\d{1,2})(?:[/-](20\d{2}))?\b/);
+  let parsed: Date | null = null;
+  if (iso) parsed = new Date(Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3]), 12));
+  else if (us) parsed = new Date(Date.UTC(Number(us[3] || base.getUTCFullYear()), Number(us[1]) - 1, Number(us[2]), 12));
+  else {
+    const monthDate = Date.parse(`${value.replace(/(\d+)(st|nd|rd|th)\b/gi, "$1")} ${base.getUTCFullYear()} 12:00 UTC`);
+    if (!Number.isNaN(monthDate)) parsed = new Date(monthDate);
+  }
+  if (!parsed || Number.isNaN(parsed.getTime())) return null;
+  if (parsed < base) parsed.setUTCFullYear(parsed.getUTCFullYear() + 1);
+  return parsed.toISOString().slice(0, 10);
+}
+
+/**
+ * Keeps the guided booking interview usable during a temporary AI/API outage.
+ * This intentionally handles only the answer expected at the current step.
+ */
+export function fallbackVoiceTurn(
+  state: VoiceCallState,
+  utterance: string,
+  today: string
+): VoiceTurnPatch {
+  const raw = clean(utterance, 240);
+  const lower = raw.toLowerCase();
+  if (!raw) return {};
+  if (/\b(goodbye|hang up|never mind|cancel this call|no service)\b/.test(lower)) return { wantsToEnd: true };
+  if (/\b(person|human|representative|manager|office|live support|shacole)\b/.test(lower)) return { wantsHuman: true };
+
+  if (!state.customerName) {
+    const name = raw.replace(/^(?:my name is|this is|i am|i'm)\s+/i, "").replace(/[^a-z .'-]/gi, "").trim();
+    return name.length >= 2 ? { customerName: name } : {};
+  }
+  if (!state.service) {
+    if (/\b(carpet|rug|room)\b/.test(lower)) return { service: "carpet" };
+    if (/\b(air duct|duct|vent|hvac)\b/.test(lower)) return { service: "duct" };
+    if (/\b(upholstery|couch|sofa|furniture|chair)\b/.test(lower)) return { service: "upholstery" };
+    if (/\b(move[ -]?(?:in|out)|moving|turnover)\b/.test(lower)) return { service: "move" };
+    return {};
+  }
+  if (state.service === "carpet" && !state.carpetAreas) {
+    const areas = spokenCount(lower);
+    return areas ? { carpetAreas: areas } : {};
+  }
+  if ((state.service === "carpet" || state.service === "upholstery") && state.petTreatment === null) {
+    if (/\b(no|nope|none|do not|don't|without)\b/.test(lower)) return { petTreatment: false };
+    if (/\b(yes|yeah|yep|add|pet|enzyme|odor|smell)\b/.test(lower)) return { petTreatment: true };
+    return {};
+  }
+  if (!state.zip) {
+    const zip = raw.match(/\b\d{5}\b/)?.[0];
+    return zip ? { zip } : {};
+  }
+  if (!state.address) {
+    const address = raw.replace(/^(?:the address is|my address is|it is|it's)\s+/i, "").trim();
+    return /\d/.test(address) && address.length >= 5 ? { address } : {};
+  }
+  if (!state.requestedDate) {
+    const requestedDate = fallbackDate(raw, today);
+    return requestedDate ? { requestedDate } : {};
+  }
+  if (!state.requestedWindow) {
+    if (/\blate afternoon\b|\bevening\b/.test(lower)) return { requestedWindow: "late_afternoon" };
+    if (/\bafternoon\b/.test(lower)) return { requestedWindow: "afternoon" };
+    if (/\bmorning\b/.test(lower)) return { requestedWindow: "morning" };
+    return {};
+  }
+  if (/\b(yes|yeah|yep|correct|confirm|that's right|that is right)\b/.test(lower)) return { confirmed: true };
+  return {};
+}
+
 export interface VoiceQuote {
   promotion: Promotion;
   items: Array<{
