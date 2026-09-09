@@ -40,10 +40,14 @@ export function validTwilioSignature(
   authToken: string
 ): boolean {
   if (!signature || !authToken) return false;
-  const pairs = Array.from(params.entries()).sort(([aKey, aValue], [bKey, bValue]) =>
-    aKey === bKey ? aValue.localeCompare(bValue) : aKey.localeCompare(bKey)
-  );
-  const payload = pairs.reduce((value, [key, item]) => `${value}${key}${item}`, url);
+  // Twilio uses JavaScript's default, case-sensitive UTF-16 ordering for both
+  // parameter names and repeated values. localeCompare() uses linguistic
+  // collation and produces a different order for keys such as CallSid/Called.
+  const keys = Array.from(new Set(params.keys())).sort();
+  const payload = keys.reduce((value, key) => {
+    const items = Array.from(new Set(params.getAll(key))).sort();
+    return items.reduce((all, item) => `${all}${key}${item}`, value);
+  }, url);
   const expected = crypto.createHmac("sha1", authToken).update(payload).digest("base64");
   const a = Buffer.from(signature);
   const b = Buffer.from(expected);
