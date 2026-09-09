@@ -30,6 +30,22 @@ export type Promotion = {
 
 export const PROMOTIONS: readonly Promotion[] = Object.freeze([
   {
+    code: "CARPET119",
+    kind: "carpet",
+    name: "3-bedroom carpet cleaning special",
+    price: 119,
+    path: "/carpet119",
+    summary: "Up to 3 standard carpeted bedrooms plus one hallway, with fiber rinse and deodorizer."
+  },
+  {
+    code: "CARPET159",
+    kind: "carpet",
+    name: "4-bedroom carpet cleaning special",
+    price: 159,
+    path: "/carpet159",
+    summary: "Up to 4 standard carpeted bedrooms plus one hallway, with fiber rinse and deodorizer."
+  },
+  {
     code: "COMBO498",
     kind: "combo",
     name: "Carpet + air duct cleaning combo",
@@ -125,7 +141,7 @@ export function promotionByCode(code: unknown): Promotion | null {
 // is, and the office dials from its own handset. The column exists so that when
 // call and message activity can be reconciled from Google Voice later, it has a
 // customer marketing history to attach itself to.
-export const BUSINESS_VOICE_LINE = "404-716-2720";
+export const BUSINESS_VOICE_LINE = "470-485-3123";
 
 // The choices the console offers when somebody logs a contact by hand. "call"
 // and "voicemail" are the two that come off the business line today.

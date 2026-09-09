@@ -9,7 +9,7 @@
 
 const BUSINESS = {
   name: "DCA Cleaning Solutions",
-  phone: "(404) 716-2720",
+  phone: "(470) 485-3123",
   email: "info@dcacleaningsolutions.com",
   site: "https://www.dcacleaningsolutions.com"
 };

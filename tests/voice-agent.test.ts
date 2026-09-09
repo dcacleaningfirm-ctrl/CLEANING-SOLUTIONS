@@ -1,0 +1,65 @@
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import test from "node:test";
+
+import {
+  applyVoicePatch,
+  appointmentTime,
+  carpetPromotionFor,
+  newVoiceCall,
+  quoteForVoiceState,
+  stateIsBookable
+} from "../lib/voice-agent.ts";
+import { escapeXml, likelyHumanRequest, validTwilioSignature } from "../lib/twilio-voice.ts";
+
+test("the room count selects the published 3-, 4-, and 5-area offers", () => {
+  assert.equal(carpetPromotionFor(3)?.code, "CARPET119");
+  assert.equal(carpetPromotionFor(4)?.code, "CARPET159");
+  assert.equal(carpetPromotionFor(5)?.code, "CARPET199");
+});
+
+test("pet treatment, ENVMT, and the 15 percent deposit are calculated together", () => {
+  const state = applyVoicePatch(newVoiceCall("CA123", "+14045550101"), {
+    customerName: "Atlanta Customer",
+    service: "carpet",
+    carpetAreas: 3,
+    petTreatment: true,
+    zip: "30303",
+    address: "1 Peachtree Street",
+    requestedDate: "2026-10-12",
+    requestedWindow: "morning"
+  });
+  const quote = quoteForVoiceState(state);
+  assert.equal(quote?.promotion.code, "CARPET119");
+  assert.equal(quote?.totalCents, 20_900);
+  assert.equal(quote?.depositCents, 3_135);
+  assert.equal(stateIsBookable(state), false);
+  assert.equal(stateIsBookable(applyVoicePatch(state, { confirmed: true })), true);
+});
+
+test("Atlanta appointment windows convert correctly across daylight saving time", () => {
+  assert.equal(
+    appointmentTime({ requestedDate: "2026-07-15", requestedWindow: "morning" })?.toISOString(),
+    "2026-07-15T13:00:00.000Z"
+  );
+  assert.equal(
+    appointmentTime({ requestedDate: "2026-01-15", requestedWindow: "morning" })?.toISOString(),
+    "2026-01-15T14:00:00.000Z"
+  );
+});
+
+test("Twilio signature verification uses the public URL and sorted form fields", () => {
+  const url = "https://www.dcacleaningsolutions.com/api/voice/turn";
+  const params = new URLSearchParams({ SpeechResult: "yes", CallSid: "CA123" });
+  const token = "test_auth_token";
+  const payload = `${url}CallSidCA123SpeechResultyes`;
+  const signature = crypto.createHmac("sha1", token).update(payload).digest("base64");
+  assert.equal(validTwilioSignature(url, params, signature, token), true);
+  assert.equal(validTwilioSignature(url, params, "wrong", token), false);
+});
+
+test("voice XML is escaped and human requests are detected without AI", () => {
+  assert.equal(escapeXml(`A&B <test> "quote"`), "A&amp;B &lt;test&gt; &quot;quote&quot;");
+  assert.equal(likelyHumanRequest("Please transfer me to Shacole"), true);
+  assert.equal(likelyHumanRequest("I need three rooms cleaned"), false);
+});
