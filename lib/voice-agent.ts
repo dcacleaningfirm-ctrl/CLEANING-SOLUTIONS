@@ -2,6 +2,7 @@ import { promotionByCode, type Promotion } from "./promotions.ts";
 
 export const DCA_BUSINESS_NUMBER = "+14704853123";
 export const SHACOLE_NUMBER = "+14047033704";
+export const JAMES_COMMERCIAL_NUMBER = "+14047162720";
 export const ENVMT_CENTS = 2500;
 export const PET_TREATMENT_CENTS = 6500;
 export const DEPOSIT_PERCENT = 15;
@@ -26,6 +27,9 @@ export interface VoiceCallState {
   requestedWindow: ArrivalWindow | null;
   confirmed: boolean;
   emptyTurns: number;
+  pendingJobId: number | null;
+  pendingDepositCents: number | null;
+  depositChecks: number;
 }
 
 export interface VoiceTurnPatch {
@@ -40,6 +44,7 @@ export interface VoiceTurnPatch {
   requestedWindow?: ArrivalWindow | null;
   confirmed?: boolean | null;
   wantsHuman?: boolean | null;
+  wantsCommercial?: boolean | null;
   wantsToEnd?: boolean | null;
 }
 
@@ -104,6 +109,9 @@ export function fallbackVoiceTurn(
   const lower = raw.toLowerCase();
   if (!raw) return {};
   if (/\b(goodbye|hang up|never mind|cancel this call|no service)\b/.test(lower)) return { wantsToEnd: true };
+  if (/\bcommercial\b|\bapartment (?:complex|community|property)\b|\bproperty manager\b|\bfacilit(?:y|ies)\b|\boffice building\b|\bchurch\b|\bhotel\b|\brestaurant\b|\bschool\b|\bwarehouse\b|\bretail store\b/.test(lower)) {
+    return { wantsCommercial: true };
+  }
   if (/\b(person|human|representative|manager|office|live support|shacole)\b/.test(lower)) return { wantsHuman: true };
 
   if (!state.customerName) {
@@ -180,7 +188,10 @@ export function newVoiceCall(callSid: string, callerPhone: string, now = new Dat
     requestedDate: null,
     requestedWindow: null,
     confirmed: false,
-    emptyTurns: 0
+    emptyTurns: 0,
+    pendingJobId: null,
+    pendingDepositCents: null,
+    depositChecks: 0
   };
 }
 
@@ -380,7 +391,7 @@ export function stateIsBookable(state: VoiceCallState): boolean {
 }
 
 export function modelExtractionInstructions(today: string): string {
-  return `You extract booking details from one caller utterance for DCA Cleaning Solutions. Today is ${today} in Atlanta, Georgia. Return only the required JSON. Never invent a field. Convert a clearly stated appointment date to YYYY-MM-DD. Map morning, afternoon, and late afternoon to the allowed values. Map carpet or rug cleaning to carpet, vent or HVAC cleaning to duct, couch or furniture cleaning to upholstery, and turnover or moving cleaning to move. Recognize published codes CARPET119, CARPET159, CARPET199, CARPET350, CARPET431, DUCT299, VENTS199, UPHOLSTERY199, MOVE249, MOVE399, MOVE599, and COMBO498. Set wantsHuman when the caller asks for a person, Shacole, a manager, an unusual commercial quote, a complaint, a refund, or an emergency. Set wantsToEnd only when the caller clearly declines service or asks to end. Set confirmed true only when the caller clearly confirms the full summary. A plain yes can confirm only when the current question is the final booking confirmation.`;
+  return `You extract booking details from one caller utterance for DCA Cleaning Solutions. Today is ${today} in Atlanta, Georgia. Return only the required JSON. Never invent a field. Convert a clearly stated appointment date to YYYY-MM-DD. Map morning, afternoon, and late afternoon to the allowed values. Map carpet or rug cleaning to carpet, vent or HVAC cleaning to duct, couch or furniture cleaning to upholstery, and turnover or moving cleaning to move. Recognize published codes CARPET119, CARPET159, CARPET199, CARPET350, CARPET431, DUCT299, VENTS199, UPHOLSTERY199, MOVE249, MOVE399, MOVE599, and COMBO498. Set wantsCommercial for every commercial-service call or commercial quote, including apartments, property management, facilities, office buildings, churches, hotels, restaurants, schools, warehouses, and retail stores. Set wantsHuman when the caller asks for a person, Shacole, a manager, a complaint, a refund, or an emergency; do not set wantsHuman solely because the request is commercial. Set wantsToEnd only when the caller clearly declines service or asks to end. Set confirmed true only when the caller clearly confirms the full summary. A plain yes can confirm only when the current question is the final booking confirmation.`;
 }
 
 export const voicePatchSchema = {
@@ -401,6 +412,7 @@ export const voicePatchSchema = {
     },
     confirmed: { type: ["boolean", "null"] },
     wantsHuman: { type: ["boolean", "null"] },
+    wantsCommercial: { type: ["boolean", "null"] },
     wantsToEnd: { type: ["boolean", "null"] }
   },
   required: [
@@ -415,6 +427,7 @@ export const voicePatchSchema = {
     "requestedWindow",
     "confirmed",
     "wantsHuman",
+    "wantsCommercial",
     "wantsToEnd"
   ]
 } as const;

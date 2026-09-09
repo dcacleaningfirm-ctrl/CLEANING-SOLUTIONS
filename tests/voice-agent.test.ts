@@ -13,6 +13,8 @@ import {
 } from "../lib/voice-agent.ts";
 import {
   escapeXml,
+  gatherPayment,
+  likelyCommercialRequest,
   likelyHumanRequest,
   publicWebhookUrl,
   say,
@@ -125,6 +127,22 @@ test("voice XML is escaped and human requests are detected without AI", () => {
   );
   assert.equal(likelyHumanRequest("Please transfer me to Shacole"), true);
   assert.equal(likelyHumanRequest("I need three rooms cleaned"), false);
+  assert.match(gatherPayment("Pay now"), /timeout="60"/);
+  assert.match(gatherPayment("Pay now"), /numDigits="1"/);
+});
+
+test("new phone bookings start without a pending deposit", () => {
+  const state = newVoiceCall("CA-new", "+14045550101");
+  assert.equal(state.pendingJobId, null);
+  assert.equal(state.pendingDepositCents, null);
+  assert.equal(state.depositChecks, 0);
+});
+
+test("commercial calls and quotes route to James while residential calls stay with the scheduler", () => {
+  assert.equal(likelyCommercialRequest("I need a commercial carpet cleaning quote"), true);
+  assert.equal(likelyCommercialRequest("We manage an apartment complex"), true);
+  assert.equal(likelyCommercialRequest("Our church needs the carpets cleaned"), true);
+  assert.equal(likelyCommercialRequest("I need three rooms cleaned at my house"), false);
 });
 
 test("the configured public webhook path wins over a rewritten Netlify URL", () => {
