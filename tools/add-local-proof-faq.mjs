@@ -26,7 +26,7 @@ function removeSection(html, id) {
 }
 
 function removeFaqSchema(html) {
-  return html.replace(/\\s*<script[^>]*id=["']local-faq-schema["'][^>]*>[\\s\\S]*?<\\/script>/gi, "");
+  return html.replace(new RegExp(`\\s*<script[^>]*id=["']local-faq-schema["'][^>]*>[\\s\\S]*?<\\/script>`, "gi"), "");
 }
 
 function faqData(city) {
