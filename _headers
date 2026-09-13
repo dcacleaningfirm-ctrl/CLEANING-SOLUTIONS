@@ -5,37 +5,30 @@
   Permissions-Policy: camera=(), geolocation=(), microphone=()
   Cross-Origin-Opener-Policy: same-origin
 
-# The Meta Pixel needs three holes punched in the policies below, on every page
-# that sends one: connect.facebook.net in script-src (fbevents.js, which
-# /meta-pixel.js injects), www.facebook.com in img-src (the /tr beacon and the
-# noscript fallback), and both in connect-src (the newer beacon transport). The
-# pixel loader itself is served from /meta-pixel.js rather than inlined, so
-# 'unsafe-inline' is still not granted anywhere.
+# Customer-facing pages load both Meta and Google measurement from shared local
+# bootstrap files. Keep third-party script/connect/image origins explicit so the
+# strict CSP does not silently block page views or booking conversions.
 
 /
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; media-src 'self' blob:; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com https://www.google.com https://www.googleadservices.com https://googleads.g.doubleclick.net; media-src 'self' blob:; script-src 'self' https://connect.facebook.net https://www.googletagmanager.com; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com https://www.google-analytics.com https://analytics.google.com https://www.googleadservices.com https://www.google.com https://googleads.g.doubleclick.net
 
 /book
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; media-src 'self' blob:; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com https://www.google.com https://www.googleadservices.com https://googleads.g.doubleclick.net; media-src 'self' blob:; script-src 'self' https://connect.facebook.net https://www.googletagmanager.com; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com https://www.google-analytics.com https://analytics.google.com https://www.googleadservices.com https://www.google.com https://googleads.g.doubleclick.net
 
 /service-terms
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com https://www.google.com https://www.googleadservices.com https://googleads.g.doubleclick.net; script-src 'self' https://connect.facebook.net https://www.googletagmanager.com; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com https://www.google-analytics.com https://analytics.google.com https://www.googleadservices.com https://www.google.com https://googleads.g.doubleclick.net
 
 /privacy
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com https://www.google.com https://www.googleadservices.com https://googleads.g.doubleclick.net; script-src 'self' https://connect.facebook.net https://www.googletagmanager.com; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com https://www.google-analytics.com https://analytics.google.com https://www.googleadservices.com https://www.google.com https://googleads.g.doubleclick.net
 
-# The quote request form posts back to the site's own origin over fetch, so it
-# needs nothing beyond 'self' in connect-src and form-action. All of its
-# behaviour lives in /assets/site.js rather than an inline script, which is why
-# 'unsafe-inline' is not granted here either.
 /quote
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com https://www.google.com https://www.googleadservices.com https://googleads.g.doubleclick.net; script-src 'self' https://connect.facebook.net https://www.googletagmanager.com; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com https://www.google-analytics.com https://analytics.google.com https://www.googleadservices.com https://www.google.com https://googleads.g.doubleclick.net
 
 /move-cleaning-specials
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com https://www.google.com https://www.googleadservices.com https://googleads.g.doubleclick.net; script-src 'self' https://connect.facebook.net https://www.googletagmanager.com; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com https://www.google-analytics.com https://analytics.google.com https://www.googleadservices.com https://www.google.com https://googleads.g.doubleclick.net
 
 /thank-you
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com; script-src 'self' https://connect.facebook.net; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com https://www.google.com https://www.googleadservices.com https://googleads.g.doubleclick.net; script-src 'self' https://connect.facebook.net https://www.googletagmanager.com; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com https://www.google-analytics.com https://analytics.google.com https://www.googleadservices.com https://www.google.com https://googleads.g.doubleclick.net
 
 # The unsubscribe page is rendered by a function rather than served from the
 # site, so it carries its own small stylesheet inline and needs 'unsafe-inline'
