@@ -2,6 +2,7 @@ import type { Config } from "@netlify/functions";
 
 const DESTINATION = "dcacleaningfirm@gmail.com";
 const BUSINESS_EMAIL = "info@dcacleaningsolutions.com";
+const MAX_FETCH_ATTEMPTS = 5;
 
 function esc(value: unknown) {
   return String(value ?? "")
@@ -11,6 +12,44 @@ function esc(value: unknown) {
     .replaceAll('"', "&quot;");
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchInboundEmail(emailId: string, apiKey: string) {
+  let lastStatus = 0;
+  let lastError = "";
+
+  for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt += 1) {
+    const response = await fetch(
+      `https://api.resend.com/emails/receiving/${encodeURIComponent(emailId)}`,
+      { headers: { Authorization: `Bearer ${apiKey}` } },
+    );
+
+    lastStatus = response.status;
+
+    if (response.ok) {
+      const email = await response.json() as any;
+      if (email?.html || email?.text) return email;
+
+      lastError = "Resend returned the email metadata before the message body was available";
+    } else {
+      lastError = await response.text();
+
+      // Permission/auth errors will not improve with retries.
+      if (response.status === 401 || response.status === 403) break;
+    }
+
+    if (attempt < MAX_FETCH_ATTEMPTS) {
+      await sleep(500 * 2 ** (attempt - 1));
+    }
+  }
+
+  throw new Error(
+    `Unable to retrieve inbound email body from Resend (status ${lastStatus || "unknown"}): ${lastError || "empty response"}`,
+  );
+}
+
 export default async (req: Request) => {
   if (req.method !== "POST") return new Response("Method not allowed", { status: 405 });
 
@@ -18,28 +57,40 @@ export default async (req: Request) => {
   if (!event || event.type !== "email.received") return new Response("ok");
 
   const received = event.data ?? {};
-  const apiKey = Netlify.env.get("RESEND_API_KEY") || "";
-  if (!apiKey) return new Response("RESEND_API_KEY is not configured", { status: 500 });
+  const sendApiKey = Netlify.env.get("RESEND_API_KEY") || "";
+  const receivingApiKey = Netlify.env.get("RESEND_RECEIVING_API_KEY") || sendApiKey;
 
-  // Fetch the complete inbound message so the forwarded copy includes its body.
+  if (!sendApiKey) return new Response("RESEND_API_KEY is not configured", { status: 500 });
+  if (!receivingApiKey) return new Response("Resend receiving API key is not configured", { status: 500 });
+
   const emailId = received.email_id || received.id;
-  let inbound: any = received;
-  if (emailId) {
-    const r = await fetch(`https://api.resend.com/emails/receiving/${encodeURIComponent(emailId)}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
-    if (r.ok) inbound = { ...received, ...(await r.json()) };
+  if (!emailId) {
+    console.error("Resend email.received webhook did not include email_id", received);
+    return new Response("Missing inbound email id", { status: 400 });
   }
 
-  const from = Array.isArray(inbound.from) ? inbound.from.join(", ") : (inbound.from || "Unknown sender");
+  let inbound: any;
+  try {
+    inbound = { ...received, ...(await fetchInboundEmail(emailId, receivingApiKey)) };
+  } catch (error) {
+    // Never forward an empty placeholder message. Returning 502 lets Resend retry
+    // transient failures instead of permanently losing the original email body.
+    console.error("Resend inbound body retrieval failed", error);
+    return new Response("Inbound email body retrieval failed", { status: 502 });
+  }
+
+  const from = Array.isArray(inbound.from)
+    ? inbound.from.join(", ")
+    : (inbound.from || "Unknown sender");
   const subject = inbound.subject || "DCA business email";
-  const text = inbound.text || "";
-  const html = inbound.html || (text ? `<pre style=\"white-space:pre-wrap\">${esc(text)}</pre>` : "<p>(No message body)</p>");
+  const text = typeof inbound.text === "string" ? inbound.text : "";
+  const originalHtml = typeof inbound.html === "string" ? inbound.html : "";
+  const html = originalHtml || `<pre style="white-space:pre-wrap">${esc(text)}</pre>`;
 
   const send = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${sendApiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -47,6 +98,9 @@ export default async (req: Request) => {
       to: [DESTINATION],
       subject: `Fwd: ${subject}`,
       html: `<p><strong>Received at:</strong> ${esc(BUSINESS_EMAIL)}<br><strong>Original sender:</strong> ${esc(from)}</p><hr>${html}`,
+      text: text
+        ? `Received at: ${BUSINESS_EMAIL}\nOriginal sender: ${from}\n\n${text}`
+        : undefined,
       reply_to: typeof from === "string" && from.includes("@") ? from : undefined,
     }),
   });
