@@ -7,7 +7,7 @@
  *
  * Bump VERSION to push a new shell to every installed phone.
  */
-var VERSION = "dca-manager-v20";
+var VERSION = "dca-manager-v21";
 var SHELL = [
   "/manager/",
   "/manager/manager.css",
@@ -16,6 +16,7 @@ var SHELL = [
   "/manager/owner-cleanup.js",
   "/manager/funnel-health.js",
   "/manager/lead-alert-warnings.js",
+  "/manager/verification-health.js",
   "/manager/source-performance.js",
   "/manager/customer-delete.js",
   "/manager/offline.html",
@@ -38,6 +39,7 @@ var APP_CODE = [
   "/manager/owner-cleanup.js",
   "/manager/funnel-health.js",
   "/manager/lead-alert-warnings.js",
+  "/manager/verification-health.js",
   "/manager/source-performance.js",
   "/manager/customer-delete.js",
   "/manager/manager.css",
