@@ -1,24 +1,14 @@
 // DCA Cleaning — shared Meta + Google measurement bootstrap.
 //
 // This file is loaded on the customer-facing funnel, confirmation pages and
-// marketing pages. Keeping measurement here prevents the strict CSP pages from
+// marketing pages. Keeping measurement here prevents strict CSP pages from
 // silently losing sessions and conversions because of missing inline snippets.
-//
-// Meta pixels:
-//   1000652526109538   original pixel
-//   27416224901380695  added August 2026
-//
-// Google Ads tag:
-//   AW-18304171342
-//
-// Standard conversion helpers live in /conversions.js. This bootstrap loads
-// that helper, records successful AJAX booking confirmations, and records the
-// ordinary /thank-you redirects used by contact and estimate forms.
 
 (function () {
   "use strict";
 
   var GOOGLE_ADS_ID = "AW-18304171342";
+  var GA4_ID = "G-HK9LGE14TK";
 
   // ------------------------------------------------------------------ Meta
   (function (f, b, e, v, n, t, s) {
@@ -43,26 +33,29 @@
   fbq("track", "PageView");
 
   // --------------------------------------------------------------- Google
-  // Many marketing pages already contain the Google tag directly. Only install
-  // it here when the page does not already have that exact tag, which prevents
-  // duplicate config/page_view events while filling the gap on the booking
-  // funnel and confirmation pages.
-  var googleTagSelector = 'script[src*="googletagmanager.com/gtag/js?id=' + GOOGLE_ADS_ID + '"]';
-  var existingGoogleTag = document.querySelector(googleTagSelector);
+  // Marketing pages may already load gtag.js for Google Ads. Reuse that loader
+  // when present, but always configure GA4 so every customer-facing page sends
+  // page/session data to the DCA GA4 web stream. On pages without an existing
+  // Google loader, this bootstrap installs one and configures both destinations.
+  window.dataLayer = window.dataLayer || [];
+  window.gtag = window.gtag || function () {
+    window.dataLayer.push(arguments);
+  };
 
+  var existingGoogleTag = document.querySelector('script[src*="googletagmanager.com/gtag/js"]');
   if (!existingGoogleTag) {
-    window.dataLayer = window.dataLayer || [];
-    window.gtag = window.gtag || function () {
-      window.dataLayer.push(arguments);
-    };
     window.gtag("js", new Date());
-    window.gtag("config", GOOGLE_ADS_ID);
-
     var googleScript = document.createElement("script");
     googleScript.async = true;
     googleScript.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(GOOGLE_ADS_ID);
     document.head.appendChild(googleScript);
+    window.gtag("config", GOOGLE_ADS_ID);
   }
+
+  // Configure the GA4 destination on every page. This is intentionally outside
+  // the loader guard: pages that already load Google Ads still need the GA4
+  // destination configured, while pages without a loader receive both above.
+  window.gtag("config", GA4_ID);
 
   // ------------------------------------------------------ conversion helper
   function parseMoney(value) {
