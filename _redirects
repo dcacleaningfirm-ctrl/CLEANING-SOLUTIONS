@@ -23,9 +23,8 @@
 /move-in-cleaning             /move-in-move-out-cleaning           301
 /move-out-cleaning            /move-in-move-out-cleaning           301
 /move-cleaning                /move-in-move-out-cleaning           301
-# A spoken or printed promo code is a URL. Each one lands on the request form
-# with its own offer already selected.
-/carpet199                    /quote?code=CARPET199                301
+# A spoken or printed promo code is a URL. The primary paid carpet offer has
+# its own focused sales page; the other codes use the shared quote form.
 /carpet119                    /quote?code=CARPET119                301
 /carpet159                    /quote?code=CARPET159                301
 /combo498                     /quote?code=COMBO498                 301
@@ -44,6 +43,7 @@
 /book/           /book/index.html     200
 /promotions      /promotions.html     200
 /quote           /quote.html          200
+/carpet199       /carpet199.html      200
 /move-cleaning-specials /move-cleaning-specials.html 200
 /service-terms   /service-terms.html  200
 /privacy         /privacy.html        200
