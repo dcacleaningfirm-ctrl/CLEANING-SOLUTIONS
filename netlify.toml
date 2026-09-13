@@ -1,6 +1,6 @@
 [build]
 publish = "."
-command = "node tools/fix-public-phone.mjs && node tools/fix-booking-reference.mjs && node tools/refresh-sitemap-lastmod.mjs && node tools/fix-lead-speed.mjs && node tools/fix-new-lead-alert.mjs && node tools/refresh-public-index-signals.mjs && node tools/require-general-booking-deposit.mjs"
+command = "node tools/fix-public-phone.mjs && node tools/fix-booking-reference.mjs && node tools/refresh-sitemap-lastmod.mjs && node tools/add-commercial-link.mjs && node tools/fix-lead-speed.mjs && node tools/fix-new-lead-alert.mjs && node tools/refresh-public-index-signals.mjs && node tools/require-general-booking-deposit.mjs"
 
 [build.environment]
 NPM_CONFIG_FETCH_RETRIES = "5"
