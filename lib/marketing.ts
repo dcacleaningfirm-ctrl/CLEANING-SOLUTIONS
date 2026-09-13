@@ -13,7 +13,7 @@
 import crypto from "node:crypto";
 
 export const BUSINESS_NAME = "DCA Cleaning Solutions";
-export const BUSINESS_PHONE = "(404) 716-2720";
+export const BUSINESS_PHONE = "(470) 485-3123";
 
 export type MarketingChannel = "sms" | "email";
 export const MARKETING_CHANNELS: MarketingChannel[] = ["sms", "email"];
