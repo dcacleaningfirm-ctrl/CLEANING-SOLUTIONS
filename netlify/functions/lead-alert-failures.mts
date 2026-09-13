@@ -16,12 +16,34 @@ function json(body: unknown, init: ResponseInit = {}) {
 }
 
 export default async (req: Request) => {
-  if (req.method !== "GET") return json({ error: "Method not allowed" }, { status: 405 });
+  if (req.method !== "GET" && req.method !== "POST") return json({ error: "Method not allowed" }, { status: 405 });
 
   const session = await readSessionCookie(req);
   if (!session) return json({ error: "Sign in again" }, { status: 401 });
   if (!permissionsFor(session.role).includes("leads")) {
     return json({ error: "Lead access required" }, { status: 403 });
+  }
+
+  if (req.method === "POST") {
+    const body = await req.json().catch(() => ({})) as { notificationId?: unknown };
+    const notificationId = Number(body.notificationId);
+    if (!Number.isInteger(notificationId) || notificationId <= 0) {
+      return json({ error: "A valid alert id is required" }, { status: 400 });
+    }
+
+    const [row] = await db
+      .select({ id: notifications.id, kind: notifications.kind, status: notifications.status })
+      .from(notifications)
+      .where(eq(notifications.id, notificationId))
+      .limit(1);
+    if (!row || row.kind !== "lead_alert") return json({ error: "Lead alert not found" }, { status: 404 });
+    if (row.status === "resolved") return json({ ok: true, alreadyResolved: true });
+
+    await db
+      .update(notifications)
+      .set({ status: "resolved", error: null })
+      .where(eq(notifications.id, notificationId));
+    return json({ ok: true, resolved: notificationId });
   }
 
   const rows = await db
@@ -54,5 +76,5 @@ export default async (req: Request) => {
 
 export const config: Config = {
   path: "/api/lead-alert-failures",
-  method: "GET"
+  method: ["GET", "POST"]
 };

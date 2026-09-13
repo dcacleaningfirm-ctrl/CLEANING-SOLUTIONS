@@ -13,6 +13,34 @@
     document.querySelectorAll("[data-lead-alert-warning]").forEach(function (node) { node.remove(); });
   }
 
+  function resolveAlert(id, button) {
+    if (!id) return;
+    if (button) {
+      button.disabled = true;
+      button.textContent = "Resolving…";
+    }
+    fetch("/api/lead-alert-failures", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ notificationId: id })
+    })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          if (!res.ok) throw new Error(data.error || "Could not resolve alert");
+          return data;
+        });
+      })
+      .then(function () { check(); })
+      .catch(function (error) {
+        if (button) {
+          button.disabled = false;
+          button.textContent = "Mark resolved";
+        }
+        if (window.console && console.error) console.error("lead alert resolve failed", error);
+      });
+  }
+
   function render(data) {
     removeWarnings();
     if (!data || !data.count) return;
@@ -32,7 +60,8 @@
       box.innerHTML =
         '<strong style="color:#f87171">Office alert failed — CALL NEEDED</strong>' +
         '<div style="margin-top:4px">' + data.count + ' failed new-lead SMS alert' + (data.count === 1 ? "" : "s") + '.' + esc(leadText) + '</div>' +
-        (first.error ? '<div class="muted" style="margin-top:4px">Latest error: ' + esc(first.error) + '</div>' : "");
+        (first.error ? '<div class="muted" style="margin-top:4px">Latest error: ' + esc(first.error) + '</div>' : "") +
+        '<div style="margin-top:10px"><button type="button" class="btn btn-ghost btn-sm" data-resolve-lead-alert="' + esc(first.id) + '">Mark resolved</button></div>';
       host.insertBefore(box, host.firstChild);
     });
   }
@@ -53,6 +82,12 @@
   }
 
   document.addEventListener("click", function (event) {
+    var resolve = event.target.closest && event.target.closest("[data-resolve-lead-alert]");
+    if (resolve) {
+      event.preventDefault();
+      resolveAlert(Number(resolve.getAttribute("data-resolve-lead-alert")), resolve);
+      return;
+    }
     if (event.target.closest && event.target.closest("#tabs .tab")) setTimeout(check, 100);
   });
 
