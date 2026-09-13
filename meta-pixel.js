@@ -1,14 +1,40 @@
 // DCA Cleaning — shared Meta + Google measurement bootstrap.
 //
-// This file is loaded on the customer-facing funnel, confirmation pages and
-// marketing pages. Keeping measurement here prevents strict CSP pages from
-// silently losing sessions and conversions because of missing inline snippets.
-
+// Loads measurement for customer-facing pages, preserves campaign attribution
+// during the visit, records phone-contact intent, and fires real funnel events.
 (function () {
   "use strict";
 
   var GOOGLE_ADS_ID = "AW-18304171342";
   var GA4_ID = "G-HK9LGE14TK";
+  var ATTRIBUTION_KEY = "dca-marketing-attribution";
+  var ATTRIBUTION_FIELDS = [
+    "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
+    "gclid", "fbclid"
+  ];
+
+  function readAttribution() {
+    var current = {};
+    var params = new URLSearchParams(window.location.search);
+    ATTRIBUTION_FIELDS.forEach(function (key) {
+      var value = params.get(key);
+      if (value) current[key] = value.slice(0, 200);
+    });
+
+    try {
+      var saved = JSON.parse(window.sessionStorage.getItem(ATTRIBUTION_KEY) || "{}");
+      Object.keys(saved).forEach(function (key) {
+        if (!current[key]) current[key] = saved[key];
+      });
+      if (Object.keys(current).length) {
+        window.sessionStorage.setItem(ATTRIBUTION_KEY, JSON.stringify(current));
+      }
+    } catch (error) {}
+
+    return current;
+  }
+
+  var attribution = readAttribution();
 
   // ------------------------------------------------------------------ Meta
   (function (f, b, e, v, n, t, s) {
@@ -33,10 +59,6 @@
   fbq("track", "PageView");
 
   // --------------------------------------------------------------- Google
-  // Marketing pages may already load gtag.js for Google Ads. Reuse that loader
-  // when present, but always configure GA4 so every customer-facing page sends
-  // page/session data to the DCA GA4 web stream. On pages without an existing
-  // Google loader, this bootstrap installs one and configures both destinations.
   window.dataLayer = window.dataLayer || [];
   window.gtag = window.gtag || function () {
     window.dataLayer.push(arguments);
@@ -52,10 +74,46 @@
     window.gtag("config", GOOGLE_ADS_ID);
   }
 
-  // Configure the GA4 destination on every page. This is intentionally outside
-  // the loader guard: pages that already load Google Ads still need the GA4
-  // destination configured, while pages without a loader receive both above.
   window.gtag("config", GA4_ID);
+
+  function marketingParams(extra) {
+    var params = {};
+    Object.keys(attribution || {}).forEach(function (key) {
+      params[key] = attribution[key];
+    });
+    Object.keys(extra || {}).forEach(function (key) {
+      params[key] = extra[key];
+    });
+    return params;
+  }
+
+  function trackPhoneClicks() {
+    document.addEventListener("click", function (event) {
+      var link = event.target && event.target.closest ? event.target.closest('a[href^="tel:"]') : null;
+      if (!link) return;
+
+      var number = String(link.getAttribute("href") || "").replace(/[^0-9]/g, "");
+      var params = marketingParams({
+        contact_method: "phone",
+        phone_number: number,
+        link_url: link.href,
+        page_path: window.location.pathname
+      });
+
+      try {
+        if (typeof window.gtag === "function") window.gtag("event", "phone_click", params);
+      } catch (error) {}
+
+      try {
+        if (typeof window.fbq === "function") {
+          window.fbq("track", "Contact", {
+            content_category: "phone",
+            content_name: "Phone call click"
+          });
+        }
+      } catch (error) {}
+    }, true);
+  }
 
   // ------------------------------------------------------ conversion helper
   function parseMoney(value) {
@@ -95,7 +153,6 @@
         || /^\/move-cleaning-specials(?:\.html)?$/.test(referrerPath)) type = "booking";
     }
 
-    // SMS opt-in and direct visits to the confirmation page are not sales leads.
     if (type !== "lead" && type !== "booking") return;
 
     var value = parseMoney(params.get("value"));
@@ -154,6 +211,8 @@
       function () { return "Move cleaning request"; }
     );
   }
+
+  trackPhoneClicks();
 
   var conversionScript = document.createElement("script");
   conversionScript.src = "/conversions.js";
