@@ -1,6 +1,6 @@
 [build]
 publish = "."
-command = "node tools/fix-public-phone.mjs && node tools/fix-booking-reference.mjs && node tools/refresh-sitemap-lastmod.mjs && node tools/fix-lead-speed.mjs && node tools/fix-new-lead-alert.mjs"
+command = "node tools/fix-public-phone.mjs && node tools/fix-booking-reference.mjs && node tools/refresh-sitemap-lastmod.mjs && node tools/fix-lead-speed.mjs && node tools/fix-new-lead-alert.mjs && node tools/refresh-public-index-signals.mjs"
 
 # Before running the build, Netlify does a separate `npm install` inside
 # .netlify/plugins/ for build plugins and installed extensions. That install has
@@ -34,6 +34,18 @@ for = "/*"
 X-Frame-Options = "SAMEORIGIN"
 X-Content-Type-Options = "nosniff"
 Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Force crawlers and browsers to revalidate the two page families that had stale
+# customer-phone snippets in search results instead of sitting on old HTML.
+[[headers]]
+for = "/contact"
+[headers.values]
+Cache-Control = "public, max-age=0, must-revalidate"
+
+[[headers]]
+for = "/areas/*"
+[headers.values]
+Cache-Control = "public, max-age=0, must-revalidate"
 
 # Block common WordPress scanner paths (return 404)
 [[redirects]]
