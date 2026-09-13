@@ -24,6 +24,9 @@
 /quote
   Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com https://www.google.com https://www.googleadservices.com https://googleads.g.doubleclick.net; script-src 'self' https://connect.facebook.net https://www.googletagmanager.com; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com https://www.google-analytics.com https://analytics.google.com https://www.googleadservices.com https://www.google.com https://googleads.g.doubleclick.net
 
+/carpet199
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com https://www.google.com https://www.googleadservices.com https://googleads.g.doubleclick.net; script-src 'self' https://connect.facebook.net https://www.googletagmanager.com; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com https://www.google-analytics.com https://analytics.google.com https://www.googleadservices.com https://www.google.com https://googleads.g.doubleclick.net
+
 /move-cleaning-specials
   Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: https://www.facebook.com https://www.google.com https://www.googleadservices.com https://googleads.g.doubleclick.net; script-src 'self' https://connect.facebook.net https://www.googletagmanager.com; style-src 'self'; connect-src 'self' https://connect.facebook.net https://www.facebook.com https://www.google-analytics.com https://analytics.google.com https://www.googleadservices.com https://www.google.com https://googleads.g.doubleclick.net
 
