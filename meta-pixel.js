@@ -115,6 +115,102 @@
     }, true);
   }
 
+  function bookingReference() {
+    var key = "dca-paid-booking-ref";
+    try {
+      var existing = window.sessionStorage.getItem(key);
+      if (existing) return existing;
+      var created = window.crypto && typeof window.crypto.randomUUID === "function"
+        ? window.crypto.randomUUID().replace(/-/g, "_")
+        : "web_" + Date.now() + "_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+      window.sessionStorage.setItem(key, created);
+      return created;
+    } catch (error) {
+      return "web_" + Date.now() + "_" + Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+    }
+  }
+
+  function formValue(form, name) {
+    return form.elements && form.elements[name] ? String(form.elements[name].value || "").trim() : "";
+  }
+
+  // The first paid campaign sends customers directly to CARPET199. Intercept
+  // that one offer before the ordinary Netlify form handler, create the DCA Pro
+  // Manager job, and send the customer to the secure Clover deposit page. If
+  // the deposit endpoint is unavailable, fall back to the normal Netlify form
+  // submit so the lead is never lost.
+  function installCarpetDepositFunnel() {
+    document.addEventListener("submit", function (event) {
+      var form = event.target;
+      if (!form || !form.matches || !form.matches("[data-quote-form]")) return;
+
+      var code = formValue(form, "promotion_code").toUpperCase();
+      var areas = Number(formValue(form, "carpet_rooms") || 0);
+      if (code !== "CARPET199" || !isFinite(areas) || areas < 1 || areas > 5) return;
+
+      event.preventDefault();
+      if (event.stopImmediatePropagation) event.stopImmediatePropagation();
+
+      var button = form.querySelector('button[type="submit"]');
+      var original = button ? button.textContent : "";
+      if (button) {
+        button.disabled = true;
+        button.textContent = "Preparing secure deposit…";
+      }
+
+      var payload = {
+        bookingRef: bookingReference(),
+        promotionCode: code,
+        areas: areas,
+        customerName: formValue(form, "customer_name"),
+        phone: formValue(form, "phone"),
+        email: formValue(form, "email"),
+        address: formValue(form, "service_address"),
+        city: formValue(form, "city"),
+        state: formValue(form, "state") || "GA",
+        zip: formValue(form, "zip_code"),
+        preferredDate: formValue(form, "preferred_date"),
+        preferredTime: formValue(form, "preferred_time"),
+        attribution: attribution
+      };
+
+      try {
+        if (typeof window.gtag === "function") {
+          window.gtag("event", "begin_checkout", marketingParams({
+            currency: "USD",
+            value: 199,
+            promotion_code: "CARPET199"
+          }));
+        }
+      } catch (error) {}
+
+      fetch("/api/web-booking-deposit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(payload)
+      })
+        .then(function (response) {
+          return response.json().catch(function () { return {}; }).then(function (data) {
+            if (!response.ok || !data.paymentUrl) throw new Error(data.error || "Deposit checkout unavailable");
+            return data;
+          });
+        })
+        .then(function (data) {
+          window.location.assign(data.paymentUrl);
+        })
+        .catch(function (error) {
+          if (window.console && window.console.error) window.console.error("deposit funnel fallback", error);
+          if (button) {
+            button.disabled = false;
+            button.textContent = original;
+          }
+          // Native submit bypasses this listener and the existing AJAX listener,
+          // preserving the original verified Netlify lead flow as the fallback.
+          HTMLFormElement.prototype.submit.call(form);
+        });
+    }, true);
+  }
+
   // ------------------------------------------------------ conversion helper
   function parseMoney(value) {
     var number = Number(String(value || "").replace(/[^0-9.-]/g, ""));
@@ -213,6 +309,7 @@
   }
 
   trackPhoneClicks();
+  installCarpetDepositFunnel();
 
   var conversionScript = document.createElement("script");
   conversionScript.src = "/conversions.js";
