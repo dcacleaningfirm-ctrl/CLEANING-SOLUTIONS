@@ -1,6 +1,6 @@
 [build]
 publish = "."
-command = "node tools/fix-public-phone.mjs && node tools/fix-booking-reference.mjs && node tools/refresh-sitemap-lastmod.mjs && node tools/fix-lead-speed.mjs"
+command = "node tools/fix-public-phone.mjs && node tools/fix-booking-reference.mjs && node tools/refresh-sitemap-lastmod.mjs && node tools/fix-lead-speed.mjs && node tools/fix-new-lead-alert.mjs"
 
 # Before running the build, Netlify does a separate `npm install` inside
 # .netlify/plugins/ for build plugins and installed extensions. That install has
