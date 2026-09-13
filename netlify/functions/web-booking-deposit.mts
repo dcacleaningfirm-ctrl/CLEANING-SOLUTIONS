@@ -2,28 +2,20 @@ import { and, eq } from "drizzle-orm";
 import type { Config, Context } from "@netlify/functions";
 import { db } from "../../db/index.js";
 import { customers, jobEvents, jobs, leadEvents, leads } from "../../db/schema.js";
+import { calculateCheckout } from "../../lib/checkout-pricing.js";
 import { ingestLead } from "../../lib/lead-intake.js";
-import { promotionByCode } from "../../lib/promotions.js";
 import { ensureVoicePaymentLink, voicePaymentUrl } from "../../lib/voice-payment.js";
-
-const DEPOSIT_PERCENT = 15;
-const PRIMARY_WEB_OFFER = "CARPET199";
-const MIN_GENERAL_TOTAL_CENTS = 500;
-const MAX_GENERAL_TOTAL_CENTS = 1_000_000;
 
 function clean(value: unknown, max = 240): string {
   return String(value || "").trim().slice(0, max);
 }
 
 export default async (req: Request, _context: Context) => {
-  if (req.method !== "POST") {
-    return Response.json({ error: "Method not allowed" }, { status: 405 });
-  }
+  if (req.method !== "POST") return Response.json({ error: "Method not allowed" }, { status: 405 });
 
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const bookingRef = clean(body.bookingRef, 100);
   const promotionCode = clean(body.promotionCode, 40).toUpperCase();
-  const promotion = promotionByCode(promotionCode);
   const customerName = clean(body.customerName, 160);
   const phone = clean(body.phone, 40);
   const email = clean(body.email, 200);
@@ -33,11 +25,6 @@ export default async (req: Request, _context: Context) => {
   const zip = clean(body.zip, 20);
   const preferredDate = clean(body.preferredDate, 20);
   const preferredTime = clean(body.preferredTime, 80);
-  const areas = Math.max(0, Math.floor(Number(body.areas) || 0));
-  const requestedTotalCents = Math.round(Number(body.totalCents) || 0);
-  const serviceName = clean(body.serviceName, 180) || "Website cleaning estimate";
-  const serviceDetail = clean(body.serviceDetail, 1000);
-  const estimateBreakdown = clean(body.estimateBreakdown, 1800);
   const customerNotes = clean(body.customerNotes, 1400);
   const attribution = body.attribution && typeof body.attribution === "object"
     ? body.attribution as Record<string, unknown>
@@ -50,31 +37,31 @@ export default async (req: Request, _context: Context) => {
     return Response.json({ error: "Name, phone, email and ZIP code are required." }, { status: 400 });
   }
 
-  const isPrimaryCarpetOffer = Boolean(promotion && promotion.code === PRIMARY_WEB_OFFER);
-  const isGeneralBooking = !promotion || promotionCode === "" || promotionCode === "NOT APPLIED";
-
-  if (!isPrimaryCarpetOffer && !isGeneralBooking) {
-    return Response.json(
-      { error: "This special needs its published checkout total confirmed before a deposit is created." },
-      { status: 400 }
-    );
-  }
-  if (isPrimaryCarpetOffer && (areas < 1 || areas > 5)) {
-    return Response.json(
-      { error: "Jobs over 5 carpeted areas need the final total confirmed before a deposit is charged." },
-      { status: 409 }
-    );
-  }
-  if (isGeneralBooking && (requestedTotalCents < MIN_GENERAL_TOTAL_CENTS || requestedTotalCents > MAX_GENERAL_TOTAL_CENTS)) {
-    return Response.json({ error: "A valid planning estimate is required before the deposit can be created." }, { status: 400 });
+  const providedQuantities = body.quantities && typeof body.quantities === "object"
+    ? body.quantities as Record<string, unknown>
+    : {};
+  // Backward compatibility for the already-live CARPET199 client while all
+  // public pages migrate to the structured unified checkout payload.
+  if (providedQuantities.carpet_rooms == null && Number(body.areas) > 0) {
+    providedQuantities.carpet_rooms = body.areas;
   }
 
-  const totalCents = isPrimaryCarpetOffer
-    ? Math.round((promotion?.price || 0) * 100)
-    : requestedTotalCents;
-  const depositCents = Math.ceil(totalCents * DEPOSIT_PERCENT / 100);
-  const bookingService = isPrimaryCarpetOffer ? promotion!.name : serviceName;
-  const bookingCode = isPrimaryCarpetOffer ? promotion!.code : null;
+  let pricing;
+  try {
+    pricing = calculateCheckout({
+      orderMode: body.orderMode,
+      promotionCode,
+      quantities: providedQuantities,
+      treatments: body.treatments
+    });
+  } catch (error) {
+    return Response.json({ error: error instanceof Error ? error.message : "The order could not be priced." }, { status: 400 });
+  }
+
+  // Browser totals are deliberately ignored. The server-calculated amount is
+  // the only amount that can create a DCA Pro job or Clover deposit link.
+  const totalCents = pricing.totalCents;
+  const depositCents = pricing.depositCents;
 
   const [existing] = await db
     .select({ id: leads.id, jobId: leads.jobId, customerId: leads.customerId })
@@ -95,14 +82,15 @@ export default async (req: Request, _context: Context) => {
       jobId: existing.jobId,
       totalCents,
       depositCents,
+      serverPriced: true,
       paymentUrl: voicePaymentUrl(payment.token)
     });
   }
 
-  const campaign = clean(attribution.utm_campaign || (bookingCode ? bookingCode.toLowerCase() : "direct-web-booking"), 120);
-  const detail = isPrimaryCarpetOffer
-    ? `${areas} carpeted area${areas === 1 ? "" : "s"}; secure deposit requested online`
-    : (serviceDetail || estimateBreakdown || "Multi-service website estimate; secure deposit requested online");
+  const campaign = clean(
+    attribution.utm_campaign || (pricing.promotionCode ? pricing.promotionCode.toLowerCase() : "direct-web-booking"),
+    120
+  );
 
   const intake = await ingestLead({
     source: "website",
@@ -118,11 +106,11 @@ export default async (req: Request, _context: Context) => {
     state,
     zip,
     contactMethod: "Website",
-    service: bookingService,
-    serviceDetail: detail,
-    promotionCode: bookingCode || undefined,
-    promotionName: isPrimaryCarpetOffer ? promotion!.name : undefined,
-    quantities: isPrimaryCarpetOffer ? { "Carpeted areas": areas } : {},
+    service: pricing.serviceName,
+    serviceDetail: `${pricing.serviceDetail}; server-priced checkout`,
+    promotionCode: pricing.promotionCode || undefined,
+    promotionName: pricing.promotionCode ? pricing.serviceName : undefined,
+    quantities: pricing.quantities,
     subtotalCents: totalCents,
     totalCents,
     requestedDate: preferredDate || null,
@@ -132,9 +120,11 @@ export default async (req: Request, _context: Context) => {
       channel: "website",
       bookingRef,
       attribution,
-      depositPercent: DEPOSIT_PERCENT,
-      estimateBreakdown: estimateBreakdown || null,
-      generalEstimate: isGeneralBooking
+      depositPercent: 15,
+      serverPriced: true,
+      orderMode: clean(body.orderMode, 20) || (pricing.promotionCode ? "special" : "general"),
+      checkoutQuantities: pricing.quantities,
+      checkoutTreatments: pricing.treatments
     }
   });
 
@@ -155,6 +145,7 @@ export default async (req: Request, _context: Context) => {
       jobId: intake.lead.jobId,
       totalCents,
       depositCents,
+      serverPriced: true,
       paymentUrl: voicePaymentUrl(payment.token)
     });
   }
@@ -163,36 +154,30 @@ export default async (req: Request, _context: Context) => {
     .insert(jobs)
     .values({
       customerId: intake.customer.id,
-      serviceType: bookingService,
+      serviceType: pricing.serviceName,
       status: "scheduled",
       priceCents: totalCents,
       scheduledFor: null,
-      durationMinutes: isPrimaryCarpetOffer ? 120 : 180,
+      durationMinutes: pricing.promotionCode?.startsWith("CARPET") ? 120 : 180,
       source: "website",
       bookedBy: null,
       address,
-      notes: `Website appointment hold pending 15% deposit. Preferred date: ${preferredDate || "not selected"}; preferred arrival: ${preferredTime || "no preference"}. Booking ref ${bookingRef}.${estimateBreakdown ? ` Estimate: ${estimateBreakdown}` : ""}`
+      notes: `Server-priced website appointment hold pending 15% deposit. Preferred date: ${preferredDate || "not selected"}; preferred arrival: ${preferredTime || "no preference"}. Booking ref ${bookingRef}. ${pricing.serviceDetail}`
     })
     .returning({ id: jobs.id });
 
-  await db
-    .update(leads)
-    .set({ jobId: job.id, status: "scheduled", updatedAt: new Date() })
-    .where(eq(leads.id, intake.lead.id));
+  await db.update(leads).set({ jobId: job.id, status: "scheduled", updatedAt: new Date() }).where(eq(leads.id, intake.lead.id));
   await db.insert(jobEvents).values({
     jobId: job.id,
     kind: "created",
-    message: `Website booking held pending $${(depositCents / 100).toFixed(2)} deposit${bookingCode ? `; ${bookingCode}` : ""}`
+    message: `Server-priced website booking held pending $${(depositCents / 100).toFixed(2)} deposit${pricing.promotionCode ? `; ${pricing.promotionCode}` : ""}`
   });
   await db.insert(leadEvents).values({
     leadId: intake.lead.id,
     kind: "converted",
-    message: `Website request converted to job #${job.id}; deposit pending`
+    message: `Website request converted to job #${job.id}; server-calculated total $${(totalCents / 100).toFixed(2)}; deposit pending`
   });
-  await db
-    .update(customers)
-    .set({ lastActivityAt: new Date() })
-    .where(eq(customers.id, intake.customer.id));
+  await db.update(customers).set({ lastActivityAt: new Date() }).where(eq(customers.id, intake.customer.id));
 
   const payment = await ensureVoicePaymentLink({
     jobId: job.id,
@@ -207,6 +192,7 @@ export default async (req: Request, _context: Context) => {
     jobId: job.id,
     totalCents,
     depositCents,
+    serverPriced: true,
     paymentUrl: voicePaymentUrl(payment.token)
   });
 };
