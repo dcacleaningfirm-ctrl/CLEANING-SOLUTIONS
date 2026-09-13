@@ -33,9 +33,9 @@ export function gatherPayment(message: string, action = "/api/voice/turn"): stri
 
 export function transfer(number: string, introduction?: string): string {
   const introductionXml = introduction ? say(introduction) : "";
-  return `${introductionXml}<Dial timeout="25" answerOnBridge="true"><Number>${escapeXml(number)}</Number></Dial>${say(
-    "The DCA office was not available. Please leave a message after the tone."
-  )}<Record maxLength="120" playBeep="true"/><Hangup/>`;
+  return `${introductionXml}<Dial timeout="25" answerOnBridge="true" action="/api/voice/missed-call" method="POST"><Number>${escapeXml(
+    number
+  )}</Number></Dial>`;
 }
 
 export function publicWebhookUrl(req: Request, expectedPath?: string): string {
