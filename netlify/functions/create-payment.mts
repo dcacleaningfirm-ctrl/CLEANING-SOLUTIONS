@@ -147,7 +147,7 @@ export default async (req: Request, context: Context) => {
       console.error("Clover charge failed:", chargeData);
       return Response.json(
         {
-          error: "Payment failed. Please try again or contact us at (404) 716-2720.",
+          error: "Payment failed. Please try again or contact us at (470) 485-3123.",
           details: chargeData.message || "Unknown error",
         },
         { status: 400 }
@@ -166,7 +166,7 @@ export default async (req: Request, context: Context) => {
   } catch (err) {
     console.error("Payment processing error:", err);
     return Response.json(
-      { error: "Payment processing unavailable. Please call (404) 716-2720 to complete your booking." },
+      { error: "Payment processing unavailable. Please call (470) 485-3123 to complete your booking." },
       { status: 500 }
     );
   }
