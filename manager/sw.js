@@ -7,12 +7,17 @@
  *
  * Bump VERSION to push a new shell to every installed phone.
  */
-var VERSION = "dca-manager-v19";
+var VERSION = "dca-manager-v20";
 var SHELL = [
   "/manager/",
   "/manager/manager.css",
   "/manager/manager.js",
   "/manager/maps.js",
+  "/manager/owner-cleanup.js",
+  "/manager/funnel-health.js",
+  "/manager/lead-alert-warnings.js",
+  "/manager/source-performance.js",
+  "/manager/customer-delete.js",
   "/manager/offline.html",
   "/manager/manifest.webmanifest",
   "/manager/icon-192.png",
@@ -30,6 +35,11 @@ var SHELL = [
 var APP_CODE = [
   "/manager/manager.js",
   "/manager/maps.js",
+  "/manager/owner-cleanup.js",
+  "/manager/funnel-health.js",
+  "/manager/lead-alert-warnings.js",
+  "/manager/source-performance.js",
+  "/manager/customer-delete.js",
   "/manager/manager.css",
   "/manager/setup/setup.js",
   "/data/pricing.js"
