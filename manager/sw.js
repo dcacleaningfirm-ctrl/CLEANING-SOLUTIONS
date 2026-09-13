@@ -7,7 +7,7 @@
  *
  * Bump VERSION to push a new shell to every installed phone.
  */
-var VERSION = "dca-manager-v21";
+var VERSION = "dca-manager-v22";
 var SHELL = [
   "/manager/",
   "/manager/manager.css",
@@ -17,12 +17,15 @@ var SHELL = [
   "/manager/funnel-health.js",
   "/manager/lead-alert-warnings.js",
   "/manager/verification-health.js",
+  "/manager/operations-attention.js",
+  "/manager/pwa-register.js",
   "/manager/source-performance.js",
   "/manager/customer-delete.js",
   "/manager/offline.html",
   "/manager/manifest.webmanifest",
   "/manager/icon-192.png",
   "/manager/icon-512.png",
+  "/manager/icon-maskable-512.png",
   // The price catalog the booking screen quotes from.
   "/data/pricing.js",
   "/logo.svg"
@@ -40,6 +43,8 @@ var APP_CODE = [
   "/manager/funnel-health.js",
   "/manager/lead-alert-warnings.js",
   "/manager/verification-health.js",
+  "/manager/operations-attention.js",
+  "/manager/pwa-register.js",
   "/manager/source-performance.js",
   "/manager/customer-delete.js",
   "/manager/manager.css",
@@ -55,8 +60,6 @@ self.addEventListener("install", function (event) {
   event.waitUntil(
     caches
       .open(VERSION)
-      // addAll is all-or-nothing, so add individually: one missing asset must
-      // not stop the worker from installing.
       .then(function (cache) {
         return Promise.all(
           SHELL.map(function (url) {
@@ -103,11 +106,8 @@ self.addEventListener("fetch", function (event) {
   }
   if (url.origin !== self.location.origin) return;
 
-  // Authenticated data and the login endpoint: always straight to the network.
   if (url.pathname.indexOf("/api/") === 0) return;
 
-  // Page loads: prefer the network so the shell is never stale, but fall back
-  // to the cached shell (and then an offline notice) when the signal drops.
   if (req.mode === "navigate") {
     event.respondWith(
       fetch(req)
@@ -134,10 +134,6 @@ self.addEventListener("fetch", function (event) {
     return;
   }
 
-  // The app's own code: network first, so opening the console online always
-  // runs the build that is currently deployed. The stored copy is kept only as
-  // the answer for a phone with no signal. ignoreSearch lets a request for
-  // manager.js?v=11 be answered by the plain manager.js put there at install.
   if (isAppCode(url.pathname)) {
     event.respondWith(
       fetch(req)
@@ -157,7 +153,6 @@ self.addEventListener("fetch", function (event) {
     return;
   }
 
-  // Static assets: serve from cache for instant loads, refresh in background.
   event.respondWith(
     caches.match(req).then(function (hit) {
       var network = fetch(req)

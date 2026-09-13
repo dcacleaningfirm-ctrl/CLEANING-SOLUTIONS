@@ -1,4 +1,4 @@
-import { and, desc, eq, lte, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import type { Config } from "@netlify/functions";
 import { db } from "../../db/index.js";
 import {
@@ -10,13 +10,14 @@ import {
   payments,
   jobs
 } from "../../db/schema.js";
-import { money } from "../../lib/voice-agent.js";
+import { money, SHACOLE_NUMBER } from "../../lib/voice-agent.js";
 import { ensureVoicePaymentLink, voicePaymentUrl } from "../../lib/voice-payment.js";
 import { normalizePhone, sendSms } from "../../lib/notify.js";
 
 const DEPOSIT_PERCENT = 15;
-const FIRST_REMINDER_MS = 30 * 60 * 1000;
-const SECOND_REMINDER_MS = 24 * 60 * 60 * 1000;
+const FIRST_REMINDER_MS = 15 * 60 * 1000;
+const SECOND_REMINDER_MS = 2 * 60 * 60 * 1000;
+const FINAL_REMINDER_MS = 24 * 60 * 60 * 1000;
 
 async function paidForJob(jobId: number): Promise<number> {
   const [row] = await db
@@ -35,6 +36,30 @@ async function hasNotification(jobId: number, kind: string): Promise<boolean> {
   return Boolean(row);
 }
 
+async function recordSms(input: {
+  jobId: number;
+  customerId: number;
+  kind: string;
+  to: string;
+  body: string;
+}) {
+  if (!input.to || await hasNotification(input.jobId, input.kind)) return false;
+  const result = await sendSms({ to: input.to, body: input.body });
+  await db.insert(notifications).values({
+    jobId: input.jobId,
+    customerId: input.customerId,
+    kind: input.kind,
+    channel: "sms",
+    recipient: normalizePhone(input.to) || input.to,
+    body: input.body,
+    status: result.ok ? "sent" : "failed",
+    provider: result.provider,
+    providerRef: result.providerRef,
+    error: result.error
+  });
+  return result.ok;
+}
+
 async function sendDepositReminder(input: {
   jobId: number;
   customerId: number;
@@ -51,20 +76,20 @@ async function sendDepositReminder(input: {
     amountCents: input.depositCents
   });
   const body = `DCA Cleaning Solutions: ${input.customerName || "your appointment"}, your ${input.serviceType} request is being held pending the ${money(input.depositCents)} deposit. Pay securely here: ${voicePaymentUrl(link.token)}. Questions: (470) 485-3123.`;
-  const result = await sendSms({ to: input.phone, body });
-  await db.insert(notifications).values({
-    jobId: input.jobId,
-    customerId: input.customerId,
-    kind: input.kind,
-    channel: "sms",
-    recipient: normalizePhone(input.phone) || input.phone,
-    body,
-    status: result.ok ? "sent" : "failed",
-    provider: result.provider,
-    providerRef: result.providerRef,
-    error: result.error
-  });
-  return result.ok;
+  return recordSms({ jobId: input.jobId, customerId: input.customerId, kind: input.kind, to: input.phone, body });
+}
+
+async function alertOfficeAbandonedDeposit(input: {
+  jobId: number;
+  customerId: number;
+  customerName: string;
+  phone: string;
+  serviceType: string;
+  depositCents: number;
+}) {
+  const kind = "deposit_abandoned_office_15m";
+  const body = `DCA deposit pending — CALL NOW: ${input.customerName || "customer"}, ${input.phone || "no phone"}, ${input.serviceType}, job #${input.jobId}, deposit ${money(input.depositCents)}. Customer reached checkout but has not paid after 15 minutes.`;
+  return recordSms({ jobId: input.jobId, customerId: input.customerId, kind, to: SHACOLE_NUMBER, body });
 }
 
 async function reconcileCampaignRevenue(input: {
@@ -142,6 +167,7 @@ export default async () => {
     .limit(100);
 
   let remindersSent = 0;
+  let officeAlertsSent = 0;
   let revenueRowsUpdated = 0;
 
   for (const row of candidates) {
@@ -157,9 +183,19 @@ export default async () => {
     if (!requiredDeposit || paidCents >= requiredDeposit || !row.createdAt) continue;
 
     const age = now - new Date(row.createdAt).getTime();
+    if (age >= FIRST_REMINDER_MS && await alertOfficeAbandonedDeposit({
+      jobId: row.jobId,
+      customerId: row.customerId,
+      customerName: row.customerName,
+      phone: row.customerPhone || "",
+      serviceType: row.serviceType,
+      depositCents: requiredDeposit
+    })) officeAlertsSent += 1;
+
     let kind = "";
-    if (age >= SECOND_REMINDER_MS) kind = "deposit_reminder_24h";
-    else if (age >= FIRST_REMINDER_MS) kind = "deposit_reminder_30m";
+    if (age >= FINAL_REMINDER_MS) kind = "deposit_reminder_24h";
+    else if (age >= SECOND_REMINDER_MS) kind = "deposit_reminder_2h";
+    else if (age >= FIRST_REMINDER_MS) kind = "deposit_reminder_15m";
     if (!kind) continue;
 
     if (await sendDepositReminder({
@@ -173,9 +209,9 @@ export default async () => {
     })) remindersSent += 1;
   }
 
-  console.log("revenue-followup", { checked: candidates.length, remindersSent, revenueRowsUpdated });
+  console.log("revenue-followup", { checked: candidates.length, remindersSent, officeAlertsSent, revenueRowsUpdated });
 };
 
 export const config: Config = {
-  schedule: "*/30 * * * *"
+  schedule: "*/15 * * * *"
 };
