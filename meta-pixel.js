@@ -43,20 +43,26 @@
   fbq("track", "PageView");
 
   // --------------------------------------------------------------- Google
-  // gtag('config') records page-view traffic for the Google tag. If the Google
-  // tag is later connected to GA4 as a destination, the same sitewide install
-  // can feed that destination without another code rollout.
-  window.dataLayer = window.dataLayer || [];
-  window.gtag = window.gtag || function () {
-    window.dataLayer.push(arguments);
-  };
-  window.gtag("js", new Date());
-  window.gtag("config", GOOGLE_ADS_ID);
+  // Many marketing pages already contain the Google tag directly. Only install
+  // it here when the page does not already have that exact tag, which prevents
+  // duplicate config/page_view events while filling the gap on the booking
+  // funnel and confirmation pages.
+  var googleTagSelector = 'script[src*="googletagmanager.com/gtag/js?id=' + GOOGLE_ADS_ID + '"]';
+  var existingGoogleTag = document.querySelector(googleTagSelector);
 
-  var googleScript = document.createElement("script");
-  googleScript.async = true;
-  googleScript.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(GOOGLE_ADS_ID);
-  document.head.appendChild(googleScript);
+  if (!existingGoogleTag) {
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = window.gtag || function () {
+      window.dataLayer.push(arguments);
+    };
+    window.gtag("js", new Date());
+    window.gtag("config", GOOGLE_ADS_ID);
+
+    var googleScript = document.createElement("script");
+    googleScript.async = true;
+    googleScript.src = "https://www.googletagmanager.com/gtag/js?id=" + encodeURIComponent(GOOGLE_ADS_ID);
+    document.head.appendChild(googleScript);
+  }
 
   // ------------------------------------------------------ conversion helper
   function parseMoney(value) {
