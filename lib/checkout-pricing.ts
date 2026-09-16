@@ -21,6 +21,9 @@ const TREATMENTS = Object.freeze({
   petTreatment: 65.00
 });
 
+const NEXTDOOR_UPHOLSTERY_CODE = "NEXTDOOR10";
+const NEXTDOOR_UPHOLSTERY_DISCOUNT = 10;
+
 const SPECIAL_RULES: Record<string, {
   kind: "carpet" | "duct-units" | "duct-vents" | "combo" | "flat";
   includedAreas?: number;
@@ -147,6 +150,7 @@ function priceGeneral(input: CheckoutPricingInput): CheckoutPricingResult {
   };
   const code = String(input.promotionCode || "").trim().toUpperCase();
   const useVents199 = code === "VENTS199" && quantities.air_vents > 0;
+  const useNextdoor10 = code === NEXTDOOR_UPHOLSTERY_CODE;
 
   let total = 0;
   const detail: string[] = [];
@@ -163,10 +167,18 @@ function priceGeneral(input: CheckoutPricingInput): CheckoutPricingResult {
       detail.push(`Air duct base + ${quantities.air_vents} vent(s)`);
     }
   }
-  if (quantities.armchairs) { total += quantities.armchairs * SERVICES.armchair; detail.push(`${quantities.armchairs} armchair(s)`); }
-  if (quantities.sofas) { total += quantities.sofas * SERVICES.sofa; detail.push(`${quantities.sofas} sofa(s)`); }
-  if (quantities.sectionals) { total += quantities.sectionals * SERVICES.sectional; detail.push(`${quantities.sectionals} sectional(s)`); }
+  let upholsterySubtotal = 0;
+  if (quantities.armchairs) { const amount = quantities.armchairs * SERVICES.armchair; total += amount; upholsterySubtotal += amount; detail.push(`${quantities.armchairs} armchair(s)`); }
+  if (quantities.sofas) { const amount = quantities.sofas * SERVICES.sofa; total += amount; upholsterySubtotal += amount; detail.push(`${quantities.sofas} sofa(s)`); }
+  if (quantities.sectionals) { const amount = quantities.sectionals * SERVICES.sectional; total += amount; upholsterySubtotal += amount; detail.push(`${quantities.sectionals} sectional(s)`); }
   if (quantities.move_packages) { total += quantities.move_packages * SERVICES.movePackage; detail.push(`${quantities.move_packages} move package(s)`); }
+
+  if (useNextdoor10) {
+    if (upholsterySubtotal <= 0) throw new Error("NEXTDOOR10 requires at least one regular-price upholstery item");
+    const discount = cents(upholsterySubtotal * NEXTDOOR_UPHOLSTERY_DISCOUNT / 100) / 100;
+    total -= discount;
+    detail.push(`NEXTDOOR10: ${NEXTDOOR_UPHOLSTERY_DISCOUNT}% off upholstery (-$${discount.toFixed(2)})`);
+  }
 
   for (const key of treatments) {
     const rate = key === "dryerVent" && quantities.air_vents > 0 ? TREATMENTS.dryerVentAddOn : TREATMENTS[key as keyof typeof TREATMENTS];
@@ -179,9 +191,9 @@ function priceGeneral(input: CheckoutPricingInput): CheckoutPricingResult {
   return {
     totalCents,
     depositCents: Math.ceil(totalCents * CHECKOUT_DEPOSIT_PERCENT / 100),
-    serviceName: "Website cleaning estimate",
+    serviceName: useNextdoor10 ? "Nextdoor upholstery cleaning request" : "Website cleaning estimate",
     serviceDetail: detail.join("; "),
-    promotionCode: useVents199 ? "VENTS199" : null,
+    promotionCode: useNextdoor10 ? NEXTDOOR_UPHOLSTERY_CODE : (useVents199 ? "VENTS199" : null),
     quantities,
     treatments
   };
@@ -190,7 +202,7 @@ function priceGeneral(input: CheckoutPricingInput): CheckoutPricingResult {
 export function calculateCheckout(input: CheckoutPricingInput): CheckoutPricingResult {
   const mode = String(input.orderMode || "").trim().toLowerCase();
   const code = String(input.promotionCode || "").trim().toUpperCase();
-  if (mode === "special" || (code && code !== "NOT APPLIED" && code !== "VENTS199")) {
+  if (mode === "special" || (code && code !== "NOT APPLIED" && code !== "VENTS199" && code !== NEXTDOOR_UPHOLSTERY_CODE)) {
     return priceSpecial(code, input.quantities || {});
   }
   return priceGeneral(input);
