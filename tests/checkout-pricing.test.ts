@@ -62,6 +62,28 @@ describe("server-authoritative checkout pricing", () => {
     expect(result.depositCents).toBe(11264);
   });
 
+  it("applies NEXTDOOR10 only to regular-price upholstery", () => {
+    const result = calculateCheckout({
+      orderMode: "general",
+      promotionCode: "NEXTDOOR10",
+      quantities: { armchairs: 1, sofas: 1, sectionals: 1 },
+      treatments: ["petTreatment"]
+    });
+    // Upholstery: $507.15 - $50.72 (10%, rounded to cents) + $65 pet treatment.
+    expect(result.totalCents).toBe(52143);
+    expect(result.depositCents).toBe(7822);
+    expect(result.promotionCode).toBe("NEXTDOOR10");
+    expect(result.serviceDetail).toMatch(/10% off upholstery \(-\$50\.72\)/);
+  });
+
+  it("does not allow NEXTDOOR10 without a regular-price upholstery item", () => {
+    expect(() => calculateCheckout({
+      orderMode: "general",
+      promotionCode: "NEXTDOOR10",
+      quantities: { carpet_rooms: 2 }
+    })).toThrow(/requires at least one regular-price upholstery item/);
+  });
+
   it("rejects unknown promotion codes", () => {
     expect(() => calculateCheckout({
       orderMode: "special",
