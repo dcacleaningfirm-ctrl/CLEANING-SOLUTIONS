@@ -38,7 +38,7 @@
         var v = params.get(key);
         if (v) out[key] = v;
       });
-      var stored = sessionStorage.getItem("dca-attribution");
+      var stored = sessionStorage.getItem("dca-marketing-attribution") || sessionStorage.getItem("dca-attribution");
       if (stored) Object.assign(out, JSON.parse(stored));
     } catch (error) {}
     return out;

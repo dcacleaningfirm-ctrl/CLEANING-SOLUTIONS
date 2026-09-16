@@ -23,6 +23,7 @@
 
   var bannerPromotion = special("VENTS199");
   var entryCarpetSpecial = special("CARPET199");
+  var nextdoorCoupon = pricing && pricing.coupons ? pricing.coupons.NEXTDOOR10 : null;
 
   /* A special's comparison price: whatever it publishes as its own regular
      price, and otherwise the catalog's price for the same work. Returning 0
@@ -379,6 +380,12 @@
       if (item) element.textContent = formatPrice(item.price);
     });
 
+    scope.querySelectorAll("[data-nextdoor-coupon-price]").forEach(function (element) {
+      var item = pricing.services[element.dataset.nextdoorCouponPrice];
+      if (!item || !nextdoorCoupon) return;
+      element.textContent = formatPrice(item.price * (1 - nextdoorCoupon.discountPercent / 100));
+    });
+
     scope.querySelectorAll("[data-price-compute]").forEach(function (element) {
       element.textContent = formatPrice(computed(element.dataset.priceCompute));
     });
@@ -449,6 +456,19 @@
       /* Private browsing or storage disabled — each step still works alone. */
     }
     if (!Array.isArray(draft.treatments)) draft.treatments = [];
+
+    /* A coupon link carries its code onto the first booking page. The code is
+       then kept in the same session draft as the selected furniture so it
+       survives every later step without exposing pricing authority to the
+       browser. The server recalculates the discount before creating a deposit. */
+    try {
+      var requestedCoupon = new URLSearchParams(window.location.search).get("code");
+      if (nextdoorCoupon && requestedCoupon && requestedCoupon.toUpperCase() === nextdoorCoupon.code) {
+        draft.coupon_code = nextdoorCoupon.code;
+        draft.promo_applied = false;
+      }
+    } catch (error) {}
+
     return draft;
   }
 
@@ -510,9 +530,31 @@
       }
     }
 
-    addUnits(services.armchair, toCount(draft.armchairs));
-    addUnits(services.sofa, toCount(draft.sofas));
-    addUnits(services.sectional, toCount(draft.sectionals));
+    var upholsterySubtotal = 0;
+    var armchairs = toCount(draft.armchairs);
+    var sofas = toCount(draft.sofas);
+    var sectionals = toCount(draft.sectionals);
+    addUnits(services.armchair, armchairs);
+    addUnits(services.sofa, sofas);
+    addUnits(services.sectional, sectionals);
+    upholsterySubtotal += armchairs * services.armchair.price;
+    upholsterySubtotal += sofas * services.sofa.price;
+    upholsterySubtotal += sectionals * services.sectional.price;
+
+    var couponApplied = Boolean(
+      nextdoorCoupon
+      && draft.coupon_code === nextdoorCoupon.code
+      && upholsterySubtotal > 0
+      && !draft.promo_applied
+    );
+    if (couponApplied) {
+      var couponDiscount = toCents(upholsterySubtotal * nextdoorCoupon.discountPercent / 100);
+      add(
+        nextdoorCoupon.name + " (" + nextdoorCoupon.code + ")",
+        nextdoorCoupon.discountPercent + "% off regular upholstery prices",
+        -couponDiscount
+      );
+    }
     addUnits(services.movePackage, toCount(draft.move_packages));
 
     draft.treatments.forEach(function (key) {
@@ -521,7 +563,7 @@
       add(item.label, "Optional add-on", item.price);
     });
 
-    return { lines: lines, total: total };
+    return { lines: lines, total: total, couponApplied: couponApplied };
   }
 
   function describe(draft) {
@@ -534,6 +576,10 @@
 
   function renderSummary(draft) {
     var result = calculate(draft);
+
+    document.querySelectorAll("[data-nextdoor-coupon-applied]").forEach(function (element) {
+      element.hidden = !nextdoorCoupon || draft.coupon_code !== nextdoorCoupon.code;
+    });
 
     document.querySelectorAll("[data-estimate-total]").forEach(function (element) {
       element.textContent = formatPrice(result.total);
@@ -593,7 +639,10 @@
     }
 
     var promoBox = form.querySelector("input[type='checkbox'][data-promo-toggle]");
-    if (promoBox) draft.promo_applied = promoBox.checked;
+    if (promoBox) {
+      draft.promo_applied = promoBox.checked;
+      if (promoBox.checked) draft.coupon_code = "";
+    }
 
     return draft;
   }
@@ -695,7 +744,17 @@
         return item ? item.label : key;
       }).join("; ") || "None selected");
 
-      setHidden("promotion_code", draft.promo_applied ? bannerPromotion.code : "Not applied");
+      var activeCode = result.couponApplied
+        ? nextdoorCoupon.code
+        : (draft.promo_applied ? bannerPromotion.code : "Not applied");
+      var activeName = result.couponApplied
+        ? nextdoorCoupon.name
+        : (draft.promo_applied ? bannerPromotion.name : "Not applied");
+      var upholsteryPieces = toCount(draft.armchairs) + toCount(draft.sofas) + toCount(draft.sectionals);
+      setHidden("promotion_code", activeCode);
+      setHidden("promotion_name", activeName);
+      setHidden("promotion_quantity", result.couponApplied ? String(upholsteryPieces) : "0");
+      setHidden("promotion_quantity_label", result.couponApplied ? "Upholstery pieces" : "Not applicable");
       setHidden("planning_estimate", formatPrice(result.total));
       setHidden("estimate_breakdown", describe(draft) || "No priced services selected");
       setHidden("pricing_version", pricing.version);

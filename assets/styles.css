@@ -2156,8 +2156,168 @@ fieldset.field {
   display: none;
 }
 
+/* DCA gold-and-black coupon system. Kept independent from the green used by
+   Nextdoor so every shared link still looks and feels like DCA. */
+.nextdoor-coupon {
+  position: relative;
+  overflow: hidden;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  border: 2px solid var(--gold);
+  border-radius: 22px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 92% 10%, rgba(212, 175, 55, 0.24), transparent 34%),
+    linear-gradient(145deg, #080808 0%, #17130a 100%);
+  box-shadow: 0 22px 55px rgba(0, 0, 0, 0.24);
+}
+
+.nextdoor-coupon::after {
+  content: "DCA";
+  position: absolute;
+  right: -0.08em;
+  bottom: -0.32em;
+  color: rgba(212, 175, 55, 0.07);
+  font-size: clamp(7rem, 17vw, 14rem);
+  font-weight: 900;
+  letter-spacing: -0.09em;
+  pointer-events: none;
+}
+
+.nextdoor-coupon > * {
+  position: relative;
+  z-index: 1;
+}
+
+.nextdoor-coupon h2,
+.nextdoor-coupon p,
+.nextdoor-coupon small {
+  color: inherit;
+}
+
+.nextdoor-coupon .eyebrow {
+  margin-top: 1rem;
+  color: var(--gold);
+}
+
+.nextdoor-coupon-badge {
+  display: inline-flex;
+  padding: 0.42rem 0.7rem;
+  border: 1px solid rgba(212, 175, 55, 0.7);
+  border-radius: 999px;
+  color: var(--gold);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+}
+
+.coupon-price-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.coupon-price-grid div {
+  display: grid;
+  gap: 0.25rem;
+  padding: 1rem;
+  border: 1px solid rgba(212, 175, 55, 0.36);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.coupon-price-grid strong {
+  color: var(--gold);
+  font-size: 1.55rem;
+}
+
+.coupon-price-grid small,
+.coupon-action small {
+  opacity: 0.72;
+}
+
+.coupon-terms {
+  margin: 1.5rem 0 0;
+  padding-left: 1.2rem;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 0.86rem;
+}
+
+.button-gold {
+  border-color: var(--gold);
+  color: #111;
+  background: linear-gradient(135deg, #f2d36b, var(--gold));
+  box-shadow: 0 9px 24px rgba(212, 175, 55, 0.23);
+}
+
+.button-gold:hover {
+  border-color: #ffe69b;
+  color: #050505;
+  background: linear-gradient(135deg, #ffe69b, #d4af37);
+}
+
+.button-ghost-gold {
+  border-color: rgba(212, 175, 55, 0.65);
+  color: var(--gold);
+  background: transparent;
+}
+
+.nextdoor-coupon-horizontal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2rem;
+}
+
+.coupon-action {
+  display: grid;
+  gap: 0.65rem;
+  max-width: 310px;
+  text-align: center;
+}
+
+.section-compact {
+  padding-block: clamp(1.5rem, 4vw, 3rem);
+}
+
+.nextdoor-coupon-applied {
+  margin-bottom: 1.5rem;
+  padding: 1.35rem;
+  border-radius: 16px;
+}
+
+.nextdoor-rate-row {
+  border-color: rgba(212, 175, 55, 0.55);
+  background: rgba(212, 175, 55, 0.08);
+}
+
+.nextdoor-offer-tile {
+  border-color: var(--gold);
+  background: linear-gradient(145deg, #0b0b0b, #201a0b);
+  color: #fff;
+}
+
+.nextdoor-offer-tile h3,
+.nextdoor-offer-tile p {
+  color: inherit;
+}
+
+.nextdoor-offer-tile .offer-price,
+.nextdoor-offer-tile .offer-code {
+  color: var(--gold);
+}
+
 @media (max-width: 900px) {
   .prose-grid {
     grid-template-columns: 1fr;
+  }
+
+  .coupon-price-grid,
+  .nextdoor-coupon-horizontal {
+    grid-template-columns: 1fr;
+  }
+
+  .coupon-action {
+    max-width: none;
   }
 }
