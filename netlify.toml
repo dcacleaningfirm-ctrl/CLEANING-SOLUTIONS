@@ -94,3 +94,11 @@ from = "https://www.deluxecarpetandairduct.com/*"
 to = "https://www.dcacleaningsolutions.com/:splat"
 status = 301
 force = true
+
+# Branded, shareable Nextdoor coupon link. Keep this as a temporary redirect so
+# campaign tracking or coupon terms can be updated without changing the URL DCA
+# has already posted to Nextdoor.
+[[redirects]]
+from = "/nextdoor-upholstery"
+to = "/book/upholstery?code=NEXTDOOR10&utm_source=nextdoor&utm_medium=organic&utm_campaign=nextdoor_upholstery_10"
+status = 302
