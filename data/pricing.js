@@ -5,7 +5,7 @@
  * steps, the add-ons page and the promotion page at once.
  */
 window.DCA_PRICING = Object.freeze({
-  version: "2026-09-08",
+  version: "2026-09-16",
   currency: "USD",
   services: Object.freeze({
     carpetRoom: Object.freeze({ label: "Carpet cleaning — per room", price: 46.58 }),
@@ -23,6 +23,21 @@ window.DCA_PRICING = Object.freeze({
     sanitizer: Object.freeze({ label: "Sanitizer application", price: 45.00 }),
     antimicrobial: Object.freeze({ label: "Antimicrobial treatment", price: 85.00 }),
     petTreatment: Object.freeze({ label: "Pet-odor treatment", price: 65.00 })
+  }),
+  coupons: Object.freeze({
+    NEXTDOOR10: Object.freeze({
+      code: "NEXTDOOR10",
+      kind: "upholstery",
+      name: "Nextdoor Neighbor Upholstery Coupon",
+      discountPercent: 10,
+      summary: "Save 10% on DCA's regular armchair, sofa and sectional cleaning prices.",
+      terms: Object.freeze([
+        "Applies to regular-price armchair, recliner, three-seat sofa and large-sectional upholstery cleaning booked through the NEXTDOOR10 link.",
+        "The 10% discount applies to the upholstery cleaning subtotal. Pet-odor, sanitizing, heavy-soil, fabric-protection and other optional treatments remain at their regular prices.",
+        "Cannot be combined with UPHOLSTERY199 or another promotion or coupon.",
+        "Final scope and price are confirmed after the fabric, condition, dimensions, piece count and accessibility are reviewed before work begins."
+      ])
+    })
   }),
   /*
    * The move-in / move-out tiers. Each tier stores its published price and the
