@@ -2,9 +2,9 @@
   "use strict";
 
   /*
-   * Internal lead routing only. Every request is accepted.
-   * The zone label helps the office distinguish nearby jobs from leads that
-   * may need travel pricing, a partner, or a referral.
+   * Internal lead routing only. This city/ZIP label is not a booking decision:
+   * the checkout server verifies the full service address against the 45-mile
+   * radius before creating an order or deposit link.
    */
   var CORE_CITIES = [
     "stone mountain",

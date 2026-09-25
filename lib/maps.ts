@@ -20,6 +20,8 @@
 //    search is biased to the service area, so an ordinary address typed the
 //    ordinary way is found.
 
+import { serviceCenterFrom } from "./service-radius.js";
+
 function env(name: string): string {
   return (process.env[name] || "").trim();
 }
@@ -39,25 +41,10 @@ export function browserKey(): string {
 // Where the service area sits, used to bias a lookup so "123 main st" typed
 // without a city finds the one the crew actually drives to. Atlanta by default;
 // a site working somewhere else sets MAPS_SERVICE_CENTER to "lat,lng".
-const DEFAULT_CENTER = { latitude: 33.749, longitude: -84.388 };
 const SERVICE_RADIUS_METERS = 80000;
 
 export function serviceCenter(): { latitude: number; longitude: number } {
-  const raw = env("MAPS_SERVICE_CENTER");
-  const parts = raw.split(",");
-  if (parts.length === 2) {
-    const latitude = Number(parts[0]);
-    const longitude = Number(parts[1]);
-    if (
-      Number.isFinite(latitude) &&
-      Number.isFinite(longitude) &&
-      Math.abs(latitude) <= 90 &&
-      Math.abs(longitude) <= 180
-    ) {
-      return { latitude, longitude };
-    }
-  }
-  return DEFAULT_CENTER;
+  return serviceCenterFrom(env("MAPS_SERVICE_CENTER"));
 }
 
 // What the manager app is told about mapping. The browser key travels — it has

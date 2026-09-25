@@ -1176,6 +1176,14 @@
                         <input type="tel" id="pay-phone" required placeholder="(470) 485-3123">
                     </div>
                     <div class="form-group">
+                        <label for="pay-address">Service street address</label>
+                        <input type="text" id="pay-address" required autocomplete="street-address" placeholder="Street address where the work happens">
+                    </div>
+                    <div class="form-group">
+                        <label for="pay-zip">Service ZIP code</label>
+                        <input type="text" id="pay-zip" required inputmode="numeric" autocomplete="postal-code" pattern="[0-9]{5}(-[0-9]{4})?" placeholder="ZIP code">
+                    </div>
+                    <div class="form-group">
                         <label for="pay-city">Service City</label>
                         <select id="pay-city" required>
                             <option value="Atlanta">Atlanta</option>
@@ -1573,7 +1581,11 @@
                     }),
                     customerName: document.getElementById('pay-name').value,
                     customerEmail: document.getElementById('pay-email').value,
-                    customerPhone: document.getElementById('pay-phone').value
+                    customerPhone: document.getElementById('pay-phone').value,
+                    address: document.getElementById('pay-address').value,
+                    city: document.getElementById('pay-city').value,
+                    state: 'GA',
+                    zip: document.getElementById('pay-zip').value
                 })
             })
             .then(function(res) { return res.json(); })

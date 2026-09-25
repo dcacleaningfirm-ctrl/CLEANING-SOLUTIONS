@@ -5,6 +5,7 @@ import { customers, jobEvents, jobs, leadEvents, leads } from "../../db/schema.j
 import { calculateCheckout } from "../../lib/checkout-pricing.js";
 import { ingestLead } from "../../lib/lead-intake.js";
 import { ensureVoicePaymentLink, voicePaymentUrl } from "../../lib/voice-payment.js";
+import { checkServiceAddress } from "../../lib/service-area-check.js";
 
 function clean(value: unknown, max = 240): string {
   return String(value || "").trim().slice(0, max);
@@ -33,9 +34,11 @@ export default async (req: Request, _context: Context) => {
   if (!bookingRef || !/^[A-Za-z0-9_-]{16,100}$/.test(bookingRef)) {
     return Response.json({ error: "Booking reference is invalid" }, { status: 400 });
   }
-  if (!customerName || !phone || !email || !zip) {
-    return Response.json({ error: "Name, phone, email and ZIP code are required." }, { status: 400 });
+  if (!customerName || !phone || !email) {
+    return Response.json({ error: "Name, phone and email are required." }, { status: 400 });
   }
+  const serviceAreaError = await checkServiceAddress({ address, city, state, zip });
+  if (serviceAreaError) return Response.json({ error: serviceAreaError.error }, { status: serviceAreaError.status });
 
   const providedQuantities = body.quantities && typeof body.quantities === "object"
     ? body.quantities as Record<string, unknown>

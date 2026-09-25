@@ -1,4 +1,5 @@
 import type { Config, Context } from "@netlify/functions";
+import { checkServiceAddress } from "../../lib/service-area-check.js";
 
 export default async (req: Request, context: Context) => {
   if (req.method === "OPTIONS") {
@@ -48,6 +49,10 @@ export default async (req: Request, context: Context) => {
     customerName: string;
     customerEmail?: string;
     customerPhone?: string;
+    address?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
   };
 
   try {
@@ -63,6 +68,14 @@ export default async (req: Request, context: Context) => {
       { error: "Missing required fields: token, customerName" },
       { status: 400 }
     );
+  }
+
+  const serviceAreaError = await checkServiceAddress({
+    address: String(body.address || ""), city: String(body.city || ""),
+    state: String(body.state || ""), zip: String(body.zip || "")
+  });
+  if (serviceAreaError) {
+    return Response.json({ error: serviceAreaError.error }, { status: serviceAreaError.status });
   }
 
   // Normalize the order into a list of line items, accepting either the new

@@ -1,11 +1,18 @@
 import type { Context, Config } from "@netlify/edge-functions";
+import { serviceCenterFrom, withinServiceRadius } from "../../lib/service-radius.js";
 
 export default async (req: Request, context: Context) => {
+  if (req.method !== "GET" && req.method !== "HEAD") return;
   const countryCode = context.geo?.country?.code;
-
-  if (countryCode === "US") {
-    return;
-  }
+  const latitude = Number(context.geo?.latitude);
+  const longitude = Number(context.geo?.longitude);
+  const hasCoordinates = context.geo?.latitude != null && context.geo?.longitude != null &&
+    Number.isFinite(latitude) && Number.isFinite(longitude);
+  // Unavailable IP geolocation must not prevent legitimate local customers from
+  // reading the site. Their entered service address is checked before any order.
+  if (countryCode === "US" && (!hasCoordinates || withinServiceRadius(
+    { latitude, longitude }, serviceCenterFrom(Netlify.env.get("MAPS_SERVICE_CENTER"))
+  ))) return;
 
   return new Response(blockedPage(), {
     status: 403,
@@ -19,7 +26,7 @@ function blockedPage(): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Service Unavailable in Your Region</title>
+  <title>Outside DCA's Service Area</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -60,14 +67,13 @@ function blockedPage(): string {
 <body>
   <div class="container">
     <div class="icon">&#x1F30E;</div>
-    <h1>This Service Is Only Available in the United States</h1>
+    <h1>Our Service Area Is Within 45 Miles of Atlanta</h1>
     <p>
-      Deluxe Carpet &amp; Airduct Cleaning Solutions is a local business
-      proudly serving the <span class="highlight">Atlanta, Georgia</span> metro area.
+      DCA Cleaning Solutions serves addresses within <span class="highlight">45 miles of Atlanta, Georgia</span>.
     </p>
     <p>
-      Our services are currently only available to customers in the
-      <span class="highlight">United States</span>.
+      Your internet location appears outside our service area. If the service address is nearby,
+      <a href="/contact" style="color:#F59E0B">contact our office</a> and we can check it.
     </p>
   </div>
 </body>
@@ -97,6 +103,13 @@ export const config: Config = {
     "/service-terms.html",
     // Let those public pages load the shared DCA branding and behavior.
     "/assets/*",
+    "/api/*",
+    "/manager/*",
+    "/contact",
+    "/contact.html",
+    // Customers may open a receipt's review link while traveling.
+    "/reviews",
+    "/reviews.html",
     "/logo.svg",
     "/.netlify/*",
     "/styles.css",

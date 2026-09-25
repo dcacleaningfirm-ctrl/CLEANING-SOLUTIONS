@@ -199,14 +199,18 @@
           window.location.assign(data.paymentUrl);
         })
         .catch(function (error) {
-          if (window.console && window.console.error) window.console.error("deposit funnel fallback", error);
           if (button) {
             button.disabled = false;
             button.textContent = original;
           }
-          // Native submit bypasses this listener and the existing AJAX listener,
-          // preserving the original verified Netlify lead flow as the fallback.
-          HTMLFormElement.prototype.submit.call(form);
+          // A failed service-area check must not silently become an accepted
+          // order through the old Netlify form submission path.
+          var message = form.querySelector("[data-quote-status]");
+          if (message) {
+            message.textContent = (error && error.message ? error.message : "Booking is unavailable") +
+              " Please call DCA at (470) 485-3123 if you think your address is within our service area.";
+            message.hidden = false;
+          }
         });
     }, true);
   }
