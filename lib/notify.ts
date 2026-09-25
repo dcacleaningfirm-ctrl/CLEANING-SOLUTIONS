@@ -435,6 +435,12 @@ export function paymentReceipt(
   appointment: AppointmentSummary,
   payment: { amountCents: number; method: string; reference?: string | null; balanceCents: number }
 ) {
+  // Use the business-owned review destination when configured. Never invent a
+  // Google review URL: an incorrect link can send a customer to another firm.
+  const configuredReviewUrl = env("CUSTOMER_REVIEW_URL");
+  const reviewUrl = /^https:\/\/[^\s]+$/i.test(configuredReviewUrl)
+    ? configuredReviewUrl
+    : `${BUSINESS.site}/reviews`;
   const rows: [string, string][] = [
     ["Amount paid", money(payment.amountCents)],
     ["Payment method", methodLabel(payment.method)]
@@ -454,14 +460,16 @@ export function paymentReceipt(
     ""
   ];
   for (const [label, value] of rows) lines.push(`${label}: ${value}`);
-  lines.push("", `Questions about this receipt? Call ${BUSINESS.phone}.`, "", BUSINESS.name);
+  lines.push("", `Questions about this receipt? Call ${BUSINESS.phone}.`);
+  lines.push("", `Share your experience: ${reviewUrl}`);
+  lines.push("", BUSINESS.name);
 
   const sms =
     `${BUSINESS.name}: received ${money(payment.amountCents)} by ${methodLabel(
       payment.method
     ).toLowerCase()} for job #${appointment.jobId}.` +
     (payment.balanceCents > 0 ? ` Balance remaining ${money(payment.balanceCents)}.` : " Paid in full — thank you!") +
-    ` Questions? ${BUSINESS.phone}.`;
+    ` Questions? ${BUSINESS.phone}. Review: ${reviewUrl}`;
 
   return {
     subject: `Receipt for your ${money(payment.amountCents)} payment — ${BUSINESS.name}`,
@@ -475,7 +483,8 @@ export function paymentReceipt(
           : "This job is now paid in full."
       ],
       rows
-    ),
+    ).replace("</body>",
+      `<p style="max-width:560px;margin:12px auto;font-size:14px">Share your experience: <a href="${escapeHtml(reviewUrl)}">Leave a review</a></p></body>`),
     sms
   };
 }
