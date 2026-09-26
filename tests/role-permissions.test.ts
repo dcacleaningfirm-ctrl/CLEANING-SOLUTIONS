@@ -240,6 +240,7 @@ test("each role is only offered the sections it may open", () => {
     "jobs",
     "maps",
     "customers",
+    "commercial",
     "grow",
     "charges",
     "crew"
@@ -251,6 +252,7 @@ test("each role is only offered the sections it may open", () => {
     "jobs",
     "maps",
     "customers",
+    "commercial",
     "grow"
   ]);
   assert.deepEqual(navigationFor("admin"), ["dashboard", "book", "jobs", "maps", "charges", "crew"]);

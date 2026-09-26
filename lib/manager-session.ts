@@ -259,6 +259,7 @@ export const NAV_SECTIONS: { view: string; label: string; permission: Permission
   { view: "jobs", label: "Jobs", permission: "jobs" },
   { view: "maps", label: "Map & route", permission: "jobs" },
   { view: "customers", label: "Customers", permission: "customers" },
+  { view: "commercial", label: "Commercial", permission: "customers" },
   { view: "grow", label: "Grow", permission: "marketing" },
   { view: "charges", label: "Custom charge", permission: "charges" },
   { view: "crew", label: "Crew", permission: "crew" }

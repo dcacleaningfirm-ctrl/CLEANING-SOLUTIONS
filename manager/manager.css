@@ -1332,3 +1332,16 @@ tbody tr.clickable:hover { background: var(--surface-2); }
   .route-stop, .map-stop { flex-wrap: wrap; }
   .route-stop-actions, .map-stop-actions { width: 100%; }
 }
+/* Commercial account and invoice workspace */
+.commercial-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; margin: 14px 0; }
+.commercial-form label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.commercial-form input, .commercial-form select, .commercial-form textarea, .commercial-photo input { width: 100%; padding: 10px; border: 1px solid #59616a; border-radius: 6px; background: #161a20; color: #fff; font: inherit; }
+.commercial-form input[type="checkbox"], .commercial-photo input[type="checkbox"] { width: auto; }
+.commercial-form button { align-self: end; }
+.commercial-list { display: grid; gap: 8px; }
+.commercial-order { display: flex; flex-direction: column; text-align: left; align-items: flex-start; white-space: normal; gap: 5px; }
+.commercial-order span { font-size: 14px; }
+.commercial-photo { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; border-top: 1px solid #4b5057; padding: 12px 0; }
+.commercial-photo img { width: 116px; height: 90px; object-fit: cover; }
+.commercial-photo input:not([type="checkbox"]) { max-width: 240px; }
+#commercial-notice { min-height: 22px; color: #e8c76f; }
