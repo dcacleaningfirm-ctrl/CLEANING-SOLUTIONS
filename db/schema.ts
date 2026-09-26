@@ -408,18 +408,20 @@ export const vendorOrders = pgTable("vendor_orders", {
 
 export const commercialPhotos = pgTable("commercial_photos", {
   id: serial().primaryKey(),
-  orderId: integer("order_id").notNull().references(() => vendorOrders.id),
+  orderId: integer("order_id").references(() => vendorOrders.id),
+  jobId: integer("job_id").references(() => jobs.id),
   storageKey: text("storage_key").notNull(),
   sendableKey: text("sendable_key").notNull(),
   contentType: text("content_type").notNull(),
   caption: text().notNull().default(""),
   includeWithInvoice: boolean("include_with_invoice").notNull().default(false),
   createdAt: timestamp("created_at").notNull().defaultNow()
-}, (t) => [index("commercial_photos_order_idx").on(t.orderId)]);
+}, (t) => [index("commercial_photos_order_idx").on(t.orderId), index("commercial_photos_job_idx").on(t.jobId)]);
 
 export const commercialInvoices = pgTable("commercial_invoices", {
   id: serial().primaryKey(),
-  orderId: integer("order_id").notNull().references(() => vendorOrders.id),
+  orderId: integer("order_id").references(() => vendorOrders.id),
+  jobId: integer("job_id").references(() => jobs.id),
   documentKey: text("document_key").notNull(),
   snapshot: jsonb().notNull(),
   status: text().notNull().default("draft"),
@@ -430,7 +432,7 @@ export const commercialInvoices = pgTable("commercial_invoices", {
   error: text(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   sentAt: timestamp("sent_at")
-}, (t) => [index("commercial_invoices_order_idx").on(t.orderId), uniqueIndex("commercial_invoices_access_hash_idx").on(t.accessHash)]);
+}, (t) => [index("commercial_invoices_order_idx").on(t.orderId), index("commercial_invoices_job_idx").on(t.jobId), uniqueIndex("commercial_invoices_access_hash_idx").on(t.accessHash)]);
 
 // One row per line item on a job: the booked service plus any add-ons.
 export const jobItems = pgTable(
