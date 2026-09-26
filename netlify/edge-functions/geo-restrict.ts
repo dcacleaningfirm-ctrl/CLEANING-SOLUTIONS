@@ -67,9 +67,9 @@ function blockedPage(): string {
 <body>
   <div class="container">
     <div class="icon">&#x1F30E;</div>
-    <h1>Our Service Area Is Within 45 Miles of Atlanta</h1>
+    <h1>Our Service Area Is Within 50 Miles of Atlanta</h1>
     <p>
-      DCA Cleaning Solutions serves addresses within <span class="highlight">45 miles of Atlanta, Georgia</span>.
+      DCA Cleaning Solutions serves addresses within <span class="highlight">50 miles of Atlanta, Georgia</span>.
     </p>
     <p>
       Your internet location appears outside our service area. If the service address is nearby,

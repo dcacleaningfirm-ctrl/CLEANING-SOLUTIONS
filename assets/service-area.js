@@ -3,7 +3,7 @@
 
   /*
    * Internal lead routing only. This city/ZIP label is not a booking decision:
-   * the checkout server verifies the full service address against the 45-mile
+   * the checkout server verifies the full service address against the 50-mile
    * radius before creating an order or deposit link.
    */
   var CORE_CITIES = [
