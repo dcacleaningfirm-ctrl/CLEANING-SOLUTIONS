@@ -1,5 +1,5 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { invoiceLogoPng } from "./invoice-logo.ts";
+import { invoiceLogoJpg } from "./invoice-logo.ts";
 
 export interface InvoicePhoto { id: number; caption: string; bytes: Uint8Array; type: string }
 export interface InvoiceData {
@@ -13,25 +13,24 @@ export async function createCommercialInvoice(data: InvoiceData): Promise<Uint8A
   const pdf = await PDFDocument.create();
   const regular = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
-  const logo = await pdf.embedPng(invoiceLogoPng);
+  const logo = await pdf.embedJpg(invoiceLogoJpg);
   const ink = rgb(0.08, 0.1, 0.14);
   const gold = rgb(0.68, 0.48, 0.11);
   const print = (page: ReturnType<typeof pdf.addPage>, value: string, x: number, y: number, size = 11, heavy = false) =>
     page.drawText(value.replace(/[^\x20-\x7e]/g, " ").slice(0, 105), { x, y, size, font: heavy ? bold : regular, color: ink });
   const dollars = (cents: number) => `$${(cents / 100).toFixed(2)}`;
   let page = pdf.addPage([612, 792]);
-  page.drawRectangle({ x: 0, y: 737, width: 612, height: 55, color: ink });
-  page.drawRectangle({ x: 30, y: 741, width: 210, height: 47, color: rgb(1, 1, 1) });
-  page.drawImage(logo, { x: 35, y: 742, width: 180, height: 45 });
-  page.drawText("INVOICE", { x: 458, y: 758, size: 18, font: bold, color: rgb(1, 1, 1) });
-  print(page, `INVOICE ${data.number}`, 38, 706, 17, true);
-  print(page, `Date: ${data.date}`, 38, 683);
-  print(page, `Bill to: ${data.company}`, 38, 650, 13, true);
-  if (data.representative) print(page, `Representative: ${data.representative}`, 38, 630);
-  print(page, `Service address: ${data.address}`, 38, 610);
-  print(page, `Work order / PO: ${data.reference}`, 38, 590);
-  print(page, `Work: ${data.details}`, 38, 570);
-  let y = 535;
+  page.drawRectangle({ x: 0, y: 687, width: 612, height: 105, color: rgb(0, 0, 0) });
+  page.drawImage(logo, { x: 25, y: 695, width: 150, height: 100 });
+  page.drawText("INVOICE", { x: 458, y: 735, size: 18, font: bold, color: rgb(1, 1, 1) });
+  print(page, `INVOICE ${data.number}`, 38, 657, 17, true);
+  print(page, `Date: ${data.date}`, 38, 634);
+  print(page, `Bill to: ${data.company}`, 38, 601, 13, true);
+  if (data.representative) print(page, `Representative: ${data.representative}`, 38, 581);
+  print(page, `Service address: ${data.address}`, 38, 561);
+  print(page, `Work order / PO: ${data.reference}`, 38, 541);
+  print(page, `Work: ${data.details}`, 38, 521);
+  let y = 486;
   print(page, "SERVICES", 38, y, 12, true);
   y -= 24;
   for (const line of data.lines) {
@@ -50,10 +49,11 @@ export async function createCommercialInvoice(data: InvoiceData): Promise<Uint8A
     for (const photo of data.photos) {
       const image = photo.type === "image/png" ? await pdf.embedPng(photo.bytes) : await pdf.embedJpg(photo.bytes);
       const p = pdf.addPage([612, 792]);
-      p.drawImage(logo, { x: 38, y: 725, width: 180, height: 45 });
-      print(p, `INVOICE ${data.number} - JOB PHOTO`, 250, 746, 11, true);
-      const scale = Math.min(536 / image.width, 640 / image.height, 1);
-      p.drawImage(image, { x: 38 + (536 - image.width * scale) / 2, y: 80 + (640 - image.height * scale) / 2,
+      p.drawRectangle({ x: 0, y: 710, width: 612, height: 82, color: rgb(0, 0, 0) });
+      p.drawImage(logo, { x: 30, y: 715, width: 105, height: 70 });
+      p.drawText(`INVOICE ${data.number} - JOB PHOTO`, { x: 250, y: 746, size: 11, font: bold, color: rgb(1, 1, 1) });
+      const scale = Math.min(536 / image.width, 615 / image.height, 1);
+      p.drawImage(image, { x: 38 + (536 - image.width * scale) / 2, y: 75 + (615 - image.height * scale) / 2,
         width: image.width * scale, height: image.height * scale });
       print(p, photo.caption || `Photo ${photo.id}`, 38, 45);
     }
