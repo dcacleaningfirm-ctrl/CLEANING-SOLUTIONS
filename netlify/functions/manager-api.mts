@@ -1048,7 +1048,7 @@ export default async (req: Request, context: Context) => {
     // Only the owner and Management Specialist can read or change them.
     if (path === "commercial" || path.startsWith("commercial/")) {
       if (!allows("customers")) return denied("commercial accounts and invoices");
-      return handleCommercial(req, path.replace(/^commercial\/?/, ""), { id: account.id, name: account.name });
+      return handleCommercial(req, path.replace(/^commercial\/?/, ""), { id: account.id, name: account.name, role: account.role });
     }
 
     // --- Dashboard -------------------------------------------------------

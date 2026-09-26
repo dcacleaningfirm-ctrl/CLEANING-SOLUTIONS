@@ -21,9 +21,10 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
   }
   function handleError(error) { notify(error.message || "Something went wrong"); }
-  async function load() {
+  async function load(showTest) {
     try {
       root.innerHTML = '<h1>Commercial accounts & vendor orders</h1><p id="commercial-notice" role="status"></p>' +
+        (showTest ? '<div class="card"><h2>Send a test invoice to my phone</h2><p>This sends a $0.00 sample PDF link. It does not book a job or change vendor totals.</p><form id="co-test-form" class="commercial-form"><label>My mobile phone<input id="co-test-phone" type="tel" required maxlength="40" autocomplete="tel"></label><button class="btn btn-primary">Text test invoice</button></form></div>' : '') +
         '<div class="card"><h2>Company account</h2><form id="commercial-account-form" class="commercial-form">' +
         '<label>Company name<input id="co-company" required maxlength="120"></label><label>Representative name<input id="co-rep" required maxlength="120"></label>' +
         '<label>Representative email<input id="co-email" type="email" maxlength="160"></label><label>Representative phone<input id="co-phone" type="tel" maxlength="40"></label>' +
@@ -37,6 +38,13 @@
         '<label>Search PO / work order<input id="co-search" type="search"></label></div><div id="commercial-orders"></div></div>' +
         '<div id="commercial-detail"></div>';
       get("commercial-account-form").addEventListener("submit", addAccount);
+      if (showTest) get("co-test-form").addEventListener("submit", async function (event) {
+        event.preventDefault();
+        var button = get("co-test-form").querySelector("button"); button.disabled = true;
+        try { await request("test-invoice", "POST", { phone: val("co-test-phone") }); notify("Test invoice text sent. Open its link on your phone within one hour."); }
+        catch (e) { handleError(e); }
+        finally { button.disabled = false; }
+      });
       get("co-load-account").addEventListener("click", function () {
         var a = accounts.find(function (item) { return item.id === Number(val("co-edit-account")); });
         if (!a) return;

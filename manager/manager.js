@@ -581,7 +581,7 @@
     if (name === "jobs") renderJobs();
     if (name === "maps") renderMaps();
     if (name === "customers") renderCustomers();
-    if (name === "commercial" && window.DCACommercial) window.DCACommercial.render();
+    if (name === "commercial" && window.DCACommercial) window.DCACommercial.render(state.isOwner);
     if (name === "grow") renderGrow();
     if (name === "charges") renderCharges();
     if (name === "crew") renderCrew();

@@ -14,13 +14,35 @@ const validDate = (raw: unknown) => raw ? new Date(String(raw)) : null;
 const storeKey = (kind: string) => `${kind}/${crypto.randomUUID()}`;
 const cleanStatus = (s: unknown) => ["received", "scheduled", "in_progress", "completed", "invoiced", "cancelled"].includes(String(s)) ? String(s) : null;
 
-export async function handleCommercial(req: Request, path: string, actor: { id: number; name: string }) {
+export async function handleCommercial(req: Request, path: string, actor: { id: number; name: string; role: string }) {
   const method = req.method.toUpperCase();
   const url = new URL(req.url);
   const body = method === "POST" || method === "PATCH" ? await req.json().catch(() => ({})) as Record<string, unknown> : {};
   const audit = async (jobId: number | null, message: string) => {
     if (jobId) await db.insert(jobEvents).values({ jobId, employeeId: actor.id, kind: "invoice", message });
   };
+
+  if (path === "test-invoice" && method === "POST") {
+    if (actor.role !== "owner") return json({ error: "Only the owner can send a test invoice" }, 403);
+    const recipient = field(body, "phone", 40);
+    if (!recipient) return json({ error: "Enter a mobile phone number" }, 400);
+    const token = crypto.randomBytes(32).toString("hex");
+    const hash = crypto.createHash("sha256").update(token).digest("hex");
+    const pdf = await createCommercialInvoice({
+      number: `TEST-${Date.now()}`,
+      company: "DCA Cleaning Solutions — TEST", representative: actor.name,
+      address: "No service visit", reference: "TEST ONLY", details: "Invoice delivery test — no charge",
+      date: new Date().toISOString().slice(0, 10),
+      lines: [{ label: "Test invoice — no service provided", quantity: 1, amountCents: 0 }],
+      totalCents: 0, paidCents: 0, photos: []
+    });
+    const expiresAt = new Date(Date.now() + 60 * 60_000).toISOString();
+    await files().set(`tests/${hash}`, Buffer.from(pdf), { metadata: { expiresAt, contentType: "application/pdf" } });
+    const link = `${url.origin}/api/invoice-document?token=${token}`;
+    const result = await sendSms({ to: recipient, body: `DCA Cleaning Solutions TEST invoice — $0.00, no service booked or charge due. View the sample PDF: ${link} (expires in 1 hour).` });
+    if (!result.ok) await files().delete(`tests/${hash}`);
+    return json({ ok: result.ok, error: result.error, providerRef: result.providerRef, recipient }, result.ok ? 201 : 502);
+  }
 
   if (path === "accounts" && method === "GET") {
     const rows = await db.select().from(customers).where(eq(customers.customerType, "business")).orderBy(customers.name);
