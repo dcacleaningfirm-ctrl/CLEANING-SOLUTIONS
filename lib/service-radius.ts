@@ -1,7 +1,7 @@
 // Straight-line distance from the business's service center. Booking decisions
 // use the geocoded service address; an IP location is only useful for deciding
 // which visitors see the public marketing pages.
-export const SERVICE_RADIUS_MILES = 45;
+export const SERVICE_RADIUS_MILES = 50;
 export const DEFAULT_SERVICE_CENTER = { latitude: 33.749, longitude: -84.388 }; // Atlanta
 
 export function serviceCenterFrom(value: string | undefined | null) {
