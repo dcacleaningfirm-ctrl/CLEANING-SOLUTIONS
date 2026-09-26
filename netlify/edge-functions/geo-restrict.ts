@@ -1,5 +1,5 @@
 import type { Context, Config } from "@netlify/edge-functions";
-import { serviceCenterFrom, withinServiceRadius } from "../../lib/service-radius.js";
+import { serviceCenterFrom, withinServiceRadius } from "../../lib/service-radius.ts";
 
 export default async (req: Request, context: Context) => {
   if (req.method !== "GET" && req.method !== "HEAD") return;
