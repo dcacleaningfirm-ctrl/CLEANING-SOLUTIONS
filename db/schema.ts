@@ -34,6 +34,9 @@ export const customers = pgTable(
     placeId: text("place_id"),
     formattedAddress: text("formatted_address"),
     customerType: text("customer_type").notNull().default("residential"),
+    representativeName: text("representative_name"),
+    representativeEmail: text("representative_email"),
+    representativePhone: text("representative_phone"),
     // A second number to try when the main one does not answer. Common on
     // imported lists, where a household gives both a mobile and a landline.
     altPhone: text("alt_phone"),
@@ -386,6 +389,48 @@ export const jobs = pgTable(
     index("jobs_scheduled_idx").on(table.scheduledFor)
   ]
 );
+
+export const vendorOrders = pgTable("vendor_orders", {
+  id: serial().primaryKey(),
+  customerId: integer("customer_id").notNull().references(() => customers.id),
+  jobId: integer("job_id").references(() => jobs.id),
+  reference: text().notNull(),
+  serviceAddress: text("service_address").notNull(),
+  details: text().notNull(),
+  status: text().notNull().default("received"),
+  receivedAt: timestamp("received_at").notNull().defaultNow(),
+  scheduledAt: timestamp("scheduled_at"),
+  completedAt: timestamp("completed_at"),
+  quotedCents: integer("quoted_cents").notNull().default(0),
+  invoicedCents: integer("invoiced_cents").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow()
+}, (t) => [index("vendor_orders_customer_idx").on(t.customerId), index("vendor_orders_job_idx").on(t.jobId)]);
+
+export const commercialPhotos = pgTable("commercial_photos", {
+  id: serial().primaryKey(),
+  orderId: integer("order_id").notNull().references(() => vendorOrders.id),
+  storageKey: text("storage_key").notNull(),
+  sendableKey: text("sendable_key").notNull(),
+  contentType: text("content_type").notNull(),
+  caption: text().notNull().default(""),
+  includeWithInvoice: boolean("include_with_invoice").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow()
+}, (t) => [index("commercial_photos_order_idx").on(t.orderId)]);
+
+export const commercialInvoices = pgTable("commercial_invoices", {
+  id: serial().primaryKey(),
+  orderId: integer("order_id").notNull().references(() => vendorOrders.id),
+  documentKey: text("document_key").notNull(),
+  snapshot: jsonb().notNull(),
+  status: text().notNull().default("draft"),
+  recipient: text().notNull(),
+  accessHash: text("access_hash").notNull(),
+  accessExpiresAt: timestamp("access_expires_at").notNull(),
+  providerRef: text("provider_ref"),
+  error: text(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  sentAt: timestamp("sent_at")
+}, (t) => [index("commercial_invoices_order_idx").on(t.orderId), uniqueIndex("commercial_invoices_access_hash_idx").on(t.accessHash)]);
 
 // One row per line item on a job: the booked service plus any add-ons.
 export const jobItems = pgTable(

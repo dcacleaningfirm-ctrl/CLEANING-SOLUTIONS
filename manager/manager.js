@@ -119,6 +119,7 @@
     { view: "jobs", permission: "jobs" },
     { view: "maps", permission: "jobs" },
     { view: "customers", permission: "customers" },
+    { view: "commercial", permission: "customers" },
     { view: "grow", permission: "marketing" },
     { view: "charges", permission: "charges" },
     { view: "crew", permission: "crew" }
@@ -580,6 +581,7 @@
     if (name === "jobs") renderJobs();
     if (name === "maps") renderMaps();
     if (name === "customers") renderCustomers();
+    if (name === "commercial" && window.DCACommercial) window.DCACommercial.render();
     if (name === "grow") renderGrow();
     if (name === "charges") renderCharges();
     if (name === "crew") renderCrew();
@@ -636,6 +638,7 @@
           : "") +
         stat("Active crew", s.activeCrew) +
         "</div>" +
+        (hasPerm("customers") ? '<div class="card"><strong>Commercial invoices</strong> <button class="btn btn-primary btn-sm" data-goto="commercial">Open vendor orders and text an invoice</button></div>' : "") +
         (leadStats
           ? '<div class="card"><div class="row-between"><h3 class="section-title">New requests</h3>' +
             '<button class="btn btn-ghost btn-sm" data-goto="leads">See all requests</button></div>' +

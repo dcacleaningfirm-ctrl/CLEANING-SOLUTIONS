@@ -96,6 +96,7 @@ export async function sendEmail(options: {
   subject: string;
   text: string;
   html: string;
+  attachments?: { filename: string; content: string; contentType: string }[];
 }): Promise<SendResult> {
   const provider = emailProvider();
   const from = fromEmail();
@@ -124,7 +125,8 @@ export async function sendEmail(options: {
           reply_to: BUSINESS.email,
           subject: options.subject,
           text: options.text,
-          html: options.html
+          html: options.html,
+          attachments: options.attachments?.map(a => ({ filename: a.filename, content: a.content, content_type: a.contentType }))
         })
       });
       const data = (await res.json().catch(() => ({}))) as {
@@ -153,7 +155,8 @@ export async function sendEmail(options: {
           content: [
             { type: "text/plain", value: options.text },
             { type: "text/html", value: options.html }
-          ]
+          ],
+          attachments: options.attachments?.map(a => ({ filename: a.filename, content: a.content, type: a.contentType, disposition: "attachment" }))
         })
       });
       if (!res.ok) {
@@ -184,7 +187,8 @@ export async function sendEmail(options: {
         Subject: options.subject,
         TextBody: options.text,
         HtmlBody: options.html,
-        MessageStream: env("POSTMARK_MESSAGE_STREAM") || "outbound"
+        MessageStream: env("POSTMARK_MESSAGE_STREAM") || "outbound",
+        Attachments: options.attachments?.map(a => ({ Name: a.filename, Content: a.content, ContentType: a.contentType }))
       })
     });
     const data = (await res.json().catch(() => ({}))) as {

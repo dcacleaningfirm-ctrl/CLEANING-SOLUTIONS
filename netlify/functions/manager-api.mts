@@ -113,6 +113,7 @@ import {
   updateServiceNote
 } from "../../lib/service-notes.js";
 import { customerMarketingProfile } from "../../lib/customer-marketing.js";
+import { handleCommercial } from "../../lib/commercial-routes.js";
 import { PROMOTIONS, promotionByCode } from "../../lib/promotions.js";
 
 // Read + write API for the DCA Pro Manager app. Login lives in a separate
@@ -1041,6 +1042,13 @@ export default async (req: Request, context: Context) => {
         },
         { status: 403 }
       );
+    }
+
+    // Company records and their invoice documents contain the customer base.
+    // Only the owner and Management Specialist can read or change them.
+    if (path === "commercial" || path.startsWith("commercial/")) {
+      if (!allows("customers")) return denied("commercial accounts and invoices");
+      return handleCommercial(req, path.replace(/^commercial\/?/, ""), { id: account.id, name: account.name });
     }
 
     // --- Dashboard -------------------------------------------------------
