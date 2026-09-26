@@ -1,4 +1,5 @@
 import type { Config, Context } from "@netlify/functions";
+import { handleJobInvoice } from "../../lib/job-invoice-routes.js";
 import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "../../db/index.js";
@@ -1049,6 +1050,10 @@ export default async (req: Request, context: Context) => {
     if (path === "commercial" || path.startsWith("commercial/")) {
       if (!allows("customers")) return denied("commercial accounts and invoices");
       return handleCommercial(req, path.replace(/^commercial\/?/, ""), { id: account.id, name: account.name, role: account.role });
+    }
+    if (/^jobs\/\d+\/invoice(?:\/|$)/.test(path)) {
+      if (!allows("customers")) return denied("customer invoices");
+      return handleJobInvoice(req, path, { id: account.id, name: account.name });
     }
 
     // --- Dashboard -------------------------------------------------------

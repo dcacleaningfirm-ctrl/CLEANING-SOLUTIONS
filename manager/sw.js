@@ -7,11 +7,13 @@
  *
  * Bump VERSION to push a new shell to every installed phone.
  */
-var VERSION = "dca-manager-v22";
+var VERSION = "dca-manager-v23";
 var SHELL = [
   "/manager/",
   "/manager/manager.css",
   "/manager/manager.js",
+  "/manager/invoices.js",
+  "/manager/commercial.js",
   "/manager/maps.js",
   "/manager/owner-cleanup.js",
   "/manager/funnel-health.js",
@@ -38,6 +40,8 @@ var SHELL = [
 // running a build that was replaced days ago.
 var APP_CODE = [
   "/manager/manager.js",
+  "/manager/invoices.js",
+  "/manager/commercial.js",
   "/manager/maps.js",
   "/manager/owner-cleanup.js",
   "/manager/funnel-health.js",

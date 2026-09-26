@@ -240,6 +240,7 @@ test("each role is only offered the sections it may open", () => {
     "jobs",
     "maps",
     "customers",
+    "invoices",
     "commercial",
     "grow",
     "charges",
@@ -252,6 +253,7 @@ test("each role is only offered the sections it may open", () => {
     "jobs",
     "maps",
     "customers",
+    "invoices",
     "commercial",
     "grow"
   ]);
