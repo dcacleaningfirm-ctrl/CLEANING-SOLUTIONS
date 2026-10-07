@@ -7382,7 +7382,9 @@
           "</p>"
         : '<p class="hint warn">Card charging needs ' + esc((card.missing || []).join(", ") || "Clover credentials") +
           " on the site. Take the payment another way, or add the credentials and redeploy.</p>"
-      : '<p class="hint">Recorded as money already received — nothing is charged to a card.</p>';
+      : p.method === "ach"
+        ? '<p class="hint">Record an ACH payment only after the deposit arrives in DCA’s bank account. Enter the bank confirmation or invoice number as the reference. This records the payment; it does not initiate a bank transfer.</p>'
+        : '<p class="hint">Recorded as money already received — nothing is charged to a card.</p>';
 
     return (
       '<div class="pay-panel">' +

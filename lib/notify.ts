@@ -580,7 +580,7 @@ export const PAYMENT_METHODS = [
   { value: "card_terminal", label: "Card on Clover terminal", collects: "manual" },
   { value: "cash", label: "Cash", collects: "manual" },
   { value: "check", label: "Check", collects: "manual" },
-  { value: "ach", label: "Bank transfer / ACH", collects: "manual" },
+  { value: "ach", label: "ACH bank transfer", collects: "manual" },
   { value: "zelle", label: "Zelle", collects: "manual" },
   { value: "cashapp", label: "Cash App", collects: "manual" },
   { value: "venmo", label: "Venmo", collects: "manual" },
