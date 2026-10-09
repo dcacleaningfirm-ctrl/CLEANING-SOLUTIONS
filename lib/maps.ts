@@ -463,6 +463,11 @@ export async function geocodeAddress(
     if (status === "ZERO_RESULTS") continue;
     if (status !== "OK") {
       lastError = result.data?.error_message || "Google could not look that address up";
+      // Operator-only diagnostic. Do not log the request URL, service address
+      // or API key, and never return provider configuration details to callers.
+      const detail = String(lastError).split(serverKey()).join("[redacted]")
+        .replace(/AIza[A-Za-z0-9_-]{20,}/g, "[redacted]");
+      console.warn("DCA address verification provider refused request", { status, detail });
       continue;
     }
 
