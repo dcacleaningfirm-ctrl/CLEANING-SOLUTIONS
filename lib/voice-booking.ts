@@ -1,3 +1,4 @@
+import { checkServiceAddressText } from "./service-area-check.js";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
 import {
@@ -179,6 +180,11 @@ export async function bookVoiceAppointment(state: VoiceCallState) {
       paymentUrl: paymentLink ? voicePaymentUrl(paymentLink.token) : null
     };
   }
+
+  const serviceAreaError = await checkServiceAddressText(
+    [state.address, state.zip].filter(Boolean).join(", "), state.zip || undefined
+  );
+  if (serviceAreaError) return { ok: false as const, reason: serviceAreaError.error };
 
   const availability = await checkVoiceAvailability(state);
   if (!availability.available || !availability.at || !availability.durationMinutes) {

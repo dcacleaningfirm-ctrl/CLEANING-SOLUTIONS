@@ -143,13 +143,13 @@ const sitemapFile = path.join(root, "sitemap.xml");
 let sitemap = fs.readFileSync(sitemapFile, "utf8");
 for (const [, href] of deprecatedCities) {
   const loc = `https://www.dcacleaningsolutions.com${href}`;
-  sitemap = sitemap.replace(new RegExp(`\\s*<url>[\\s\\S]*?<loc>${escapeRegex(loc)}<\\/loc>[\\s\\S]*?<\\/url>`, "g"), "");
+  sitemap = sitemap.replace(new RegExp(`\\s*<url>(?:(?!<url>)[\\s\\S])*?<loc>${escapeRegex(loc)}<\\/loc>[\\s\\S]*?<\\/url>`, "g"), "");
 }
 const today = new Date().toISOString().slice(0, 10);
 for (const [, href] of priorityCities) {
   const loc = `https://www.dcacleaningsolutions.com${href}`;
   const boostedEntry = `  <url>\n    <loc>${loc}</loc>\n    <lastmod>${today}</lastmod>\n    <changefreq>weekly</changefreq>\n    <priority>0.9</priority>\n  </url>`;
-  const existingEntry = new RegExp(`\\s*<url>[\\s\\S]*?<loc>${escapeRegex(loc)}<\\/loc>[\\s\\S]*?<\\/url>`, "g");
+  const existingEntry = new RegExp(`\\s*<url>(?:(?!<url>)[\\s\\S])*?<loc>${escapeRegex(loc)}<\\/loc>[\\s\\S]*?<\\/url>`, "g");
   if (existingEntry.test(sitemap)) {
     existingEntry.lastIndex = 0;
     sitemap = sitemap.replace(existingEntry, `\n${boostedEntry}`);

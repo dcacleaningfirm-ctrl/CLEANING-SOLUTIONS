@@ -206,13 +206,20 @@ async function callGoogle(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
+    // The v3 Geocoding endpoint requires key in the query string. The newer
+    // Places and Routes APIs accept the header. Keep this server-side URL out
+    // of responses and logs so the private key never reaches a customer.
+    const requestUrl = new URL(url);
+    const legacyGeocoding = requestUrl.origin === "https://maps.googleapis.com" &&
+      requestUrl.pathname === "/maps/api/geocode/json";
+    if (legacyGeocoding) requestUrl.searchParams.set("key", key);
     const headers: Record<string, string> = {
-      "x-goog-api-key": key,
+      ...(!legacyGeocoding ? { "x-goog-api-key": key } : {}),
       ...(init.body ? { "content-type": "application/json" } : {})
     };
     if (init.fieldMask) headers["x-goog-fieldmask"] = init.fieldMask;
 
-    const res = await fetch(url, {
+    const res = await fetch(requestUrl, {
       method: init.method || "GET",
       headers,
       body: init.body,

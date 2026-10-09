@@ -1,3 +1,4 @@
+import { checkServiceAddressText } from "../../lib/service-area-check.js";
 import type { Config, Context } from "@netlify/functions";
 import { handleJobInvoice } from "../../lib/job-invoice-routes.js";
 import { and, asc, desc, eq, gte, ilike, inArray, lt, ne, or, sql, type SQL } from "drizzle-orm";
@@ -2986,6 +2987,24 @@ export default async (req: Request, context: Context) => {
         zip: (supplied.zip || "").trim().slice(0, 20) || null
       };
 
+      const [existingCustomer] = body.customerId
+        ? await db.select().from(customers).where(eq(customers.id, Number(body.customerId)))
+        : [];
+      if (body.customerId && !existingCustomer) {
+        return json({ error: "That customer no longer exists" }, { status: 404 });
+      }
+      // Reject outside/unverified service addresses before customer writes,
+      // Clover sync, scheduling or confirmation messages. force only overrides
+      // calendar conflicts, never the service-area policy.
+      const serviceAddress = (body.address || "").trim() || joinAddress({
+        address: contact.address || existingCustomer?.address || "",
+        city: contact.city || existingCustomer?.city || "",
+        state: contact.state || existingCustomer?.state || "",
+        zip: contact.zip || existingCustomer?.zip || ""
+      });
+      const serviceAreaError = await checkServiceAddressText(serviceAddress);
+      if (serviceAreaError) return json({ error: serviceAreaError.error }, { status: serviceAreaError.status });
+
       // The verified spot behind the address that was typed on the booking
       // screen — present only when the taker picked one of Google's suggestions.
       // Saved with the appointment so the stop can be mapped and routed later
@@ -2995,12 +3014,7 @@ export default async (req: Request, context: Context) => {
 
       let customer: typeof customers.$inferSelect | null = null;
       if (body.customerId) {
-        const [found] = await db
-          .select()
-          .from(customers)
-          .where(eq(customers.id, Number(body.customerId)));
-        if (!found) return json({ error: "That customer no longer exists" }, { status: 404 });
-        customer = found;
+        customer = existingCustomer!;
         if (customer.customerType !== customerType) {
           await db.update(customers).set({ customerType }).where(eq(customers.id, customer.id));
           customer = { ...customer, customerType };
@@ -3075,10 +3089,7 @@ export default async (req: Request, context: Context) => {
         }
       }
 
-      const address =
-        (body.address || "").trim() ||
-        [customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(", ") ||
-        null;
+      const address = serviceAddress;
 
       const [job] = await db
         .insert(jobs)
@@ -3280,6 +3291,8 @@ export default async (req: Request, context: Context) => {
       if (typeof body.address === "string") {
         const nextAddress = body.address.trim().slice(0, 300) || null;
         if (nextAddress !== (existing.address || null)) {
+          const serviceAreaError = await checkServiceAddressText(nextAddress || "");
+          if (serviceAreaError) return json({ error: serviceAreaError.error }, { status: serviceAreaError.status });
           updates.address = nextAddress;
           events.push({
             kind: "customer",
@@ -3947,6 +3960,11 @@ export default async (req: Request, context: Context) => {
         const [found] = await db.select().from(customers).where(eq(customers.id, lead.customerId));
         customer = found || null;
       }
+      const serviceAddress = (body.address || "").trim() ||
+        joinAddress({ address: lead.address || "", city: lead.city || "", state: lead.state || "", zip: lead.zip || "" }) ||
+        joinAddress(customer);
+      const serviceAreaError = await checkServiceAddressText(serviceAddress);
+      if (serviceAreaError) return json({ error: serviceAreaError.error }, { status: serviceAreaError.status });
       if (!customer) {
         const [created] = await db
           .insert(customers)
@@ -3979,11 +3997,7 @@ export default async (req: Request, context: Context) => {
         }
       }
 
-      const address =
-        (body.address || "").trim() ||
-        [lead.address, lead.city, lead.state, lead.zip].filter(Boolean).join(", ") ||
-        [customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(", ") ||
-        null;
+      const address = serviceAddress;
 
       // What the customer told us, carried onto the job so the crew reads it at
       // the door rather than in a tab nobody opens.
