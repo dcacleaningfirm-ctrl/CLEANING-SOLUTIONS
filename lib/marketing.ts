@@ -287,6 +287,8 @@ export function describeSegments(values: readonly string[]): string {
 // --- The audience filter ----------------------------------------------------
 
 export interface AudienceFilter {
+  // null preserves broad filters; an empty explicit list matches nobody.
+  phoneNumbers: string[] | null;
   // any    — anybody who can be reached on either channel
   // sms    — only accounts that may be texted
   // email  — only accounts that may be emailed
@@ -313,6 +315,7 @@ export interface AudienceFilter {
 }
 
 export const DEFAULT_AUDIENCE: AudienceFilter = {
+  phoneNumbers: null,
   channel: "any",
   service: "",
   segments: [],
@@ -363,7 +366,14 @@ export function normalizeAudience(raw: unknown): AudienceFilter {
   const days = Number(input.notBookedDays);
   const excludeCampaignId = Number(input.excludeCampaignId);
 
+  const selectedPhones = input.phoneNumbers;
+  const phoneNumbers = selectedPhones == null ? null : readList(selectedPhones, 100, (v) => {
+    const digits = v.replace(/\D/g, "");
+    return /^1?[2-9][0-9]{2}[2-9][0-9]{6}$/.test(digits) ? "+1" + digits.slice(-10) : "";
+  }, /[,;\n]+/);
+
   return {
+    phoneNumbers,
     channel: ["any", "sms", "email", "both"].includes(channel)
       ? (channel as AudienceFilter["channel"])
       : "any",
@@ -394,6 +404,7 @@ export function normalizeAudience(raw: unknown): AudienceFilter {
 // audience still means something a year after the filter was set.
 export function describeAudience(filter: AudienceFilter): string {
   const parts: string[] = [];
+  if (filter.phoneNumbers != null) parts.push(`selected contacts (${filter.phoneNumbers.length} phone numbers)`);
   if (filter.channel === "sms") parts.push("textable customers");
   else if (filter.channel === "email") parts.push("emailable customers");
   else if (filter.channel === "both") parts.push("customers reachable both ways");

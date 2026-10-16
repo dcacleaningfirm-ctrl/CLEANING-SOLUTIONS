@@ -177,6 +177,12 @@ export function customerSegmentSql(value: string): SQL | null {
 export function audienceConditions(filter: AudienceFilter): SQL | null {
   const parts: SQL[] = [];
 
+  if (filter.phoneNumbers != null) {
+    parts.push(filter.phoneNumbers.length
+      ? sql`${PHONE_E164_SQL} in (${sql.join(filter.phoneNumbers.map((phone) => sql`${phone}`), sql`, `)})`
+      : sql`false`);
+  }
+
   if (filter.channel === "sms") parts.push(SMS_ELIGIBLE_SQL);
   else if (filter.channel === "email") parts.push(EMAIL_ELIGIBLE_SQL);
   else if (filter.channel === "both") {

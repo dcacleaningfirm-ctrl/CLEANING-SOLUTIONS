@@ -4921,9 +4921,13 @@
       (editable ? "" : " disabled") + ">" + esc(c.emailBody || "") + "</textarea></label>" +
       '<p class="hint">An unsubscribe link is added to every promotional email. It cannot be turned off.</p>' +
       "</div>" +
+      (editable ? '<div class="card"><label class="field"><span>Only these phone numbers</span>' +
+        '<textarea id="gc-phones" rows="5" placeholder="One phone number per line">' +
+        esc((c.audience && c.audience.phoneNumbers || []).join("\n")) + '</textarea></label>' +
+        '<p class="hint">Optional: replaces other audience filters with these exact contacts. Consent and opt-outs still apply. Up to 100 numbers.</p></div>' : "") +
       '<div class="card"><h3>Who this goes to</h3><p class="hint">' +
       esc(c.audienceLabel || "The audience currently set on the Audience tab") + "</p>" +
-      '<p id="gc-count" class="grow-count">Counting…</p>' +
+      '<p id="gc-count" class="grow-count">Counting…</p><p id="gc-preview" class="hint"></p>' +
       (editable
         ? '<p class="hint">Saving uses whatever is set on the Audience tab right now.</p>'
         : "") +
@@ -4968,12 +4972,17 @@
       updateCount();
     }
 
+    var phonesBox = document.getElementById("gc-phones");
+    if (phonesBox) phonesBox.addEventListener("change", function () {
+      c.audience = selectedCampaignAudience(c.audience);
+      api("marketing/audience", { method: "POST", body: { audience: c.audience } }).then(function (d) {
+        renderCampaignAudienceCount(d);
+      }).catch(function () { document.getElementById("gc-count").textContent = "The audience could not be counted. Do not send."; });
+    });
     var countLine = document.getElementById("gc-count");
     api("marketing/audience", { method: "POST", body: { audience: c.id ? c.audience : audiencePayload() } })
       .then(function (d) {
-        countLine.textContent =
-          d.counts.total + " customers in this audience — " + d.counts.sms +
-          " can be texted, " + d.counts.email + " can be emailed.";
+        renderCampaignAudienceCount(d);
       })
       .catch(function () { countLine.textContent = "The audience could not be counted."; });
   }
@@ -4989,6 +4998,22 @@
     }
   }
 
+  function renderCampaignAudienceCount(d) {
+    document.getElementById("gc-count").textContent = d.counts.total + " customers in this audience — " + d.counts.sms + " can be texted, " + d.counts.email + " can be emailed.";
+    document.getElementById("gc-preview").textContent = "Audience preview: " + (d.preview || []).map(function (p) { return p.name + " (" + (p.phoneHint || p.emailHint || "") + ")"; }).join("; ");
+  }
+
+  function selectedCampaignAudience(fallback) {
+    var box = document.getElementById("gc-phones");
+    if (box && box.value.trim()) {
+      var selected = defaultAudienceFilter();
+      selected.phoneNumbers = box.value.split(/[,;\n]+/).map(function (v) { return v.trim(); }).filter(Boolean);
+      return selected;
+    }
+    if (box && fallback && fallback.phoneNumbers != null) return Object.assign({}, fallback, { phoneNumbers: [] });
+    return fallback || audiencePayload();
+  }
+
   function campaignPayload() {
     var g = growState();
     return {
@@ -5002,7 +5027,7 @@
       emailEnabled: document.getElementById("gc-email-on").checked,
       emailSubject: val("gc-subject"),
       emailBody: document.getElementById("gc-email").value.trim(),
-      audience: g.editing && g.editing.id ? g.editing.audience : audiencePayload()
+      audience: selectedCampaignAudience(g.editing && g.editing.id ? g.editing.audience : audiencePayload())
     };
   }
 

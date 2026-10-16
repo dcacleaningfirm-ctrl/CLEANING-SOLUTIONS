@@ -518,3 +518,12 @@ test("the message body limits the API enforces are the ones the screen shows", (
   assert.match(CLIENT, /maxlength="480"/);
   assert.match(CLIENT, new RegExp(`${BUSINESS_NAME.split(" ")[0]}`));
 });
+
+
+test("exact contact audiences normalize, deduplicate and fail closed", () => {
+  assert.equal(normalizeAudience({}).phoneNumbers, null);
+  assert.deepEqual(normalizeAudience({phoneNumbers: ["(404) 234-5678", "+1 404 234 5678", "bad"]}).phoneNumbers, ["+14042345678"]);
+  assert.deepEqual(normalizeAudience({phoneNumbers: "invalid"}).phoneNumbers, []);
+  assert.deepEqual(normalizeAudience({phoneNumbers: []}).phoneNumbers, []);
+  assert.match(describeAudience(normalizeAudience({phoneNumbers: "4042345678"})), /selected contacts \(1 phone numbers\)/);
+});
