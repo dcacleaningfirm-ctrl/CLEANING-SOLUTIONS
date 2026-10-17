@@ -67,6 +67,8 @@ window.DCA_PRICING = Object.freeze({
       carpetRooms: 3,
       ductSystems: 1,
       ventsPerSystem: 10,
+      ductScope: "Vent-only cleaning for up to 10 vents on one HVAC system. Furnace cleaning is not included.",
+      furnaceAddOn: Object.freeze({ label: "Optional furnace cleaning", price: 60.00 }),
       includesBasic: true,
       lines: Object.freeze([
         Object.freeze({ label: "Whole-home sanitizing treatment upgrade", amount: 50.0 }),
