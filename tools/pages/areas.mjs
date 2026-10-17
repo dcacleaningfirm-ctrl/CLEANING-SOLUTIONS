@@ -93,7 +93,7 @@ export function areaPage(c) {
         ${rateCard({
           rows: [
             ["Carpet, per room", price("carpetRoom")],
-            ["Stairs (counted as two rooms)", price("carpetRoom")],
+            ["Stairs (1 area; landing is a separate area)", price("carpetRoom")],
             ["Air duct system base", price("airDuctBase")],
             ["Each supply vent or return", price("airVent")],
             ["Armchair", price("armchair")],
@@ -144,6 +144,7 @@ export function areaPage(c) {
           h2: `What we can do at a ${esc(c.city)} address`,
         })}
         ${features([
+          ...(c.slug === "stockbridge-ga" ? [["carpet", "Commercial carpet and air duct cleaning", 'Service for apartments, offices, churches, retail and managed properties. <a href="/commercial-cleaning">Request a commercial quote</a>.']] : []),
           [
             "carpet",
             "Carpet cleaning",
@@ -229,7 +230,7 @@ ${faqSection({
   items: c.faqs,
 })}
 
-    <section class="section section-alt">
+${c.slug === "stockbridge-ga" ? "" : `    <section class="section section-alt">
       <div class="container">
         ${sectionHeading({
           eyebrow: "Nearby",
@@ -239,6 +240,7 @@ ${faqSection({
         ${areaLinks(c.slug)}
       </div>
     </section>
+`}
 
 ${ctaBand(
   `Book carpet or air duct cleaning in ${esc(c.city)}.`,
