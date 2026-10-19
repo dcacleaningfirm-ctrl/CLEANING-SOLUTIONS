@@ -1,4 +1,6 @@
 import fs from "node:fs";
+import { cities } from "./content/cities.mjs";
+import { pricing } from "./lib/site.mjs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,6 +32,12 @@ function removeFaqSchema(html) {
 }
 
 function faqData(city) {
+  if (city === "Stockbridge") return [
+    ...cities.find(c => c.city === city).faqs.map(([q, a]) => ({ q, a })),
+    { q: "How are stairs and landings counted?", a: pricing.carpetAreaRules.rules.join(" ") + " " + pricing.carpetAreaRules.example },
+    { q: "Can businesses request a commercial quote?", a: "Yes. We provide carpet and air-duct quotes for apartments, offices, churches, retail and managed properties in Stockbridge. Scope and access are confirmed before work begins." },
+    { q: "How do I schedule service in Stockbridge?", a: `Start an online estimate or call ${phone}. Availability depends on the route and service scope.` },
+  ];
   return [
     {
       q: `Does DCA provide carpet cleaning in ${city}, GA?`,
@@ -80,6 +88,12 @@ for (const [city, slug] of priorityCities) {
   html = removeSection(html, "local-proof");
   html = removeSection(html, "city-faq");
   html = removeFaqSchema(html);
+  if (city === "Stockbridge") {
+    html = removeSection(html, "faq");
+    html = html.replace(/<script\b[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g, (block, json) => {
+      return JSON.parse(json)["@type"] === "FAQPage" ? "" : block;
+    });
+  }
   html = html.replace("</head>", `${faqSchema(city)}\n</head>`);
   const insertion = `${proofBlock(city)}\n${faqBlock(city)}\n`;
   const nearbyIndex = html.indexOf('<section class="section section-alt" id="south-east-nearby-areas">');

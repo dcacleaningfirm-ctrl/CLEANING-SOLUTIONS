@@ -135,7 +135,7 @@ for (const [name, href] of priorityCities) {
   if (!fs.existsSync(full)) continue;
   let html = fs.readFileSync(full, "utf8");
   const cityServices = `<section class="section" id="priority-city-services"><div class="container"><p class="eyebrow">${name} cleaning services</p><h2>Carpet, air duct and commercial cleaning in ${name}, GA</h2><p>${cityFocus[name]}</p><div class="feature-grid"><article class="feature-card"><h3><a href="/carpet-cleaning">Carpet cleaning in ${name}</a></h3><p>Truck-mounted hot-water extraction for homes, rentals, stairs, hallways and high-traffic carpet.</p></article><article class="feature-card"><h3><a href="/air-duct-cleaning">Air duct cleaning in ${name}</a></h3><p>Supply, return and accessible HVAC-system cleaning with the scope confirmed before service.</p></article><article class="feature-card"><h3><a href="/commercial-cleaning">Commercial cleaning in ${name}</a></h3><p>Carpet and air-duct quote requests for apartments, offices, churches, retail, hospitality and managed facilities.</p></article></div><p><a class="button button-dark" href="/book">Get a ${name} estimate</a> <a class="button button-outline" href="tel:4704853123">Call ${phone}</a></p></div></section>`;
-  html = html.replace("</main>", `${cityServices}\n${nearbyBlock}\n</main>`);
+  html = html.replace("</main>", `${name === "Stockbridge" ? "" : cityServices}\n${nearbyBlock}\n</main>`);
   fs.writeFileSync(full, html);
 }
 
