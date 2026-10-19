@@ -67,11 +67,16 @@
               </label>
 
               <label class="addon-card">
-                <input type="checkbox" data-treatment="petTreatment">
                 <span>
-                  <strong><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-droplet"></use></svg> Pet-odor treatment</strong>
-                  <span class="addon-price" data-price-key="petTreatment" data-price-group="treatments">$65–$120, depending on home size</span>
-                  <span class="addon-note">Optional add-on, not included in cleaning packages. Your estimate includes a $65 starting allowance. The exact price, from $65 to $120 depending on home size, is confirmed before treatment. Applied to the affected area. Where urine has reached the padding or the subfloor, surface cleaning will not resolve it — that needs padding replacement, which is outside our scope, and we will tell you if we find it.</span>
+                  <strong><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#icon-droplet"></use></svg> Pet enzyme treatment</strong>
+                  <span class="addon-price" data-price-key="petTreatment" data-price-group="treatments">Small home $65 · Medium home $80 · Larger home $120</span>
+                  <select data-pet-size aria-label="Pet enzyme treatment home size">
+                    <option value="">No pet enzyme treatment</option>
+                    <option value="petTreatment">Small home — $65</option>
+                    <option value="petTreatmentMedium">Medium home — $80</option>
+                    <option value="petTreatmentLarge">Larger home — $120</option>
+                  </select>
+                  <span class="addon-note">Optional add-on, not included in cleaning packages. Choose your home size below. The selected rate is included in your estimate and deposit calculation. Home size is confirmed before treatment. Applied to the affected area. Where urine has reached the padding or the subfloor, surface cleaning will not resolve it — that needs padding replacement, which is outside our scope, and we will tell you if we find it.</span>
                 </span>
               </label>
 

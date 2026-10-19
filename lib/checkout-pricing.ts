@@ -19,7 +19,9 @@ const TREATMENTS = Object.freeze({
   dryerVentAddOn: 70.00,
   sanitizer: 45.00,
   antimicrobial: 85.00,
-  petTreatment: 65.00
+  petTreatment: 65.00,
+  petTreatmentMedium: 80.00,
+  petTreatmentLarge: 120.00
 });
 
 const NEXTDOOR_UPHOLSTERY_CODE = "NEXTDOOR10";
@@ -142,6 +144,8 @@ function priceGeneral(input: CheckoutPricingInput): CheckoutPricingResult {
   const treatments = Array.isArray(input.treatments)
     ? input.treatments.map(String).filter((key) => Object.prototype.hasOwnProperty.call(TREATMENTS, key))
     : [];
+  const petSelections = treatments.filter((key) => key.startsWith("petTreatment"));
+  if (petSelections.length > 1) throw new Error("Select only one home size for pet enzyme treatment");
   const quantities = {
     carpet_rooms: count(q.carpet_rooms, 40),
     air_vents: count(q.air_vents, 60),

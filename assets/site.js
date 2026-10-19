@@ -560,7 +560,7 @@
     draft.treatments.forEach(function (key) {
       var item = key === "dryerVent" ? dryerVentItem(draft) : treatments[key];
       if (!item) return;
-      add(item.label, key === "petTreatment" ? "$65–$120 depending on home size; estimate includes $65. Final price confirmed before treatment." : "Optional add-on", item.price);
+      add(item.label, key.indexOf("petTreatment") === 0 ? "Optional add-on; home size confirmed before treatment" : "Optional add-on", item.price);
     });
 
     return { lines: lines, total: total, couponApplied: couponApplied };
@@ -635,6 +635,8 @@
       treatmentBoxes.forEach(function (box) {
         if (box.checked) selected.push(box.dataset.treatment);
       });
+      var petSize = form.querySelector("[data-pet-size]");
+      if (petSize && ["petTreatment", "petTreatmentMedium", "petTreatmentLarge"].indexOf(petSize.value) !== -1) selected.push(petSize.value);
       draft.treatments = selected;
     }
 
@@ -656,6 +658,9 @@
     form.querySelectorAll("input[type='checkbox'][data-treatment]").forEach(function (box) {
       box.checked = draft.treatments.indexOf(box.dataset.treatment) !== -1;
     });
+
+    var petSize = form.querySelector("[data-pet-size]");
+    if (petSize) petSize.value = draft.treatments.find(function (key) { return ["petTreatment", "petTreatmentMedium", "petTreatmentLarge"].indexOf(key) !== -1; }) || "";
 
     var promoBox = form.querySelector("input[type='checkbox'][data-promo-toggle]");
     if (promoBox) promoBox.checked = Boolean(draft.promo_applied);
