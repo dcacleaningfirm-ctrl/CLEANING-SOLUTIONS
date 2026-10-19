@@ -49,7 +49,7 @@ window.DCA_PRICING = Object.freeze({
    */
   packages: Object.freeze({
     basic: Object.freeze({
-      label: "Basic Clean & Sanitizing Treatment",
+      label: "Basic Move-In / Move-Out Refresh",
       /* No price of its own: the entry tier IS the movePackage rate above. */
       carpetRooms: 0,
       ductSystems: 0,
@@ -62,7 +62,7 @@ window.DCA_PRICING = Object.freeze({
       ])
     }),
     deep: Object.freeze({
-      label: "Intense Deep Clean",
+      label: "Move-In / Move-Out Deep Clean",
       price: 549.99,
       carpetRooms: 3,
       ductSystems: 1,
@@ -77,11 +77,15 @@ window.DCA_PRICING = Object.freeze({
       ])
     }),
     complete: Object.freeze({
-      label: "Complete Home",
+      label: "Complete Home Move-In / Move-Out Cleaning",
       price: 899.99,
       carpetRooms: 5,
       ductSystems: 2,
       ventsPerSystem: 10,
+      furnaceIncluded: true,
+      ductScope: "Two HVAC systems, up to 10 vents per system, with furnace cleaning included for both systems.",
+      additionalSystem: Object.freeze({ label: "Additional HVAC system with furnace cleaning", price: 199.99, furnaceIncluded: true }),
+      exclusions: Object.freeze(["Mold treatment", "Repairs"]),
       secondSystemDiscount: 0.3,
       includesBasic: true,
       lines: Object.freeze([
