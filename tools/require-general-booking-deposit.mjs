@@ -18,12 +18,12 @@ function injectOnce(file, marker, addition) {
 replaceRequired(
   "book/review.html",
   'content="The final step of the booking flow. Check your line-by-line planning estimate, add your contact details and a photo, and send the request. Nothing is charged online."',
-  'content="Review your planning estimate, add scheduling details, and continue to a secure 15% Clover deposit. The remaining balance is due under the approved service scope."'
+  'content="Review your planning estimate, add scheduling details, and continue to a secure 20% Clover deposit. The remaining balance is due under the approved service scope."'
 );
 replaceRequired(
   "book/review.html",
   "We use these details to check the service area and appointment availability. Nothing is charged online and no card details are collected here.",
-  "We use these details to check the service area and appointment availability. A 15% deposit is required to hold an online booking; card details are entered only on DCA’s secure Clover payment page."
+  "We use these details to check the service area and appointment availability. A 20% deposit is required to hold an online booking; card details are entered only on DCA’s secure Clover payment page."
 );
 replaceRequired(
   "book/review.html",
@@ -33,7 +33,7 @@ replaceRequired(
 replaceRequired(
   "book/review.html",
   "Not a final quote. Inspection, measurements, access, condition and the approved scope can change the figure. No card details are collected here.",
-  "Not a final quote. Inspection, measurements, access, condition and the approved scope can change the figure. The online hold deposit is 15% of the server-verified order total."
+  "Not a final quote. Inspection, measurements, access, condition and the approved scope can change the figure. The online hold deposit is 20% of the server-verified order total."
 );
 injectOnce(
   "book/review.html",
@@ -44,13 +44,13 @@ injectOnce(
 replaceRequired(
   "book/index.html",
   "Every price comes from one shared catalog and nothing is charged online.",
-  "Every price comes from one shared catalog; online bookings continue to a secure 15% Clover deposit calculated again on DCA’s server."
+  "Every price comes from one shared catalog; online bookings continue to a secure 20% Clover deposit calculated again on DCA’s server."
 );
 
 replaceRequired(
   "quote.html",
   "The figure is calculated here from the same published catalog every other page on this site reads, so what you send is what you saw. Nothing is charged online and no card details are collected.",
-  "The figure shown here comes from DCA’s published catalog. When you continue, DCA’s server independently verifies the price and creates a secure 15% Clover deposit; browser-entered prices are never trusted."
+  "The figure shown here comes from DCA’s published catalog. When you continue, DCA’s server independently verifies the price and creates a secure 20% Clover deposit; browser-entered prices are never trusted."
 );
 replaceRequired(
   "quote.html",
@@ -66,7 +66,7 @@ injectOnce(
 replaceRequired(
   "move-cleaning-specials.html",
   "Nothing is charged online. DCA confirms the approved scope and price before work begins.",
-  "A 15% secure Clover deposit is required to hold an online booking. DCA confirms the approved scope before work begins."
+  "A 20% secure Clover deposit is required to hold an online booking. DCA confirms the approved scope before work begins."
 );
 replaceRequired(
   "move-cleaning-specials.html",

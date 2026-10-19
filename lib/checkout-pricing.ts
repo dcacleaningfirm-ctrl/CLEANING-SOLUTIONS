@@ -1,6 +1,7 @@
+import { priceMovePackages } from "./move-package-pricing.js";
 import { promotionByCode } from "./promotions.js";
 
-export const CHECKOUT_DEPOSIT_PERCENT = 15;
+export const CHECKOUT_DEPOSIT_PERCENT = 20;
 
 const SERVICES = Object.freeze({
   carpetRoom: 46.58,
@@ -64,6 +65,7 @@ export type CheckoutPricingInput = {
 };
 
 export type CheckoutPricingResult = {
+  lineItems?: { kind: string; label: string; quantity: number; unitPriceCents: number; amountCents: number }[];
   totalCents: number;
   depositCents: number;
   serviceName: string;
@@ -201,6 +203,7 @@ function priceGeneral(input: CheckoutPricingInput): CheckoutPricingResult {
 
 export function calculateCheckout(input: CheckoutPricingInput): CheckoutPricingResult {
   const mode = String(input.orderMode || "").trim().toLowerCase();
+  if (mode === "move-packages") return priceMovePackages(input.quantities || {});
   const code = String(input.promotionCode || "").trim().toUpperCase();
   if (mode === "special" || (code && code !== "NOT APPLIED" && code !== "VENTS199" && code !== NEXTDOOR_UPHOLSTERY_CODE)) {
     return priceSpecial(code, input.quantities || {});

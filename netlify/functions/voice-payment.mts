@@ -75,7 +75,7 @@ function page(input: {
     ? `<div class="success">✓</div><p class="eyebrow">PAYMENT CONFIRMED</p><h1>Deposit received</h1><div class="summary"><span>${htmlEscape(input.serviceType)}</span><strong>Job #${input.jobId}</strong><small>Your booking is now in DCA Pro. The office will contact you to confirm the exact appointment time.</small></div><a class="call" href="tel:4704853123">Questions? Call (470) 485-3123</a>`
     : input.unavailable
       ? `<h1>Secure payment is unavailable</h1><p>Please call <a href="tel:4704853123">(470) 485-3123</a> and reference job #${input.jobId}.</p>`
-      : `<p class="eyebrow">DCA CLEANING SOLUTIONS</p><h1>Secure 15% deposit</h1><div class="summary"><span>${htmlEscape(input.serviceType)}</span><strong>${money(input.amountCents)}</strong><small>Job #${input.jobId} · Your appointment is confirmed by the office after the deposit is received.</small></div>
+      : `<p class="eyebrow">DCA CLEANING SOLUTIONS</p><h1>Secure booking deposit</h1><div class="summary"><span>${htmlEscape(input.serviceType)}</span><strong>${money(input.amountCents)}</strong><small>Job #${input.jobId} · Your appointment is confirmed by the office after the deposit is received.</small></div>
          <form id="pay-form"><label>Card number<div class="field" id="card-number"></div></label><div class="grid"><label>Expiration<div class="field" id="card-date"></div></label><label>Security code<div class="field" id="card-cvv"></div></label></div><label>Billing ZIP<div class="field" id="card-postal"></div></label><p id="error" class="error" hidden></p><button id="submit" disabled>Loading secure card form…</button></form><p class="fine">Card information goes directly to Clover and is not stored by DCA Cleaning Solutions.</p>`;
   const script = input.paid || input.unavailable ? "" : `<script src="/meta-pixel.js"></script><script src="${input.sdkUrl}"></script><script>
     const cfg=${config}; const button=document.getElementById('submit'); const error=document.getElementById('error');
@@ -128,7 +128,7 @@ export default async (req: Request, context: Context) => {
       amount: remaining,
       currency: "usd",
       source: cardToken,
-      description: `DCA 15% deposit - job #${payment.row.jobId}`,
+      description: `DCA booking deposit - job #${payment.row.jobId}`,
       metadata: { jobId: String(payment.row.jobId), source: payment.row.source || "website" }
     })
   });
@@ -140,30 +140,25 @@ export default async (req: Request, context: Context) => {
 
   const [duplicate] = await db.select({ id: payments.id }).from(payments).where(eq(payments.providerRef, charge.id)).limit(1);
   if (!duplicate) {
-    await db.insert(payments).values({ jobId: payment.row.jobId, customerId: payment.row.customerId, amountCents: remaining, provider: "clover", providerRef: charge.id, status: "paid", method: "card", note: `15% deposit paid through secure Clover link (${payment.row.source || "website"})` });
+    await db.insert(payments).values({ jobId: payment.row.jobId, customerId: payment.row.customerId, amountCents: remaining, provider: "clover", providerRef: charge.id, status: "paid", method: "card", note: `Booking deposit paid through secure Clover link (${payment.row.source || "website"})` });
     await db.insert(jobEvents).values({ jobId: payment.row.jobId, kind: "payment", message: `Customer paid ${money(remaining)} deposit through secure Clover link` });
     await db.insert(jobEvents).values({ jobId: payment.row.jobId, kind: "status", message: "Deposit requirement satisfied — office appointment confirmation required" });
   }
   await markVoicePaymentUsed(payment.link);
 
-  const customerBody = `DCA Cleaning Solutions: PAYMENT CONFIRMED. We received your ${money(remaining)} deposit for job #${payment.row.jobId} (${payment.row.serviceType}). Your booking is now in DCA Pro and the office will contact you to confirm the appointment time. Questions: (470) 485-3123.`;
+  // Show payment success on screen; avoid an extra customer notification.
+  // The office sends the booking confirmation after confirming the time.
   const officeBody = `PAID BOOKING — CONFIRM NOW: ${payment.row.customerName}, ${money(remaining)}, ${payment.row.serviceType}, job #${payment.row.jobId}, source ${payment.row.source || "website"}. Deposit is paid. Contact the customer to confirm the appointment time.`;
-  const results = await Promise.all([
-    sendSms({ to: payment.row.customerPhone, body: customerBody }),
-    sendSms({ to: SHACOLE_NUMBER, body: officeBody })
-  ]);
-  await db.insert(notifications).values([
-    { jobId: payment.row.jobId, customerId: payment.row.customerId, kind: "payment_receipt", channel: "sms", recipient: normalizePhone(payment.row.customerPhone) || payment.row.customerPhone, body: customerBody, status: results[0].ok ? "sent" : "failed", provider: results[0].provider, providerRef: results[0].providerRef, error: results[0].error },
-    { jobId: payment.row.jobId, customerId: payment.row.customerId, kind: "office_deposit_alert", channel: "sms", recipient: normalizePhone(SHACOLE_NUMBER) || SHACOLE_NUMBER, body: officeBody, status: results[1].ok ? "sent" : "failed", provider: results[1].provider, providerRef: results[1].providerRef, error: results[1].error }
-  ]);
+  const officeResult = await sendSms({ to: SHACOLE_NUMBER, body: officeBody });
+  await db.insert(notifications).values({ jobId: payment.row.jobId, customerId: payment.row.customerId, kind: "office_deposit_alert", channel: "sms", recipient: normalizePhone(SHACOLE_NUMBER) || SHACOLE_NUMBER, body: officeBody, status: officeResult.ok ? "sent" : "failed", provider: officeResult.provider, providerRef: officeResult.providerRef, error: officeResult.error });
   return Response.json({
     success: true,
     jobId: payment.row.jobId,
     chargeId: charge.id,
     amountCents: remaining,
     serviceType: payment.row.serviceType,
-    customerReceiptSent: results[0].ok,
-    officeAlertSent: results[1].ok,
+    customerReceiptSent: false,
+    officeAlertSent: officeResult.ok,
     message: "Payment confirmed. Your deposit was received and the DCA office has been alerted to confirm your appointment time."
   });
 };

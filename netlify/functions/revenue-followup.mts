@@ -11,13 +11,10 @@ import {
   jobs
 } from "../../db/schema.js";
 import { money, SHACOLE_NUMBER } from "../../lib/voice-agent.js";
-import { ensureVoicePaymentLink, voicePaymentUrl } from "../../lib/voice-payment.js";
 import { normalizePhone, sendSms } from "../../lib/notify.js";
 
-const DEPOSIT_PERCENT = 15;
+const DEPOSIT_PERCENT = 20;
 const FIRST_REMINDER_MS = 15 * 60 * 1000;
-const SECOND_REMINDER_MS = 2 * 60 * 60 * 1000;
-const FINAL_REMINDER_MS = 24 * 60 * 60 * 1000;
 
 async function paidForJob(jobId: number): Promise<number> {
   const [row] = await db
@@ -58,25 +55,6 @@ async function recordSms(input: {
     error: result.error
   });
   return result.ok;
-}
-
-async function sendDepositReminder(input: {
-  jobId: number;
-  customerId: number;
-  customerName: string;
-  phone: string;
-  serviceType: string;
-  depositCents: number;
-  kind: string;
-}) {
-  if (!input.phone || await hasNotification(input.jobId, input.kind)) return false;
-  const link = await ensureVoicePaymentLink({
-    jobId: input.jobId,
-    customerId: input.customerId,
-    amountCents: input.depositCents
-  });
-  const body = `DCA Cleaning Solutions: ${input.customerName || "your appointment"}, your ${input.serviceType} request is being held pending the ${money(input.depositCents)} deposit. Pay securely here: ${voicePaymentUrl(link.token)}. Questions: (470) 485-3123.`;
-  return recordSms({ jobId: input.jobId, customerId: input.customerId, kind: input.kind, to: input.phone, body });
 }
 
 async function alertOfficeAbandonedDeposit(input: {
@@ -192,21 +170,8 @@ export default async () => {
       depositCents: requiredDeposit
     })) officeAlertsSent += 1;
 
-    let kind = "";
-    if (age >= FINAL_REMINDER_MS) kind = "deposit_reminder_24h";
-    else if (age >= SECOND_REMINDER_MS) kind = "deposit_reminder_2h";
-    else if (age >= FIRST_REMINDER_MS) kind = "deposit_reminder_15m";
-    if (!kind) continue;
+    // Customer deposit reminders are disabled. The office alert above stays internal.
 
-    if (await sendDepositReminder({
-      jobId: row.jobId,
-      customerId: row.customerId,
-      customerName: row.customerName,
-      phone: row.customerPhone || "",
-      serviceType: row.serviceType,
-      depositCents: requiredDeposit,
-      kind
-    })) remindersSent += 1;
   }
 
   console.log("revenue-followup", { checked: candidates.length, remindersSent, officeAlertsSent, revenueRowsUpdated });

@@ -14,12 +14,12 @@ const verifyUi = read("manager/verification-health.js");
 const indexing = read("tools/refresh-public-index-signals.mjs");
 const netlify = read("netlify.toml");
 
-assert.match(depositApi, /DEPOSIT_PERCENT = 15/);
+assert.match(depositApi, /DEPOSIT_PERCENT = 20/);
 assert.match(depositApi, /isGeneralBooking/);
 assert.match(depositApi, /ensureVoicePaymentLink/);
 assert.match(depositClient, /data-review-form/);
 assert.match(depositClient, /Continue to secure deposit/);
-assert.match(depositBuild, /15% deposit/);
+assert.match(depositBuild, /20% deposit/);
 assert.match(depositBuild, /general-deposit\.js\?v=1/);
 
 assert.match(proof, /paid-web-booking/);

@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import type { Config, Context } from "@netlify/functions";
 import { db } from "../../db/index.js";
-import { customers, jobEvents, jobs, leadEvents, leads } from "../../db/schema.js";
+import { customers, jobEvents, jobItems, jobs, leadEvents, leads } from "../../db/schema.js";
 import { calculateCheckout } from "../../lib/checkout-pricing.js";
 import { ingestLead } from "../../lib/lead-intake.js";
 import { ensureVoicePaymentLink, voicePaymentUrl } from "../../lib/voice-payment.js";
@@ -118,12 +118,12 @@ export default async (req: Request, _context: Context) => {
     totalCents,
     requestedDate: preferredDate || null,
     requestedTime: preferredTime || null,
-    customerNotes: customerNotes || `Website booking. 15% deposit of $${(depositCents / 100).toFixed(2)} required before appointment confirmation.`,
+    customerNotes: customerNotes || `Website booking. 20% deposit of $${(depositCents / 100).toFixed(2)} required before appointment confirmation.`,
     raw: {
       channel: "website",
       bookingRef,
       attribution,
-      depositPercent: 15,
+      depositPercent: 20,
       serverPriced: true,
       orderMode: clean(body.orderMode, 20) || (pricing.promotionCode ? "special" : "general"),
       checkoutQuantities: pricing.quantities,
@@ -165,9 +165,13 @@ export default async (req: Request, _context: Context) => {
       source: "website",
       bookedBy: null,
       address,
-      notes: `Server-priced website appointment hold pending 15% deposit. Preferred date: ${preferredDate || "not selected"}; preferred arrival: ${preferredTime || "no preference"}. Booking ref ${bookingRef}. ${pricing.serviceDetail}`
+      notes: `Server-priced website appointment hold pending 20% deposit. Preferred date: ${preferredDate || "not selected"}; preferred arrival: ${preferredTime || "no preference"}. Booking ref ${bookingRef}. ${pricing.serviceDetail}`
     })
     .returning({ id: jobs.id });
+
+  if (pricing.lineItems?.length) {
+    await db.insert(jobItems).values(pricing.lineItems.map(item => ({ ...item, jobId: job.id })));
+  }
 
   await db.update(leads).set({ jobId: job.id, status: "scheduled", updatedAt: new Date() }).where(eq(leads.id, intake.lead.id));
   await db.insert(jobEvents).values({

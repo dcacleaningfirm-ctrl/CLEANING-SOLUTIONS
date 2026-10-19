@@ -213,7 +213,7 @@ export async function bookVoiceAppointment(state: VoiceCallState) {
     requestedDate: state.requestedDate,
     requestedTime: windowLabel(state.requestedWindow),
     customerNotes:
-      `Booked by DCA automated receptionist. 15% deposit of ${money(quote.depositCents)} is required before confirmation.` +
+      `Booked by DCA automated receptionist. 20% deposit of ${money(quote.depositCents)} is required before confirmation.` +
       (state.petTreatment ? " Pet enzyme and odor treatment requested." : ""),
     raw: { channel: "voice", callSid: state.callSid, automatedAssistant: true }
   });
@@ -244,7 +244,7 @@ export async function bookVoiceAppointment(state: VoiceCallState) {
       bookedBy: null,
       address: state.address,
       notes:
-        `AI voice booking from call ${state.callSid}. Appointment held pending a 15% deposit of ${money(
+        `AI voice booking from call ${state.callSid}. Appointment held pending a 20% deposit of ${money(
           quote.depositCents
         )}.` + (state.petTreatment ? " Pet enzyme and odor treatment requested." : "")
     })
@@ -266,7 +266,7 @@ export async function bookVoiceAppointment(state: VoiceCallState) {
   await db.insert(leadEvents).values({
     leadId: intake.lead.id,
     kind: "converted",
-    message: `DCA automated receptionist held this request as job #${job.id}; 15% deposit pending`
+    message: `DCA automated receptionist held this request as job #${job.id}; 20% deposit pending`
   });
   await db
     .update(customers)
@@ -289,7 +289,7 @@ export async function bookVoiceAppointment(state: VoiceCallState) {
   const paymentUrl = voicePaymentUrl(paymentLink.token);
   const customerMessage =
     `DCA Cleaning Solutions: we are holding ${when} for ${quote.promotion.name}. ` +
-    `Planning total ${money(quote.totalCents)}; required 15% deposit ${money(quote.depositCents)}. ` +
+    `Planning total ${money(quote.totalCents)}; required 20% deposit ${money(quote.depositCents)}. ` +
     `Pay the deposit securely here: ${paymentUrl} ` +
     `After payment, the DCA office will contact you to confirm the appointment time. ` +
     `Questions: (470) 485-3123. Job #${job.id}.`;

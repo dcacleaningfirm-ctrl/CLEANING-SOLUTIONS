@@ -6138,7 +6138,7 @@
   }
 
   function bookingDepositCents() {
-    return Math.ceil(bookingTotalCents() * 0.15);
+    return Math.ceil(bookingTotalCents() * 0.20);
   }
 
   function renderBook() {
@@ -6214,7 +6214,7 @@
       '<div class="booking-fields"><label class="field"><span>Environmental Waste Fee <small>ENVMT · per order</small></span>' +
       '<div class="money-input"><span>$</span><input id="bk-envmt" type="number" min="0" max="1000" step="0.01" value="' +
       ((b.envmtCents == null ? 2500 : b.envmtCents) / 100).toFixed(2) + '" /></div></label>' +
-      '<div class="field"><span>Required deposit (15%)</span><strong class="mono" id="bk-deposit">' +
+      '<div class="field"><span>Required deposit (20%)</span><strong class="mono" id="bk-deposit">' +
       fmtMoney(bookingDepositCents()) + "</strong></div></div>" +
       '<div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" id="bk-add-custom">Other charge</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" id="bk-clear-items">Clear list</button></div>' +
@@ -7105,15 +7105,9 @@
           " has already been collected on this job, so the new total cannot be less than that." +
           "</p>"
         : "") +
-      '<label class="field"><span>What changed (goes to the customer)</span>' +
+      '<label class="field"><span>What changed (internal office note)</span>' +
       '<input id="d-ticket-note" maxlength="300" placeholder="e.g. Added hallway and stairs on site" /></label>' +
-      '<div class="pay-receipt"><p class="eyebrow">Send the new total</p>' +
-      channelChoices("d-ticket", {
-        email: j.customerEmail,
-        phone: j.customerPhone,
-        checked: true
-      }) +
-      "</div>" +
+      '<p class="hint">Office changes are saved internally. Customers receive the booking confirmation and final invoice only.</p>' +
       '<p class="login-error" id="d-ticket-error" hidden></p>' +
       '<div class="btn-row"><button type="button" class="btn btn-primary btn-sm" id="d-ticket-save">Save new price</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" id="d-ticket-cancel">Cancel</button></div>' +
@@ -7275,7 +7269,7 @@
     }
     var button = document.getElementById("d-ticket-save");
     var note = val("d-ticket-note");
-    var channels = chosenChannels("d-ticket");
+    var channels = [];
     var box = document.getElementById("d-ticket-error");
     if (box) box.hidden = true;
     button.disabled = true;
@@ -7362,13 +7356,9 @@
       '<div class="btn-row pay-actions">' +
       (open
         ? ""
-        : '<button type="button" class="btn btn-primary btn-sm" id="d-deposit">Collect 15% deposit</button>' +
+        : '<button type="button" class="btn btn-primary btn-sm" id="d-deposit">Collect 20% deposit</button>' +
           '<button type="button" class="btn btn-ghost btn-sm" id="d-collect">Collect other payment</button>') +
       '<button type="button" class="btn btn-ghost btn-sm" id="d-confirm">Send confirmation</button>' +
-      '<button type="button" class="btn btn-ghost btn-sm" id="d-quote">Send total</button>' +
-      ((data.payments || []).length
-        ? '<button type="button" class="btn btn-ghost btn-sm" id="d-receipt">Send receipt</button>'
-        : "") +
       "</div>" +
       messages +
       (open ? payPanel(data) : "")
@@ -7426,13 +7416,7 @@
       "</div>" +
       cardBlock +
       '<label class="checkline"><input type="checkbox" id="pay-complete" checked /><span>Mark the job completed if this clears the balance</span></label>' +
-      '<div class="pay-receipt"><p class="eyebrow">Send a receipt</p>' +
-      channelChoices("pay-receipt", {
-        email: data.job.customerEmail,
-        phone: data.job.customerPhone,
-        checked: true
-      }) +
-      "</div>" +
+      '<p class="hint">Payment is recorded internally. Send the final invoice through the invoice workflow.</p>' +
       '<p class="login-error" id="pay-error" hidden></p>' +
       '<div class="btn-row"><button type="button" class="btn btn-primary btn-sm" id="pay-submit">Take payment</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" id="pay-cancel">Cancel</button></div>' +
@@ -7460,14 +7444,14 @@
       deposit.addEventListener("click", function () {
         loadSettings().catch(function () { return null; }).then(function () {
           var target = data.depositBalanceCents == null
-            ? Math.max(0, Math.ceil(j.priceCents * 0.15) - (data.paidCents || 0))
+            ? Math.max(0, Math.ceil(j.priceCents * 0.20) - (data.paidCents || 0))
             : data.depositBalanceCents;
           state.pay = {
             jobId: j.id,
             method: defaultMethod(),
             amount: (target / 100).toFixed(2),
             reference: "",
-            note: "15% order deposit"
+            note: "20% order deposit"
           };
           renderDrawer(state.job);
         });

@@ -5,7 +5,7 @@ export const SHACOLE_NUMBER = "+14047033704";
 export const JAMES_COMMERCIAL_NUMBER = "+14047162720";
 export const ENVMT_CENTS = 2500;
 export const PET_TREATMENT_CENTS = 6500;
-export const DEPOSIT_PERCENT = 15;
+export const DEPOSIT_PERCENT = 20;
 
 export type VoiceService = "carpet" | "duct" | "upholstery" | "move";
 export type ArrivalWindow = "morning" | "afternoon" | "late_afternoon";
@@ -330,7 +330,7 @@ export function confirmationQuestion(state: VoiceCallState): string {
     state.requestedDate
   } in the ${windowLabel(state.requestedWindow)}. The planning total is ${money(
     quote.totalCents
-  )}, including the ${money(ENVMT_CENTS)} environmental fee. A 15 percent deposit of ${money(
+  )}, including the ${money(ENVMT_CENTS)} environmental fee. A 20 percent deposit of ${money(
     quote.depositCents
   )} is required before the appointment is confirmed. Is all of that correct?`;
 }

@@ -114,7 +114,7 @@ export default async (req: Request, context: Context) => {
     (sum, item) => sum + item.amount * item.quantity,
     0
   );
-  const amount = Math.ceil(orderTotal * 0.15);
+  const amount = Math.ceil(orderTotal * 0.20);
 
   if (amount < 100) {
     return Response.json({ error: "Invalid amount" }, { status: 400 });
@@ -139,14 +139,14 @@ export default async (req: Request, context: Context) => {
           amount: amount,
           currency: "usd",
           source: token,
-          description: `DCA Cleaning 15% deposit - ${packageName}`,
+          description: `DCA Cleaning 20% deposit - ${packageName}`,
           metadata: {
             customerName,
             customerEmail: customerEmail || "",
             customerPhone: customerPhone || "",
             packageName,
             orderTotal: String(orderTotal),
-            depositPercent: "15",
+            depositPercent: "20",
             balanceDue: String(orderTotal - amount),
             items: JSON.stringify(lineItems),
           },

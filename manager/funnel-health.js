@@ -34,7 +34,7 @@
         '<strong>Booking funnel ready</strong>' +
         '<div class="muted" style="margin-top:4px">CARPET199 = $' +
         ((Number(data.totalCents || 0)) / 100).toFixed(2) +
-        ' · 15% deposit = $' + ((Number(data.depositCents || 0)) / 100).toFixed(2) +
+        ' · 20% deposit = $' + ((Number(data.depositCents || 0)) / 100).toFixed(2) +
         ' · Database connected · Clover configured.</div>';
     } else {
       var detail = transportError ? transportError : "One or more live funnel checks failed.";

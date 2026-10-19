@@ -25,7 +25,7 @@ describe("server-authoritative checkout pricing", () => {
         quantities: {}
       });
       expect(result.totalCents).toBe(totalCents);
-      expect(result.depositCents).toBe(Math.ceil(totalCents * 0.15));
+      expect(result.depositCents).toBe(Math.ceil(totalCents * 0.20));
       expect(result.promotionCode).toBe(code);
     });
   }
@@ -37,7 +37,7 @@ describe("server-authoritative checkout pricing", () => {
       quantities: { hvac_units: 3 }
     });
     expect(result.totalCents).toBe(79700);
-    expect(result.depositCents).toBe(11955);
+    expect(result.depositCents).toBe(15940);
   });
 
   it("prices combo extras on the server", () => {
@@ -47,7 +47,7 @@ describe("server-authoritative checkout pricing", () => {
       quantities: { carpet_rooms: 7, hvac_units: 2 }
     });
     expect(result.totalCents).toBe(89016);
-    expect(result.depositCents).toBe(13353);
+    expect(result.depositCents).toBe(17804);
   });
 
   it("prices a regular multi-service order without any browser total", () => {
@@ -59,7 +59,7 @@ describe("server-authoritative checkout pricing", () => {
     });
     // 3*46.58 + 155.25 + 10*15.53 + 165.60 + 65 + 70 (duct add-on rate)
     expect(result.totalCents).toBe(75089);
-    expect(result.depositCents).toBe(11264);
+    expect(result.depositCents).toBe(15018);
   });
 
   it("applies NEXTDOOR10 only to regular-price upholstery", () => {
@@ -71,7 +71,7 @@ describe("server-authoritative checkout pricing", () => {
     });
     // Upholstery: $507.15 - $50.72 (10%, rounded to cents) + $65 pet treatment.
     expect(result.totalCents).toBe(52143);
-    expect(result.depositCents).toBe(7822);
+    expect(result.depositCents).toBe(10429);
     expect(result.promotionCode).toBe("NEXTDOOR10");
     expect(result.serviceDetail).toMatch(/10% off upholstery \(-\$50\.72\)/);
   });

@@ -109,7 +109,7 @@
       button.disabled = true;
       button.textContent = "Preparing secure deposit…";
     }
-    status(form, "DCA is verifying the price and creating your 15% Clover deposit…", false);
+    status(form, "DCA is verifying the price and creating your 20% Clover deposit…", false);
 
     var payload = {
       bookingRef: bookingRef(),
