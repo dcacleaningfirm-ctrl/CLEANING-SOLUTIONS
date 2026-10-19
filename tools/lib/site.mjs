@@ -134,7 +134,7 @@ export const esc = (s) =>
 export function price(key, group) {
   const table = group ? pricing[group] : pricing.services;
   const attr = group ? ` data-price-group="${group}"` : "";
-  return `<span data-price-key="${key}"${attr}>${money(rate(key, group))}</span>`;
+  return `<span data-price-key="${key}"${attr}>${table[key].priceDisplay || money(rate(key, group))}</span>`;
 }
 
 /** The catalog number for a key, e.g. rate("dryerVent", "treatments"). */
@@ -411,10 +411,10 @@ export function serviceSchema({
       name: o.name,
       description: o.description,
       priceCurrency: pricing.currency,
-      price: priceValue(o.price),
+      ...(o.maxPrice ? {} : { price: priceValue(o.price) }),
       priceSpecification: {
         "@type": "UnitPriceSpecification",
-        price: priceValue(o.price),
+        ...(o.maxPrice ? { minPrice: priceValue(o.price), maxPrice: priceValue(o.maxPrice) } : { price: priceValue(o.price) }),
         priceCurrency: pricing.currency,
         ...(o.unit ? { unitText: o.unit } : {}),
       },

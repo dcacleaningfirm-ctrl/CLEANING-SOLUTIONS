@@ -377,7 +377,7 @@
     scope.querySelectorAll("[data-price-key]").forEach(function (element) {
       var group = element.dataset.priceGroup || "services";
       var item = pricing[group] && pricing[group][element.dataset.priceKey];
-      if (item) element.textContent = formatPrice(item.price);
+      if (item) element.textContent = item.priceDisplay || formatPrice(item.price);
     });
 
     scope.querySelectorAll("[data-nextdoor-coupon-price]").forEach(function (element) {
@@ -560,7 +560,7 @@
     draft.treatments.forEach(function (key) {
       var item = key === "dryerVent" ? dryerVentItem(draft) : treatments[key];
       if (!item) return;
-      add(item.label, "Optional add-on", item.price);
+      add(item.label, key === "petTreatment" ? "$65–$120 depending on home size; estimate includes $65. Final price confirmed before treatment." : "Optional add-on", item.price);
     });
 
     return { lines: lines, total: total, couponApplied: couponApplied };
