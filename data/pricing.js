@@ -22,7 +22,9 @@ window.DCA_PRICING = Object.freeze({
     dryerVentAddOn: Object.freeze({ label: "Dryer vent cleaning — added to air duct cleaning", price: 70.00 }),
     sanitizer: Object.freeze({ label: "Sanitizer application", price: 45.00 }),
     antimicrobial: Object.freeze({ label: "Antimicrobial treatment", price: 85.00 }),
-    petTreatment: Object.freeze({ label: "Pet-odor treatment — starting allowance", price: 65.00, maxPrice: 120.00, priceDisplay: "$65–$120, depending on home size" })
+    petTreatment: Object.freeze({ label: "Pet enzyme treatment — small home", price: 65.00, maxPrice: 120.00, priceDisplay: "Small home $65 · Medium home $80 · Larger home $120" }),
+    petTreatmentMedium: Object.freeze({ label: "Pet enzyme treatment — medium home", price: 80.00 }),
+    petTreatmentLarge: Object.freeze({ label: "Pet enzyme treatment — larger home", price: 120.00 })
   }),
   coupons: Object.freeze({
     NEXTDOOR10: Object.freeze({

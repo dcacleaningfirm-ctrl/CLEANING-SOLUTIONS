@@ -301,7 +301,7 @@ ${ctaBand(
           {
             name: "Enzyme treatment for organic odor sources",
             description:
-              "Optional treatment, $65–$120 depending on home size, for many common organic odor sources. Not a guarantee of odor elimination.",
+              "Optional treatment, $65 for small homes, $80 for medium homes, and $120 for larger homes, for many common organic odor sources. Not a guarantee of odor elimination.",
             price: rate("petTreatment", "treatments"),
             maxPrice: 120,
           },
@@ -882,7 +882,7 @@ ${ctaBand("Price your sofa, chairs and sectional in a few minutes.")}`;
           {
             name: "Pet-odor treatment",
             description:
-              "Optional enzyme treatment, $65–$120 depending on home size, for many common organic odor sources. Not a guarantee of odor elimination.",
+              "Optional enzyme treatment, $65 for small homes, $80 for medium homes, and $120 for larger homes, for many common organic odor sources. Not a guarantee of odor elimination.",
             price: rate("petTreatment", "treatments"),
             maxPrice: 120,
           },
