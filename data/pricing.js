@@ -5,7 +5,7 @@
  * steps, the add-ons page and the promotion page at once.
  */
 window.DCA_PRICING = Object.freeze({
-  version: "2026-09-16",
+  version: "2026-10-19",
   currency: "USD",
   services: Object.freeze({
     carpetRoom: Object.freeze({ label: "Carpet cleaning — per room", price: 46.58 }),
@@ -22,7 +22,7 @@ window.DCA_PRICING = Object.freeze({
     dryerVentAddOn: Object.freeze({ label: "Dryer vent cleaning — added to air duct cleaning", price: 70.00 }),
     sanitizer: Object.freeze({ label: "Sanitizer application", price: 45.00 }),
     antimicrobial: Object.freeze({ label: "Antimicrobial treatment", price: 85.00 }),
-    petTreatment: Object.freeze({ label: "Pet-odor treatment", price: 65.00 })
+    petTreatment: Object.freeze({ label: "Pet-odor treatment — starting allowance", price: 65.00, maxPrice: 120.00, priceDisplay: "$65–$120, depending on home size" })
   }),
   coupons: Object.freeze({
     NEXTDOOR10: Object.freeze({
