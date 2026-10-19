@@ -90,7 +90,7 @@ export default async (req: Request) => {
   const depositPending = [];
   const paidConfirm = [];
   for (const job of jobRows) {
-    const requiredDeposit = Math.ceil(Math.max(0, job.priceCents) * 0.15);
+    const requiredDeposit = Math.ceil(Math.max(0, job.priceCents) * 0.20);
     const paidCents = paidByJob.get(job.id) || 0;
     if (requiredDeposit > 0 && paidCents < requiredDeposit) {
       depositPending.push({ ...job, paidCents, requiredDepositCents: requiredDeposit, balanceToDepositCents: requiredDeposit - paidCents });

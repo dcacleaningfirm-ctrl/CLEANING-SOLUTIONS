@@ -225,7 +225,7 @@ export default async (req: Request, _context: Context) => {
         await store.setJSON(callSid, state);
         const spoken =
           `Thank you. I placed request number ${booked.jobId} on hold. ` +
-          `The planning total is ${money(booked.quote.totalCents)}, and the required 15 percent deposit is ${money(
+          `The planning total is ${money(booked.quote.totalCents)}, and the required 20 percent deposit is ${money(
             booked.quote.depositCents
           )}. I just sent a secure payment link to the phone you are calling from. ` +
           `Open the text and pay the deposit now. When you finish, press 1. Press 2 for the DCA office. ` +

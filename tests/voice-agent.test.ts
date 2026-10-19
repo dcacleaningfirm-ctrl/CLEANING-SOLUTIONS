@@ -59,7 +59,7 @@ test("the outage fallback recognizes booking dates and appointment windows", () 
   });
 });
 
-test("pet treatment, ENVMT, and the 15 percent deposit are calculated together", () => {
+test("pet treatment, ENVMT, and the 20 percent deposit are calculated together", () => {
   const state = applyVoicePatch(newVoiceCall("CA123", "+14045550101"), {
     customerName: "Atlanta Customer",
     service: "carpet",
@@ -73,7 +73,7 @@ test("pet treatment, ENVMT, and the 15 percent deposit are calculated together",
   const quote = quoteForVoiceState(state);
   assert.equal(quote?.promotion.code, "CARPET119");
   assert.equal(quote?.totalCents, 20_900);
-  assert.equal(quote?.depositCents, 3_135);
+  assert.equal(quote?.depositCents, 4_180);
   assert.equal(stateIsBookable(state), false);
   assert.equal(stateIsBookable(applyVoicePatch(state, { confirmed: true })), true);
 });

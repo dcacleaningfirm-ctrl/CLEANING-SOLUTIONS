@@ -740,7 +740,7 @@ interface BookingItem {
 const ENVMT_LABEL = "Environmental Waste Fee (ENVMT)";
 const ENVMT_CENTS = 2500;
 const MAX_ENVMT_CENTS = 100000;
-const DEPOSIT_PERCENT = 15;
+const DEPOSIT_PERCENT = 20;
 
 function withRequiredEnvmt(items: BookingItem[]): BookingItem[] {
   const supplied = items.find(

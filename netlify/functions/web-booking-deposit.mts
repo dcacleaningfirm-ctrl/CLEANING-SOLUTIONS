@@ -118,12 +118,12 @@ export default async (req: Request, _context: Context) => {
     totalCents,
     requestedDate: preferredDate || null,
     requestedTime: preferredTime || null,
-    customerNotes: customerNotes || `Website booking. 15% deposit of $${(depositCents / 100).toFixed(2)} required before appointment confirmation.`,
+    customerNotes: customerNotes || `Website booking. 20% deposit of $${(depositCents / 100).toFixed(2)} required before appointment confirmation.`,
     raw: {
       channel: "website",
       bookingRef,
       attribution,
-      depositPercent: 15,
+      depositPercent: 20,
       serverPriced: true,
       orderMode: clean(body.orderMode, 20) || (pricing.promotionCode ? "special" : "general"),
       checkoutQuantities: pricing.quantities,
@@ -165,7 +165,7 @@ export default async (req: Request, _context: Context) => {
       source: "website",
       bookedBy: null,
       address,
-      notes: `Server-priced website appointment hold pending 15% deposit. Preferred date: ${preferredDate || "not selected"}; preferred arrival: ${preferredTime || "no preference"}. Booking ref ${bookingRef}. ${pricing.serviceDetail}`
+      notes: `Server-priced website appointment hold pending 20% deposit. Preferred date: ${preferredDate || "not selected"}; preferred arrival: ${preferredTime || "no preference"}. Booking ref ${bookingRef}. ${pricing.serviceDetail}`
     })
     .returning({ id: jobs.id });
 

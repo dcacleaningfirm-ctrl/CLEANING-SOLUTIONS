@@ -29,7 +29,7 @@ export function priceMovePackages(q: Record<string, unknown>) {
   lineItems.push({ kind: "fee", label: "Environmental fee", quantity: 1, unitPriceCents: MOVE_ENVIRONMENTAL_FEE_CENTS, amountCents: MOVE_ENVIRONMENTAL_FEE_CENTS });
   const totalCents = lineItems.reduce((sum, i) => sum + i.amountCents, 0);
   return {
-    totalCents, depositCents: Math.ceil(totalCents * 15 / 100),
+    totalCents, depositCents: Math.ceil(totalCents * 20 / 100),
     serviceName: "Move-In / Move-Out Cleaning",
     serviceDetail: lineItems.map(i => `${i.label} × ${i.quantity}: $${(i.amountCents / 100).toFixed(2)}`).join("; "),
     promotionCode: null, quantities, treatments: [], lineItems

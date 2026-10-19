@@ -5,7 +5,7 @@ import { jobs } from "../../db/schema.js";
 import { promotionByCode } from "../../lib/promotions.js";
 
 const OFFER_CODE = "CARPET199";
-const DEPOSIT_PERCENT = 15;
+const DEPOSIT_PERCENT = 20;
 
 export default async (req: Request, _context: Context) => {
   if (req.method !== "GET") {
@@ -33,7 +33,7 @@ export default async (req: Request, _context: Context) => {
       : "sandbox"
   };
 
-  const offerOk = Boolean(promotion && promotion.code === OFFER_CODE && totalCents === 19900 && depositCents === 2985);
+  const offerOk = Boolean(promotion && promotion.code === OFFER_CODE && totalCents === 19900 && depositCents === 3980);
   const cloverConfigured = clover.apiKey && clover.publicKey && clover.merchantId;
   const ok = offerOk && database === "ok" && cloverConfigured;
 

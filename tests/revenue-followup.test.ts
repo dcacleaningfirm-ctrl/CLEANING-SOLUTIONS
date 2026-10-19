@@ -4,13 +4,12 @@ import { readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
 
-test("scheduled follow-up chases unpaid deposits without duplicate sends", async () => {
+test("scheduled follow-up alerts the office without customer deposit reminders", async () => {
   const source = await readFile(new URL("netlify/functions/revenue-followup.mts", root), "utf8");
-  assert.match(source, /deposit_reminder_30m/);
-  assert.match(source, /deposit_reminder_24h/);
+  assert.doesNotMatch(source, /sendDepositReminder|deposit_reminder_24h|deposit_reminder_15m/);
+  assert.match(source, /alertOfficeAbandonedDeposit/);
   assert.match(source, /hasNotification/);
-  assert.match(source, /ensureVoicePaymentLink/);
-  assert.match(source, /schedule:\s*"\*\/30 \* \* \* \*"/);
+  assert.match(source, /schedule:\s*"\*\/15 \* \* \* \*"/);
 });
 
 test("campaign revenue is reconciled from actual paid transactions", async () => {

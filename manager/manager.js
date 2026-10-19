@@ -6138,7 +6138,7 @@
   }
 
   function bookingDepositCents() {
-    return Math.ceil(bookingTotalCents() * 0.15);
+    return Math.ceil(bookingTotalCents() * 0.20);
   }
 
   function renderBook() {
@@ -6214,7 +6214,7 @@
       '<div class="booking-fields"><label class="field"><span>Environmental Waste Fee <small>ENVMT · per order</small></span>' +
       '<div class="money-input"><span>$</span><input id="bk-envmt" type="number" min="0" max="1000" step="0.01" value="' +
       ((b.envmtCents == null ? 2500 : b.envmtCents) / 100).toFixed(2) + '" /></div></label>' +
-      '<div class="field"><span>Required deposit (15%)</span><strong class="mono" id="bk-deposit">' +
+      '<div class="field"><span>Required deposit (20%)</span><strong class="mono" id="bk-deposit">' +
       fmtMoney(bookingDepositCents()) + "</strong></div></div>" +
       '<div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" id="bk-add-custom">Other charge</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" id="bk-clear-items">Clear list</button></div>' +
@@ -7356,7 +7356,7 @@
       '<div class="btn-row pay-actions">' +
       (open
         ? ""
-        : '<button type="button" class="btn btn-primary btn-sm" id="d-deposit">Collect 15% deposit</button>' +
+        : '<button type="button" class="btn btn-primary btn-sm" id="d-deposit">Collect 20% deposit</button>' +
           '<button type="button" class="btn btn-ghost btn-sm" id="d-collect">Collect other payment</button>') +
       '<button type="button" class="btn btn-ghost btn-sm" id="d-confirm">Send confirmation</button>' +
       "</div>" +
@@ -7444,14 +7444,14 @@
       deposit.addEventListener("click", function () {
         loadSettings().catch(function () { return null; }).then(function () {
           var target = data.depositBalanceCents == null
-            ? Math.max(0, Math.ceil(j.priceCents * 0.15) - (data.paidCents || 0))
+            ? Math.max(0, Math.ceil(j.priceCents * 0.20) - (data.paidCents || 0))
             : data.depositBalanceCents;
           state.pay = {
             jobId: j.id,
             method: defaultMethod(),
             amount: (target / 100).toFixed(2),
             reference: "",
-            note: "15% order deposit"
+            note: "20% order deposit"
           };
           renderDrawer(state.job);
         });

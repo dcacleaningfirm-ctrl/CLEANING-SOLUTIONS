@@ -472,7 +472,7 @@
                             <option value="Covington">Covington</option>
                         </select>
                     </div>
-                    <p>Continue to DCA’s secure Clover payment page to pay the 15% deposit. Card details are entered there.</p>
+                    <p>Continue to DCA’s secure Clover payment page to pay the 20% deposit. Card details are entered there.</p>
                     <div class="card-errors" id="cardErrors" role="alert"></div>
 
                     <button type="submit" class="payment-submit-btn" id="paySubmitBtn">
@@ -748,9 +748,9 @@
             var depositLi = document.createElement('li');
             depositLi.className = 'order-total';
             var depositLabel = document.createElement('span');
-            depositLabel.textContent = 'Deposit due now (15%)';
+            depositLabel.textContent = 'Deposit due now (20%)';
             var depositVal = document.createElement('span');
-            depositVal.textContent = money(Math.ceil(cartTotal() * 0.15));
+            depositVal.textContent = money(Math.ceil(cartTotal() * 0.20));
             depositLi.appendChild(depositLabel);
             depositLi.appendChild(depositVal);
             list.appendChild(depositLi);

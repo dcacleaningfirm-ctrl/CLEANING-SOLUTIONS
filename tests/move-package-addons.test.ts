@@ -9,7 +9,7 @@ for (const extra of [0, 1, 2, 4, 10]) {
   test(`Complete Home with ${extra} extra systems has matching lines and deposit`, () => {
     const result = priceMovePackages({ complete: 1, complete_extra_system: extra });
     assert.equal(result.totalCents, 89999 + extra * 19999 + 2500);
-    assert.equal(result.depositCents, Math.ceil(result.totalCents * .15));
+    assert.equal(result.depositCents, Math.ceil(result.totalCents * .20));
     assert.equal(result.lineItems.reduce((sum, i) => sum + i.amountCents, 0), result.totalCents);
     assert.equal(result.lineItems.filter(i => i.kind === 'fee').length, 1);
   });
@@ -39,7 +39,7 @@ test('actual page cart, checkout summary and removal follow server totals', () =
   const summary=JSON.stringify(document.getElementById('modal-order-items').children);
   // Full total includes the once-per-booking fee.
   assert.match(summary,/\$1324\.97/);
-  assert.match(summary,/\$198\.75/);
+  assert.match(summary,/\$265\.00/);
   vm.runInContext('changeQty(1,-1)',context);
   assert.equal(vm.runInContext('cartTotal()',context),priceMovePackages({complete:1,complete_extra_system:1}).totalCents);
   vm.runInContext('removeItem(0)',context);

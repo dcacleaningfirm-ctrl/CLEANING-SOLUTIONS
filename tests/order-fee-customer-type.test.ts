@@ -19,10 +19,10 @@ test("every order defaults to $25 ENVMT and allows a per-order adjustment", () =
   assert.match(manager, /id="bk-envmt"/);
 });
 
-test("phone orders offer a 15 percent deposit and keep the remaining balance", () => {
-  assert.match(api, /DEPOSIT_PERCENT = 15/);
-  assert.match(manager, /Collect 15% deposit/);
-  assert.match(manager, /Math\.ceil\(j\.priceCents \* 0\.15\)/);
+test("phone orders offer a 20 percent deposit and keep the remaining balance", () => {
+  assert.match(api, /DEPOSIT_PERCENT = 20/);
+  assert.match(manager, /Collect 20% deposit/);
+  assert.match(manager, /Math\.ceil\(j\.priceCents \* 0\.20\)/);
   assert.match(manager, /Deposit paid/);
 });
 

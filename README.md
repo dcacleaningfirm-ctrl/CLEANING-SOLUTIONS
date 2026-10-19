@@ -32,7 +32,7 @@ The inbound voice endpoints are:
 - `POST /api/voice/incoming` — starts a verified Twilio call and discloses that the caller is speaking with an automated scheduling assistant.
 - `POST /api/voice/turn` — gathers one answer at a time, creates the lead and appointment hold in DCA Pro Manager, then alerts the customer and Shacole by SMS.
 
-The assistant uses the published 3-, 4-, 5-, 10-, and 12-area carpet offers. It can add the $65 pet enzyme and odor treatment allowance and the required $25 ENVMT fee. It reads back the full scope, date, window, planning total, and 15% deposit before it can place a hold. Human requests, complaints, refunds, emergencies, custom quotes, AI failures, and booking failures transfer to Shacole at `(404) 703-3704`. Calls are not recorded by this flow.
+The assistant uses the published 3-, 4-, 5-, 10-, and 12-area carpet offers. It can add the $65 pet enzyme and odor treatment allowance and the required $25 ENVMT fee. It reads back the full scope, date, window, planning total, and 20% deposit before it can place a hold. Human requests, complaints, refunds, emergencies, custom quotes, AI failures, and booking failures transfer to Shacole at `(404) 703-3704`. Calls are not recorded by this flow.
 
 Configure these secrets in Netlify:
 

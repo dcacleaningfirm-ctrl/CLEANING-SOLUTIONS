@@ -1,7 +1,7 @@
 import { priceMovePackages } from "./move-package-pricing.js";
 import { promotionByCode } from "./promotions.js";
 
-export const CHECKOUT_DEPOSIT_PERCENT = 15;
+export const CHECKOUT_DEPOSIT_PERCENT = 20;
 
 const SERVICES = Object.freeze({
   carpetRoom: 46.58,

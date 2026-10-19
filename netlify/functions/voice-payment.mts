@@ -75,7 +75,7 @@ function page(input: {
     ? `<div class="success">✓</div><p class="eyebrow">PAYMENT CONFIRMED</p><h1>Deposit received</h1><div class="summary"><span>${htmlEscape(input.serviceType)}</span><strong>Job #${input.jobId}</strong><small>Your booking is now in DCA Pro. The office will contact you to confirm the exact appointment time.</small></div><a class="call" href="tel:4704853123">Questions? Call (470) 485-3123</a>`
     : input.unavailable
       ? `<h1>Secure payment is unavailable</h1><p>Please call <a href="tel:4704853123">(470) 485-3123</a> and reference job #${input.jobId}.</p>`
-      : `<p class="eyebrow">DCA CLEANING SOLUTIONS</p><h1>Secure 15% deposit</h1><div class="summary"><span>${htmlEscape(input.serviceType)}</span><strong>${money(input.amountCents)}</strong><small>Job #${input.jobId} · Your appointment is confirmed by the office after the deposit is received.</small></div>
+      : `<p class="eyebrow">DCA CLEANING SOLUTIONS</p><h1>Secure booking deposit</h1><div class="summary"><span>${htmlEscape(input.serviceType)}</span><strong>${money(input.amountCents)}</strong><small>Job #${input.jobId} · Your appointment is confirmed by the office after the deposit is received.</small></div>
          <form id="pay-form"><label>Card number<div class="field" id="card-number"></div></label><div class="grid"><label>Expiration<div class="field" id="card-date"></div></label><label>Security code<div class="field" id="card-cvv"></div></label></div><label>Billing ZIP<div class="field" id="card-postal"></div></label><p id="error" class="error" hidden></p><button id="submit" disabled>Loading secure card form…</button></form><p class="fine">Card information goes directly to Clover and is not stored by DCA Cleaning Solutions.</p>`;
   const script = input.paid || input.unavailable ? "" : `<script src="/meta-pixel.js"></script><script src="${input.sdkUrl}"></script><script>
     const cfg=${config}; const button=document.getElementById('submit'); const error=document.getElementById('error');
@@ -128,7 +128,7 @@ export default async (req: Request, context: Context) => {
       amount: remaining,
       currency: "usd",
       source: cardToken,
-      description: `DCA 15% deposit - job #${payment.row.jobId}`,
+      description: `DCA booking deposit - job #${payment.row.jobId}`,
       metadata: { jobId: String(payment.row.jobId), source: payment.row.source || "website" }
     })
   });
@@ -140,7 +140,7 @@ export default async (req: Request, context: Context) => {
 
   const [duplicate] = await db.select({ id: payments.id }).from(payments).where(eq(payments.providerRef, charge.id)).limit(1);
   if (!duplicate) {
-    await db.insert(payments).values({ jobId: payment.row.jobId, customerId: payment.row.customerId, amountCents: remaining, provider: "clover", providerRef: charge.id, status: "paid", method: "card", note: `15% deposit paid through secure Clover link (${payment.row.source || "website"})` });
+    await db.insert(payments).values({ jobId: payment.row.jobId, customerId: payment.row.customerId, amountCents: remaining, provider: "clover", providerRef: charge.id, status: "paid", method: "card", note: `Booking deposit paid through secure Clover link (${payment.row.source || "website"})` });
     await db.insert(jobEvents).values({ jobId: payment.row.jobId, kind: "payment", message: `Customer paid ${money(remaining)} deposit through secure Clover link` });
     await db.insert(jobEvents).values({ jobId: payment.row.jobId, kind: "status", message: "Deposit requirement satisfied — office appointment confirmation required" });
   }
