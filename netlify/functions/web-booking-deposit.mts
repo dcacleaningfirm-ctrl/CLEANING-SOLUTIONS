@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import type { Config, Context } from "@netlify/functions";
 import { db } from "../../db/index.js";
-import { customers, jobEvents, jobs, leadEvents, leads } from "../../db/schema.js";
+import { customers, jobEvents, jobItems, jobs, leadEvents, leads } from "../../db/schema.js";
 import { calculateCheckout } from "../../lib/checkout-pricing.js";
 import { ingestLead } from "../../lib/lead-intake.js";
 import { ensureVoicePaymentLink, voicePaymentUrl } from "../../lib/voice-payment.js";
@@ -168,6 +168,10 @@ export default async (req: Request, _context: Context) => {
       notes: `Server-priced website appointment hold pending 15% deposit. Preferred date: ${preferredDate || "not selected"}; preferred arrival: ${preferredTime || "no preference"}. Booking ref ${bookingRef}. ${pricing.serviceDetail}`
     })
     .returning({ id: jobs.id });
+
+  if (pricing.lineItems?.length) {
+    await db.insert(jobItems).values(pricing.lineItems.map(item => ({ ...item, jobId: job.id })));
+  }
 
   await db.update(leads).set({ jobId: job.id, status: "scheduled", updatedAt: new Date() }).where(eq(leads.id, intake.lead.id));
   await db.insert(jobEvents).values({

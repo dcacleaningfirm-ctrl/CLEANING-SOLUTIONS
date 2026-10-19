@@ -7105,15 +7105,9 @@
           " has already been collected on this job, so the new total cannot be less than that." +
           "</p>"
         : "") +
-      '<label class="field"><span>What changed (goes to the customer)</span>' +
+      '<label class="field"><span>What changed (internal office note)</span>' +
       '<input id="d-ticket-note" maxlength="300" placeholder="e.g. Added hallway and stairs on site" /></label>' +
-      '<div class="pay-receipt"><p class="eyebrow">Send the new total</p>' +
-      channelChoices("d-ticket", {
-        email: j.customerEmail,
-        phone: j.customerPhone,
-        checked: true
-      }) +
-      "</div>" +
+      '<p class="hint">Office changes are saved internally. Customers receive the booking confirmation and final invoice only.</p>' +
       '<p class="login-error" id="d-ticket-error" hidden></p>' +
       '<div class="btn-row"><button type="button" class="btn btn-primary btn-sm" id="d-ticket-save">Save new price</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" id="d-ticket-cancel">Cancel</button></div>' +
@@ -7275,7 +7269,7 @@
     }
     var button = document.getElementById("d-ticket-save");
     var note = val("d-ticket-note");
-    var channels = chosenChannels("d-ticket");
+    var channels = [];
     var box = document.getElementById("d-ticket-error");
     if (box) box.hidden = true;
     button.disabled = true;
@@ -7365,10 +7359,6 @@
         : '<button type="button" class="btn btn-primary btn-sm" id="d-deposit">Collect 15% deposit</button>' +
           '<button type="button" class="btn btn-ghost btn-sm" id="d-collect">Collect other payment</button>') +
       '<button type="button" class="btn btn-ghost btn-sm" id="d-confirm">Send confirmation</button>' +
-      '<button type="button" class="btn btn-ghost btn-sm" id="d-quote">Send total</button>' +
-      ((data.payments || []).length
-        ? '<button type="button" class="btn btn-ghost btn-sm" id="d-receipt">Send receipt</button>'
-        : "") +
       "</div>" +
       messages +
       (open ? payPanel(data) : "")
@@ -7426,13 +7416,7 @@
       "</div>" +
       cardBlock +
       '<label class="checkline"><input type="checkbox" id="pay-complete" checked /><span>Mark the job completed if this clears the balance</span></label>' +
-      '<div class="pay-receipt"><p class="eyebrow">Send a receipt</p>' +
-      channelChoices("pay-receipt", {
-        email: data.job.customerEmail,
-        phone: data.job.customerPhone,
-        checked: true
-      }) +
-      "</div>" +
+      '<p class="hint">Payment is recorded internally. Send the final invoice through the invoice workflow.</p>' +
       '<p class="login-error" id="pay-error" hidden></p>' +
       '<div class="btn-row"><button type="button" class="btn btn-primary btn-sm" id="pay-submit">Take payment</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" id="pay-cancel">Cancel</button></div>' +

@@ -1,3 +1,4 @@
+import { allowsCustomerJobNotification } from "../../lib/customer-notification-policy.js";
 import { checkServiceAddressText } from "../../lib/service-area-check.js";
 import type { Config, Context } from "@netlify/functions";
 import { handleJobInvoice } from "../../lib/job-invoice-routes.js";
@@ -1684,7 +1685,7 @@ export default async (req: Request, context: Context) => {
       // A receipt is offered on the same request so the customer gets it while
       // the crew member is still standing there.
       let receipt: Awaited<ReturnType<typeof deliverJobMessage>> | null = null;
-      const receiptChannels = readChannels(body.sendReceipt);
+      const receiptChannels: NotifyChannel[] = []; // Final invoice is sent separately.
       if (receiptChannels.length) {
         const detail = await loadJob(jobId);
         if (detail) {
@@ -1733,6 +1734,9 @@ export default async (req: Request, context: Context) => {
         body.kind === "payment_receipt" || body.kind === "quote_update"
           ? body.kind
           : "booking_confirmation";
+      if (method === "POST" && !allowsCustomerJobNotification(kind)) {
+        return json({ error: "Customer notifications are limited to booking confirmations and final invoices. Use the invoice workflow to send the final invoice." }, { status: 400 });
+      }
       const summary = summarizeJob(detail);
       const lastPayment = detail.payments[0];
       if (kind === "payment_receipt" && !lastPayment) {
@@ -3455,26 +3459,10 @@ export default async (req: Request, context: Context) => {
 
       console.log(`job ${id} repriced by employee ${account.id}`);
 
-      // The customer standing there agreed to the add-on out loud; the written
-      // total is what stops a dispute later, so it can go out in the same tap.
+      // Office edits are internal. Even older clients sending sendUpdate must
+      // not send the customer another message.
       const updated = await loadJob(id);
-      const updateChannels = readChannels(body.sendUpdate);
-      let sent: Awaited<ReturnType<typeof deliverJobMessage>> | null = null;
-      if (updated && updateChannels.length) {
-        sent = await deliverJobMessage({
-          summary: summarizeJob(updated),
-          kind: "quote_update",
-          channels: updateChannels,
-          email: updated.job.customerEmail,
-          phone: updated.job.customerPhone,
-          employeeId: account.id,
-          customerId: updated.job.customerId,
-          change: { previousCents, note }
-        });
-      }
-
-      const final = updateChannels.length ? await loadJob(id) : updated;
-      return json({ ...final, sent, previousCents });
+      return json({ ...updated, sent: null, previousCents });
     }
 
     // --- Add a note to a job --------------------------------------------
@@ -4337,6 +4325,7 @@ async function deliverJobMessage(options: {
   };
   change?: { previousCents: number; note?: string | null };
 }) {
+  if (!allowsCustomerJobNotification(options.kind)) return [];
   const content = jobMessageContent(options);
 
   const results: {

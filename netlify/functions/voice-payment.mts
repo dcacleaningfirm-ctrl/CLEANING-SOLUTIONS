@@ -146,24 +146,19 @@ export default async (req: Request, context: Context) => {
   }
   await markVoicePaymentUsed(payment.link);
 
-  const customerBody = `DCA Cleaning Solutions: PAYMENT CONFIRMED. We received your ${money(remaining)} deposit for job #${payment.row.jobId} (${payment.row.serviceType}). Your booking is now in DCA Pro and the office will contact you to confirm the appointment time. Questions: (470) 485-3123.`;
+  // Show payment success on screen; avoid an extra customer notification.
+  // The office sends the booking confirmation after confirming the time.
   const officeBody = `PAID BOOKING — CONFIRM NOW: ${payment.row.customerName}, ${money(remaining)}, ${payment.row.serviceType}, job #${payment.row.jobId}, source ${payment.row.source || "website"}. Deposit is paid. Contact the customer to confirm the appointment time.`;
-  const results = await Promise.all([
-    sendSms({ to: payment.row.customerPhone, body: customerBody }),
-    sendSms({ to: SHACOLE_NUMBER, body: officeBody })
-  ]);
-  await db.insert(notifications).values([
-    { jobId: payment.row.jobId, customerId: payment.row.customerId, kind: "payment_receipt", channel: "sms", recipient: normalizePhone(payment.row.customerPhone) || payment.row.customerPhone, body: customerBody, status: results[0].ok ? "sent" : "failed", provider: results[0].provider, providerRef: results[0].providerRef, error: results[0].error },
-    { jobId: payment.row.jobId, customerId: payment.row.customerId, kind: "office_deposit_alert", channel: "sms", recipient: normalizePhone(SHACOLE_NUMBER) || SHACOLE_NUMBER, body: officeBody, status: results[1].ok ? "sent" : "failed", provider: results[1].provider, providerRef: results[1].providerRef, error: results[1].error }
-  ]);
+  const officeResult = await sendSms({ to: SHACOLE_NUMBER, body: officeBody });
+  await db.insert(notifications).values({ jobId: payment.row.jobId, customerId: payment.row.customerId, kind: "office_deposit_alert", channel: "sms", recipient: normalizePhone(SHACOLE_NUMBER) || SHACOLE_NUMBER, body: officeBody, status: officeResult.ok ? "sent" : "failed", provider: officeResult.provider, providerRef: officeResult.providerRef, error: officeResult.error });
   return Response.json({
     success: true,
     jobId: payment.row.jobId,
     chargeId: charge.id,
     amountCents: remaining,
     serviceType: payment.row.serviceType,
-    customerReceiptSent: results[0].ok,
-    officeAlertSent: results[1].ok,
+    customerReceiptSent: false,
+    officeAlertSent: officeResult.ok,
     message: "Payment confirmed. Your deposit was received and the DCA office has been alerted to confirm your appointment time."
   });
 };
