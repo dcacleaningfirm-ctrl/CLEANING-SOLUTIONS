@@ -5,7 +5,9 @@ import crypto from "node:crypto";
 import type { Config } from "@netlify/functions";
 import { and, eq, ilike } from "drizzle-orm";
 import { db } from "../../db/index.js";
-import { employees, leads, leadEvents } from "../../db/schema.js";
+import { employees, leads, leadEvents, notifications } from "../../db/schema.js";
+import { deliverMetaLeadAlert } from "../../lib/meta-lead-alert.js";
+import { SHACOLE_NUMBER } from "../../lib/voice-agent.js";
 
 const response = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -67,6 +69,36 @@ async function importLead(leadgenId: string, formId: string | null, adId: string
     leadId: created.id, kind: "imported",
     message: "Facebook lead received for Shacole review. Customer not created."
   });
+  // Only a newly stored lead alerts the office; webhook retries return above.
+  // Provider failure must never discard the inquiry or create a customer.
+  const alertBody = [
+    "NEW FACEBOOK LEAD — SHACOLE REVIEW",
+    name.slice(0, 120), phone || email || "No contact supplied",
+    "Service: " + (service || "Cleaning inquiry"),
+    "Lead #" + created.id,
+    "Review before creating a customer or booking.",
+    "https://www.dcacleaningsolutions.com/manager/"
+  ].join("\n");
+  try {
+    const deliveries = await deliverMetaLeadAlert(alertBody, SHACOLE_NUMBER, "info@dcacleaningsolutions.com");
+    for (const delivery of deliveries) {
+      await db.insert(notifications).values({
+        customerId: null, kind: "lead_alert", channel: delivery.channel,
+        recipient: delivery.recipient, body: alertBody,
+        status: delivery.result.ok ? "sent" : "failed",
+        provider: delivery.result.provider, providerRef: delivery.result.providerRef,
+        error: delivery.result.error
+      });
+    }
+    await db.insert(leadEvents).values({
+      leadId: created.id, kind: "note",
+      message: deliveries.some(d => d.result.ok)
+        ? "Office alert sent for Shacole review. Customer not created."
+        : "Office alert failed. Lead saved for review; see Alert failed on the dashboard."
+    });
+  } catch {
+    console.error("Meta lead saved; office alert or alert logging failed", { leadId: created.id });
+  }
   return created.id;
 }
 
