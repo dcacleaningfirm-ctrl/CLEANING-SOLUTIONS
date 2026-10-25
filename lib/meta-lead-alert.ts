@@ -17,9 +17,10 @@ export async function deliverMetaLeadAlert(
     try { return await send(); }
     catch { return { ok: false, provider: null, providerRef: null, error: "Office alert provider did not respond" }; }
   };
-  const sms = await attempt(() => senders.sms({ to: officePhone, body }));
-  const deliveries: Delivery[] = [{ channel: "sms", recipient: officePhone, result: sms }];
-  if (!sms.ok) {
+  // Notify both channels immediately; provider acceptance of an SMS does not
+  // guarantee the phone received it. One slow provider must not delay the other.
+  const smsPromise = attempt(() => senders.sms({ to: officePhone, body }));
+  const emailPromise = (async () => {
     const escaped = body.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
     const email = await attempt(() => senders.email({
       to: officeEmail,
@@ -27,7 +28,12 @@ export async function deliverMetaLeadAlert(
       text: body,
       html: `<pre style="white-space:pre-wrap;font-family:Arial,sans-serif">${escaped}</pre>`
     }));
-    deliveries.push({ channel: "email", recipient: officeEmail, result: email });
-  }
-  return deliveries;
+    return email;
+  })();
+  const [sms, email] = await Promise.all([smsPromise, emailPromise]);
+  return [
+    { channel: "sms", recipient: officePhone, result: sms },
+    { channel: "email", recipient: officeEmail, result: email }
+  ];
 }
+
