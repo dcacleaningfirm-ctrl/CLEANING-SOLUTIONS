@@ -9,15 +9,15 @@ const { deliverMetaLeadAlert } = await import("../lib/meta-lead-alert.ts");
 const ok = { ok: true, provider: "test", providerRef: "123", error: null };
 const failed = { ...ok, ok: false, providerRef: null, error: "rejected" };
 
-test("successful office SMS does not send fallback email or contact the lead", async () => {
+test("successful office SMS also sends email without contacting the lead", async () => {
   const recipients: string[] = [];
   const result = await deliverMetaLeadAlert("Lead #1", "+14047033704", "info@dcacleaningsolutions.com", {
     sms: async o => { recipients.push(o.to); return ok; },
-    email: async () => { throw new Error("unexpected fallback"); }
+    email: async o => { recipients.push(o.to); return ok; }
   });
-  assert.deepEqual(recipients, ["+14047033704"]);
-  assert.equal(result.length, 1);
-  assert.equal(result[0].result.ok, true);
+  assert.deepEqual(recipients, ["+14047033704", "info@dcacleaningsolutions.com"]);
+  assert.equal(result.length, 2);
+  assert.deepEqual(result.map(d => d.result.ok), [true, true]);
 });
 test("SMS failure sends escaped office email and preserves both delivery results", async () => {
   let email: any;
@@ -36,3 +36,4 @@ test("provider exceptions remain failed delivery results so intake can retain th
   });
   assert.deepEqual(result.map(d => d.result.ok), [false, false]);
 });
+
