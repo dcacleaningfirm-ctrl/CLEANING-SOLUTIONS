@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, PDFName, PDFString, StandardFonts, rgb } from "pdf-lib";
 import { invoiceLogoJpg } from "./invoice-logo.ts";
 
 export interface InvoicePhoto { id: number; caption: string; bytes: Uint8Array; type: string }
@@ -6,7 +6,7 @@ export interface InvoiceData {
   number: string; company: string; representative: string; address: string;
   reference: string; details: string; date: string;
   lines: { label: string; quantity: number; amountCents: number }[];
-  totalCents: number; paidCents: number; photos: InvoicePhoto[];
+  totalCents: number; paidCents: number; photos: InvoicePhoto[]; paymentUrl?: string;
 }
 
 export async function createCommercialInvoice(data: InvoiceData): Promise<Uint8Array> {
@@ -45,6 +45,16 @@ export async function createCommercialInvoice(data: InvoiceData): Promise<Uint8A
   print(page, `Total: ${dollars(data.totalCents)}`, 38, y, 12, true);
   print(page, `Paid: ${dollars(data.paidCents)}`, 250, y);
   print(page, `Balance: ${dollars(Math.max(0, data.totalCents - data.paidCents))}`, 410, y, 12, true);
+  if (data.paymentUrl && data.totalCents > data.paidCents) {
+    if (!/^https:\/\/www\.dcacleaningsolutions\.com\/pay\/invoice\/[a-f0-9]{64}$/.test(data.paymentUrl)) throw Error("Invalid invoice payment URL");
+    if (y < 105) { page = pdf.addPage([612, 792]); y = 740; }
+    y -= 34;
+    page.drawText("Pay invoice securely with Clover", { x: 38, y, size: 12, font: bold, color: gold });
+    const annotation = pdf.context.register(pdf.context.obj({ Type: "Annot", Subtype: "Link", Rect: [35, y-5, 290, y+15], Border: [0,0,0], A: { Type: "Action", S: "URI", URI: PDFString.of(data.paymentUrl) } }));
+    const annotations = page.node.Annots();
+    if (annotations) annotations.push(annotation); else page.node.set(PDFName.of("Annots"), pdf.context.obj([annotation]));
+    print(page, "Link expires in 30 days. Current balance is verified before payment.", 38, y-20, 9);
+  }
   if (data.photos.length) {
     for (const photo of data.photos) {
       const image = photo.type === "image/png" ? await pdf.embedPng(photo.bytes) : await pdf.embedJpg(photo.bytes);

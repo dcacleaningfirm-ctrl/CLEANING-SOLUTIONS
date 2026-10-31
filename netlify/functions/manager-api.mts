@@ -1,3 +1,4 @@
+import { createInvoicePaymentLink } from "../../lib/invoice-payment.js";
 import { allowsCustomerJobNotification } from "../../lib/customer-notification-policy.js";
 import { checkServiceAddressText } from "../../lib/service-area-check.js";
 import type { Config, Context } from "@netlify/functions";
@@ -119,6 +120,7 @@ import { customerMarketingProfile } from "../../lib/customer-marketing.js";
 import { handleCommercial } from "../../lib/commercial-routes.js";
 import { PROMOTIONS, promotionByCode } from "../../lib/promotions.js";
 import { capiQueueRows } from "../../lib/meta-capi.js";
+import { validateOfficeCoupon } from "../../lib/office-coupons.js";
 
 // Read + write API for the DCA Pro Manager app. Login lives in a separate
 // function (manager-login); everything here requires a valid session cookie.
@@ -1557,6 +1559,8 @@ export default async (req: Request, context: Context) => {
       let providerRef: string | null = null;
 
       if (methodSpec.collects === "clover") {
+        const [invoicePending] = await db.select({ id: payments.id }).from(payments).where(and(eq(payments.jobId, jobId), eq(payments.provider, "clover_invoice"), inArray(payments.status, ["processing", "unknown"]))).limit(1);
+        if (invoicePending) return json({ error: "A customer invoice payment is awaiting Clover verification. Verify that payment before charging again." }, { status: 409 });
         const settings = cloverSettings();
         if (settings.missing.length) {
           return json(
@@ -2936,6 +2940,8 @@ export default async (req: Request, context: Context) => {
         priceCents?: number;
         force?: boolean;
         sendConfirmation?: string[];
+        promotionCode?: string;
+        couponQuantities?: Record<string, unknown>;
       };
 
       const serviceType = (body.serviceType || "").trim();
@@ -2950,6 +2956,8 @@ export default async (req: Request, context: Context) => {
 
       const parsedItems = readBookingItems(body.items);
       if (parsedItems.error) return json({ error: parsedItems.error }, { status: 400 });
+      const couponError = validateOfficeCoupon(body.promotionCode, parsedItems.items, body.couponQuantities, when.at);
+      if (couponError) return json({ error: couponError }, { status: 400 });
       const fallbackPrice = Math.round(Number(body.priceCents || 0));
       const orderItems = parsedItems.items.length || fallbackPrice <= 0
         ? parsedItems.items
@@ -3113,7 +3121,7 @@ export default async (req: Request, context: Context) => {
           longitude: hasBookedLocation ? bookedLocation!.longitude : null,
           placeId: hasBookedLocation ? bookedLocation!.placeId : null,
           formattedAddress: hasBookedLocation ? bookedLocation!.formattedAddress : null,
-          notes: (body.notes || "").trim().slice(0, 2000) || null
+          notes: [body.promotionCode ? "Coupon: " + body.promotionCode.trim().toUpperCase() : "", (body.notes || "").trim()].filter(Boolean).join("\n").slice(0, 2000) || null
         })
         .returning({ id: jobs.id });
 
@@ -4181,7 +4189,7 @@ async function loadJob(id: number) {
     })
     .from(jobEvents)
     .leftJoin(employees, eq(jobEvents.employeeId, employees.id))
-    .where(eq(jobEvents.jobId, id))
+    .where(and(eq(jobEvents.jobId, id), ne(jobEvents.kind, "invoice_payment_link")))
     .orderBy(desc(jobEvents.createdAt));
 
   const takenBy = alias(employees, "payment_taken_by");
@@ -4331,6 +4339,15 @@ async function deliverJobMessage(options: {
   change?: { previousCents: number; note?: string | null };
 }) {
   if (!allowsCustomerJobNotification(options.kind)) return [];
+  let depositError: string | null = null;
+  if (options.kind === "booking_confirmation" && options.channels.length && Math.ceil(options.summary.priceCents * .20) > (options.summary.paidCents || 0)) {
+    try {
+      const customerId = options.customerId ?? (await db.select({ customerId: jobs.customerId }).from(jobs).where(eq(jobs.id, options.summary.jobId)).limit(1))[0]?.customerId;
+      if (!customerId) throw Error("Booking customer unavailable");
+      const link = await createInvoicePaymentLink(options.summary.jobId, customerId, options.employeeId, "deposit");
+      options.summary = { ...options.summary, depositPaymentUrl: link.url };
+    } catch { depositError = "Booking confirmation was not sent because its secure deposit link could not be created. Retry from the job."; }
+  }
   const content = jobMessageContent(options);
 
   const results: {
@@ -4364,7 +4381,7 @@ async function deliverJobMessage(options: {
       continue;
     }
 
-    const sent =
+    const sent = depositError ? { ok: false, provider: "internal", providerRef: null, error: depositError } :
       channel === "email"
         ? await sendEmail({
             to: recipient,

@@ -4,7 +4,8 @@ import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { commercialInvoices, commercialPhotos, customers, jobEvents, jobItems, jobs, payments } from "../db/schema.js";
 import { createCommercialInvoice } from "./commercial-invoice.js";
-import { looksLikeEmail, money, sendEmail, sendSms } from "./notify.js";
+import { looksLikeEmail, money, normalizePhone, sendEmail, sendSms } from "./notify.js";
+import { createInvoicePaymentLink, invoicePaymentsReady, paidOnInvoice } from "./invoice-payment.js";
 
 const files = () => getStore({ name: "commercial-documents", consistency: "strong" });
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "cache-control": "no-store" } });
@@ -12,7 +13,7 @@ const field = (body: Record<string, unknown>, key: string, max: number) => Strin
 
 export async function handleJobInvoice(req: Request, path: string, actor: { id: number; name: string }) {
   const method = req.method.toUpperCase();
-  const match = path.match(/^jobs\/(\d+)\/invoice(?:\/(photos|photos\/(\d+)|document\/(\d+)))?$/);
+  const match = path.match(/^jobs\/(\d+)\/invoice(?:\/(payment-link|photos|photos\/(\d+)|document\/(\d+)))?$/);
   if (!match) return json({ error: "Invoice route not found" }, 404);
   const id = Number(match[1]);
   const suffix = match[2] || "";
@@ -22,10 +23,22 @@ export async function handleJobInvoice(req: Request, path: string, actor: { id: 
   const { job, customer } = row;
   const audit = (message: string) => db.insert(jobEvents).values({ jobId: id, employeeId: actor.id, kind: "invoice", message });
 
+  if (suffix === "payment-link" && method === "POST") {
+    const paidCents = await paidOnInvoice(id);
+    const balanceCents = Math.max(0, job.priceCents - paidCents);
+    if (!balanceCents) return json({ error: "This invoice is already paid in full" }, 409);
+    if (job.status === "cancelled") return json({ error: "This job is cancelled; review its invoice before collecting payment" }, 409);
+    if (!invoicePaymentsReady()) return json({ error: "Secure Clover payment is not configured" }, 503);
+    const link = await createInvoicePaymentLink(id, customer.id, actor.id);
+    await audit(`${actor.name} created a secure invoice payment link for ${money(balanceCents)} outstanding. No payment collected and no message sent.`);
+    return json({ ...link, jobId: id, balanceCents, paidCents, totalCents: job.priceCents }, 201);
+  }
+
   if (!suffix && method === "GET") {
     const photos = await db.select().from(commercialPhotos).where(and(eq(commercialPhotos.jobId, id), isNull(commercialPhotos.orderId))).orderBy(commercialPhotos.id);
     const invoices = await db.select({ id: commercialInvoices.id, status: commercialInvoices.status, recipient: commercialInvoices.recipient, error: commercialInvoices.error, createdAt: commercialInvoices.createdAt }).from(commercialInvoices).where(and(eq(commercialInvoices.jobId, id), isNull(commercialInvoices.orderId))).orderBy(desc(commercialInvoices.id));
-    return json({ job: { id, serviceType: job.serviceType, priceCents: job.priceCents }, customer: { name: customer.name, email: customer.email, phone: customer.phone, representativeEmail: customer.representativeEmail, representativePhone: customer.representativePhone }, photos: photos.map(({ storageKey, sendableKey, ...p }) => p), invoices });
+    const paidCents = await paidOnInvoice(id);
+    return json({ job: { id, serviceType: job.serviceType, priceCents: job.priceCents, status: job.status }, paidCents, balanceCents: Math.max(0, job.priceCents - paidCents), onlinePaymentReady: invoicePaymentsReady(), customer: { name: customer.name, email: customer.email, phone: customer.phone, representativeEmail: customer.representativeEmail, representativePhone: customer.representativePhone }, photos: photos.map(({ storageKey, sendableKey, ...p }) => p), invoices });
   }
   if (suffix === "photos" && method === "POST") {
     const type = field(body, "type", 50), raw = String(body.data || "");
@@ -61,7 +74,7 @@ export async function handleJobInvoice(req: Request, path: string, actor: { id: 
     const channel = String(body.channel || "preview");
     if (!["preview", "email", "sms"].includes(channel)) return json({ error: "Choose preview, email, or text" }, 400);
     const recipient = channel === "sms" ? field(body, "recipient", 40) || customer.representativePhone || customer.phone || "" : field(body, "recipient", 160) || customer.representativeEmail || customer.email || "";
-    if (channel === "email" && !looksLikeEmail(recipient) || channel === "sms" && !recipient) return json({ error: "Check the invoice recipient" }, 400);
+    if (channel === "email" && !looksLikeEmail(recipient) || channel === "sms" && !normalizePhone(recipient)) return json({ error: "Enter a valid invoice email address or mobile phone number" }, 400);
     const selected = await db.select().from(commercialPhotos).where(and(eq(commercialPhotos.jobId, id), isNull(commercialPhotos.orderId), eq(commercialPhotos.includeWithInvoice, true))).orderBy(commercialPhotos.id);
     if (selected.length > 8) return json({ error: "Choose up to eight photos for one invoice" }, 400);
     const photos = await Promise.all(selected.map(async p => ({ id: p.id, caption: p.caption, type: p.contentType, bytes: new Uint8Array(await files().get(p.sendableKey, { type: "arrayBuffer" }) || new ArrayBuffer(0)) })));
@@ -72,7 +85,11 @@ export async function handleJobInvoice(req: Request, path: string, actor: { id: 
     ]);
     const paidCents = settled.reduce((sum, p) => sum + p.amountCents, 0);
     const number = `DCA-${id}-${Date.now()}`;
-    const snapshot = { number, company: customer.name, representative: customer.representativeName || "", address: [job.address || customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(", "), reference: `Job #${id}`, details: job.serviceType, date: new Date().toISOString().slice(0, 10), lines: items.length ? items.map(i => ({ label: i.label, quantity: i.quantity, amountCents: i.amountCents })) : [{ label: job.serviceType, quantity: 1, amountCents: job.priceCents }], totalCents: job.priceCents, paidCents, photoIds: photos.map(p => p.id) };
+    const balanceCents = Math.max(0, job.priceCents - paidCents);
+    if (balanceCents > 0 && job.status === "cancelled" && channel !== "preview") return json({ error: "Review the cancelled job before sending a payment request" }, 409);
+    if (balanceCents > 0 && !invoicePaymentsReady() && channel !== "preview") return json({ error: "Secure payment must be configured before sending an invoice payment link" }, 503);
+    const payment = balanceCents > 0 && job.status !== "cancelled" && invoicePaymentsReady() ? await createInvoicePaymentLink(id, customer.id, actor.id) : null;
+    const snapshot = { number, company: customer.name, representative: customer.representativeName || "", address: [job.address || customer.address, customer.city, customer.state, customer.zip].filter(Boolean).join(", "), reference: `Job #${id}`, details: job.serviceType, date: new Date().toISOString().slice(0, 10), lines: items.length ? items.map(i => ({ label: i.label, quantity: i.quantity, amountCents: i.amountCents })) : [{ label: job.serviceType, quantity: 1, amountCents: job.priceCents }], totalCents: job.priceCents, paidCents, paymentUrl: payment?.url, photoIds: photos.map(p => p.id) };
     const pdf = await createCommercialInvoice({ ...snapshot, photos });
     if (pdf.length > 13_000_000) return json({ error: "Invoice exceeds 15 MB. Select fewer photos." }, 400);
     if (channel === "preview") return new Response(Buffer.from(pdf), { headers: { "content-type": "application/pdf", "content-disposition": `inline; filename="${number}.pdf"`, "cache-control": "no-store" } });
@@ -81,11 +98,11 @@ export async function handleJobInvoice(req: Request, path: string, actor: { id: 
     await files().set(key, Uint8Array.from(pdf).buffer, { metadata: { contentType: "application/pdf" } });
     const [invoice] = await db.insert(commercialInvoices).values({ jobId: id, documentKey: key, snapshot, recipient, accessHash: crypto.createHash("sha256").update(token).digest("hex"), accessExpiresAt: new Date(Date.now() + 30 * 86400_000) }).returning();
     const link = `${new URL(req.url).origin}/api/invoice-document?token=${token}`;
-    const message = `DCA Cleaning Solutions invoice ${number} for ${customer.name}: ${money(job.priceCents)} total, ${money(Math.max(0, job.priceCents - paidCents))} balance. View your invoice and photos: ${link} (link expires in 30 days).`;
+    const message = `DCA Cleaning Solutions invoice ${number} for ${customer.name}: ${money(job.priceCents)} total, ${money(balanceCents)} balance. ${payment ? `Pay securely with Clover: ${payment.url} ` : "Paid in full. "}View your invoice and photos: ${link} (links expire in 30 days).`;
     const result = channel === "sms" ? await sendSms({ to: recipient, body: message }) : await sendEmail({ to: recipient, subject: `DCA Cleaning Solutions invoice ${number}`, text: message, html: `<p>${message.replace(/&/g, "&amp;").replace(/</g, "&lt;")}</p>`, attachments: [{ filename: `${number}.pdf`, content: Buffer.from(pdf).toString("base64"), contentType: "application/pdf" }] });
     await db.update(commercialInvoices).set({ status: result.ok ? "sent" : "failed", providerRef: result.providerRef, error: result.error, sentAt: result.ok ? new Date() : null }).where(eq(commercialInvoices.id, invoice.id));
     await audit(`${actor.name} ${result.ok ? "sent" : "failed to send"} invoice ${number} by ${channel} to ${recipient}${result.error ? `: ${result.error}` : ""}`);
-    return json({ invoiceId: invoice.id, ok: result.ok, error: result.error, channel, recipient }, result.ok ? 201 : 502);
+    return json({ invoiceId: invoice.id, ok: result.ok, error: result.error, channel, recipient, paymentUrl: payment?.url || null }, result.ok ? 201 : 502);
   }
   return json({ error: "Invoice route not found" }, 404);
 }

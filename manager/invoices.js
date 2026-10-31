@@ -2,7 +2,7 @@
   "use strict";
   var root = document.getElementById("view-invoices");
   if (!root) return;
-  var jobs = [], activeId = null;
+  var jobs = [], activeId = null, paymentLink = null;
   var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
   var money = function (n) { return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format((Number(n) || 0) / 100); };
   var get = function (id) { return document.getElementById(id); };
@@ -32,6 +32,7 @@
   async function open(id) {
     try {
       activeId = id;
+      paymentLink = null;
       var data = await request("jobs/" + id + "/invoice");
       if (activeId !== id) return;
       var c = data.customer;
@@ -45,18 +46,41 @@
             '<input data-caption="' + p.id + '" maxlength="160" value="' + esc(p.caption) + '" aria-label="Photo caption">' +
             '<button class="btn btn-ghost btn-sm" data-save="' + p.id + '">Save photo settings</button></div>';
         }).join("") : '<p>No photos uploaded yet. Photos are optional.</p>') + '</div></div>' +
-        '<div class="card"><h3>Preview and send invoice</h3><p>Review the amount and selected photos in the PDF before sending.</p>' +
+        '<div class="card invoice-collection"><p class="eyebrow">Collect payment</p><h3>Balance due <span class="mono">' + money(data.balanceCents) + '</span></h3><p>' + money(data.paidCents) + ' already received · Invoice total ' + money(data.job.priceCents) + '</p>' +
+        (data.balanceCents > 0 && data.job.status !== "cancelled" ? '<p>Send the invoice with its secure Clover payment link, or copy the link while the customer is on the phone. Successful payments update this job’s balance.</p><div class="btn-row"><button class="btn btn-primary" id="invoice-create-pay-link"' + (!data.onlinePaymentReady ? ' disabled' : '') + '>Create payment link</button><button class="btn btn-ghost" id="invoice-copy-pay-link" disabled>Copy link</button><a class="btn btn-ghost" id="invoice-open-pay-link" target="_blank" rel="noopener noreferrer" hidden>Preview checkout</a></div><label class="field"><span>Secure payment link</span><input id="invoice-pay-link" type="url" readonly placeholder="Create a link to collect the outstanding balance"></label><p class="hint">Links expire in 30 days. Opening or sending a link does not charge the customer.</p>' : '<p>' + (data.balanceCents === 0 ? 'Paid in full. No further payment link is needed.' : 'This job is cancelled. Review it before requesting payment.') + '</p>') + '</div>' +
+        '<div class="card"><h3>Preview and send invoice</h3><p>The PDF, email, and text include a secure payment link when a balance is due.</p>' +
         '<div class="commercial-form"><label>Email recipient <input id="invoice-email" type="email" value="' + esc(c.representativeEmail || c.email || "") + '"></label>' +
         '<label>Mobile phone recipient <input id="invoice-phone" type="tel" value="' + esc(c.representativePhone || c.phone || "") + '"></label></div>' +
-        '<div class="btn-row"><button class="btn btn-ghost" id="invoice-preview">Preview PDF</button><button class="btn btn-primary" id="invoice-send-email">Email invoice</button><button class="btn btn-primary" id="invoice-send-sms">Text invoice</button></div>' +
+        '<div class="btn-row"><button class="btn btn-ghost" id="invoice-preview">Preview PDF</button><button class="btn btn-primary" id="invoice-send-email">Email invoice + pay link</button><button class="btn btn-primary" id="invoice-send-sms">Text invoice + pay link</button></div>' +
         '<h3>Delivery history</h3>' + (data.invoices.length ? data.invoices.map(function (i) { return '<p>' + esc(i.status) + ' · ' + esc(i.recipient) + ' · ' + esc(i.createdAt) + (i.error ? ' · ' + esc(i.error) : '') + ' <a href="/api/manager/jobs/' + id + '/invoice/document/' + i.id + '" target="_blank" rel="noopener">PDF</a></p>'; }).join("") : '<p>No invoices sent for this job.</p>') + '</div>';
       get("invoice-upload").addEventListener("submit", upload);
       get("invoice-photos").querySelectorAll("[data-save]").forEach(function (b) { b.addEventListener("click", function () { savePhoto(Number(b.dataset.save)); }); });
       get("invoice-preview").addEventListener("click", preview);
       get("invoice-send-email").addEventListener("click", function () { send("email", val("invoice-email")); });
       get("invoice-send-sms").addEventListener("click", function () { send("sms", val("invoice-phone")); });
+      if (get("invoice-create-pay-link")) get("invoice-create-pay-link").addEventListener("click", createPaymentLink);
+      if (get("invoice-copy-pay-link")) get("invoice-copy-pay-link").addEventListener("click", async function () {
+        if (!paymentLink) return;
+        try { await navigator.clipboard.writeText(paymentLink); notice("Payment link copied. Ready to share with this customer."); }
+        catch (e) { get("invoice-pay-link").select(); notice("Select and copy the payment link above."); }
+      });
       get("invoice-detail").scrollIntoView({ behavior: "smooth" });
     } catch (e) { error(e); }
+  }
+  async function createPaymentLink() {
+    var button = get("invoice-create-pay-link"), id = activeId;
+    button.disabled = true;
+    try {
+      var link = await request("jobs/" + id + "/invoice/payment-link", "POST", {});
+      if (id !== activeId) return;
+      paymentLink = link.url;
+      get("invoice-pay-link").value = link.url;
+      get("invoice-copy-pay-link").disabled = false;
+      get("invoice-open-pay-link").href = link.url;
+      get("invoice-open-pay-link").hidden = false;
+      notice("Secure payment link ready for " + money(link.balanceCents) + ". No customer message sent and no payment collected.");
+    } catch (e) { error(e); }
+    finally { if (id === activeId && button.isConnected) button.disabled = false; }
   }
   async function upload(event) {
     event.preventDefault();

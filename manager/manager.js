@@ -5999,6 +5999,7 @@
   // site sells, so the Jobs tab stays filterable and reportable.
   var SERVICE_TYPES = [
     "Carpet cleaning",
+    "Carpet + air duct cleaning",
     "Air duct cleaning",
     "Dryer vent cleaning",
     "Upholstery cleaning",
@@ -6079,6 +6080,74 @@
   // The catalog every quote is built from. Read straight out of data/pricing.js,
   // the same file the public pages price themselves from, so a figure quoted on
   // the phone can never drift from the figure the customer saw online.
+  function bookingOffers() {
+    var pricing = window.DCA_PRICING || {};
+    var offers = (pricing.specials || []).slice();
+    if (pricing.coupons && pricing.coupons.NEXTDOOR10) offers.push(pricing.coupons.NEXTDOOR10);
+    return offers;
+  }
+
+  function renderBookingOffers() {
+    var grid = document.getElementById("bk-offer-grid"), detail = document.getElementById("bk-offer-detail");
+    if (!grid || !state.booking) return;
+    var selected = state.booking.promotionCode || "";
+    var query = val("bk-offer-search").toLowerCase();
+    var filter = document.querySelector('[data-offer-kind][aria-pressed="true"]');
+    var kind = filter ? filter.dataset.offerKind : "all";
+    var offers = bookingOffers();
+    var visible = offers.filter(function (offer) {
+      return (kind === "all" || offer.kind === kind) && (offer.code + " " + offer.name + " " + offer.summary + " " + offer.price).toLowerCase().includes(query);
+    });
+    grid.innerHTML = visible.length ? visible.map(function (offer) {
+      return '<button type="button" class="booking-offer-card" data-bk-offer="' + esc(offer.code) + '" aria-pressed="' + (selected === offer.code) + '"><span class="booking-offer-code">' + esc(offer.code) + '</span><strong>' + (offer.discountPercent ? esc(offer.discountPercent) + '% off' : fmtMoney(Math.round(offer.price * 100))) + '</strong><span class="booking-offer-name">' + esc(offer.name) + '</span><small>' + esc(offer.summary || "") + '</small></button>';
+    }).join("") : '<p class="hint">No matching offer. Try another code or service.</p>';
+    var offer = offers.find(function (o) { return o.code === selected; });
+    if (detail) {
+      detail.innerHTML = offer ? '<div class="booking-offer-selected"><strong>Applied: ' + esc(offer.code) + '</strong><p>' + esc(offer.summary) + '</p>' +
+        (selected === "NEXTDOOR10" ? '<div class="booking-upholstery-counts">' + [["armchairs", "Chairs / recliners"], ["sofas", "Sofas"], ["sectionals", "Sectionals"]].map(function (entry) { return '<label>' + esc(entry[1]) + '<input type="number" min="0" max="99" step="1" data-bk-upholstery="' + entry[0] + '" value="' + Number(state.booking.couponQuantities[entry[0]] || 0) + '"></label>'; }).join("") + '</div><p class="hint">Set the piece counts. Optional treatments stay at their regular price.</p>' : "") +
+        '<details><summary>Scope & coupon terms</summary><ul>' + (offer.terms || []).map(function (term) { return '<li>' + esc(term) + '</li>'; }).join("") + '</ul></details></div>' : "";
+      detail.querySelectorAll("[data-bk-upholstery]").forEach(function (input) { input.addEventListener("input", function () {
+        state.booking.couponQuantities[input.dataset.bkUpholstery] = Math.max(0, Math.min(99, Math.floor(Number(input.value) || 0)));
+        updateNextdoorBookingLine(); renderBookingItems();
+      }); });
+    }
+  }
+
+  function updateNextdoorBookingLine() {
+    var b = state.booking, p = window.DCA_PRICING, q = b.couponQuantities;
+    var subtotal = 0, descriptions = [];
+    [["armchairs", "armchair", "chair(s)"], ["sofas", "sofa", "sofa(s)"], ["sectionals", "sectional", "sectional(s)"]].forEach(function (entry) {
+      var qty = Number(q[entry[0]] || 0); subtotal += Math.round(p.services[entry[1]].price * 100) * qty;
+      if (qty) descriptions.push(qty + " " + entry[2]);
+    });
+    b.items = b.items.filter(function (i) { return i.promotionCode !== "NEXTDOOR10"; });
+    if (subtotal) b.items.unshift({ key: "special:NEXTDOOR10", kind: "service", promotionCode: "NEXTDOOR10", label: "NEXTDOOR10 · " + descriptions.join(", "), quantity: 1, unitPriceCents: subtotal - Math.round(subtotal * .10) });
+  }
+
+  function applyBookingOffer(code) {
+    var offer = bookingOffers().find(function (o) { return o.code === code; });
+    if (!offer) return;
+    var b = state.booking;
+    if (code === "NEXTDOOR10" && b.promotionCode !== "NEXTDOOR10") {
+      b.couponQuantities = { armchairs: 0, sofas: 0, sectionals: 0 };
+      b.items.forEach(function (item) { var map = { "service:armchair": "armchairs", "service:sofa": "sofas", "service:sectional": "sectionals" }; if (map[item.key]) b.couponQuantities[map[item.key]] += item.quantity; });
+    }
+    b.items = b.items.filter(function (i) { return i.kind === "addon" || i.kind === "custom"; });
+    b.promotionCode = code;
+    if (code === "NEXTDOOR10") updateNextdoorBookingLine();
+    else b.items.unshift({ key: "special:" + code, kind: "service", promotionCode: code, label: code + " · " + offer.name, quantity: 1, unitPriceCents: Math.round(offer.price * 100) });
+    var service = document.getElementById("bk-service-type");
+    if (service) service.value = ({ carpet: "Carpet cleaning", duct: "Air duct cleaning", combo: "Carpet + air duct cleaning", upholstery: "Upholstery cleaning", move: "Move-in / move-out cleaning" })[offer.kind] || "Other cleaning work";
+    renderBookingOffers(); renderBookingItems();
+  }
+
+  function clearBookingOffer() {
+    var b = state.booking;
+    b.items = b.items.filter(function (i) { return !i.promotionCode; });
+    b.promotionCode = "";
+    renderBookingOffers(); renderBookingItems();
+  }
+
   function priceCatalog() {
     var p = window.DCA_PRICING;
     if (!p) return { services: [], addons: [], version: null };
@@ -6092,7 +6161,7 @@
       var price = pkg.price || (p.services.movePackage && p.services.movePackage.price) || 0;
       services.push({ key: "package:" + key, kind: "service", label: "Package — " + pkg.label, price: price });
     });
-    if (p.promotion) {
+    if (p.promotion && !(p.specials || []).length) {
       services.push({
         key: "promotion",
         kind: "service",
@@ -6100,6 +6169,9 @@
         price: p.promotion.price
       });
     }
+    (p.specials || []).forEach(function (offer) {
+      services.push({ key: "special:" + offer.code, kind: "service", label: offer.code + " · " + offer.name, price: offer.price });
+    });
     var addons = Object.keys(p.treatments || {}).map(function (key) {
       return { key: "treatment:" + key, kind: "addon", label: p.treatments[key].label, price: p.treatments[key].price };
     });
@@ -6119,6 +6191,8 @@
     return {
       customer: null,
       items: [],
+      promotionCode: "",
+      couponQuantities: { armchairs: 0, sofas: 0, sectionals: 0 },
       envmtCents: 2500,
       date: dateValue(new Date()),
       searchTimer: null,
@@ -6164,6 +6238,7 @@
       : '<p class="hint warn">The price catalog did not load. Add each line by hand with “Other charge”.</p>';
 
     host.innerHTML =
+      '<header class="booking-workspace-header"><div><p class="eyebrow">DCA office · call desk</p><h1>New service order</h1><p>Choose an offer, build the quote, and reserve the visit.</p></div><nav class="booking-jumps" aria-label="Booking steps"><button type="button" data-bk-jump="bk-step-customer">1 Customer</button><button type="button" data-bk-jump="bk-step-service">2 Offers & services</button><button type="button" data-bk-jump="bk-step-schedule">3 Schedule</button><button type="button" data-bk-jump="bk-step-confirm">4 Confirm</button></nav></header>' +
       '<div class="booking-layout">' +
       '<div class="card booking-panel">' +
       '<div class="charge-heading"><div><p class="eyebrow">Call center</p>' +
@@ -6175,7 +6250,7 @@
 
       '<form id="booking-form" autocomplete="off">' +
 
-      '<section class="booking-step"><h3 class="step-title"><span>1</span>Who is calling</h3>' +
+      '<section class="booking-step" id="bk-step-customer"><h3 class="step-title"><span>1</span>Who is calling</h3>' +
       // Looking a caller up searches the customer database, so the box is only
       // offered to a role entitled to it. Everyone else takes the details down
       // as the caller gives them, which is what the fields below are for.
@@ -6201,7 +6276,10 @@
       '<div id="bk-address-verify"></div>' +
       "</section>" +
 
-      '<section class="booking-step"><h3 class="step-title"><span>2</span>What they are booking</h3>' +
+      '<section class="booking-step" id="bk-step-service"><h3 class="step-title"><span>2</span>Offers & services</h3>' +
+      '<div class="booking-offers"><div class="row-between"><div><p class="eyebrow">Quick select</p><h3>Customer coupons</h3></div><button type="button" class="btn btn-ghost btn-sm" id="bk-remove-offer">Clear coupon</button></div><label class="field"><span>Find an offer</span><input id="bk-offer-search" type="search" placeholder="Code, price, or service — try CARPET119"></label><div class="booking-offer-filters" id="bk-offer-filters">' +
+      ["All", "Carpet", "Duct", "Upholstery", "Combo", "Move"].map(function (kind) { return '<button type="button" data-offer-kind="' + kind.toLowerCase() + '" aria-pressed="' + (kind === "All") + '">' + kind + '</button>'; }).join("") +
+      '</div><div id="bk-offer-grid" class="booking-offer-grid"></div><div id="bk-offer-detail" aria-live="polite"></div><p class="hint">One coupon per order. Selecting a fixed-price offer replaces the base service lines and keeps optional add-ons.</p></div>' +
       '<div class="booking-fields">' +
       '<label class="field"><span>Service</span><select id="bk-service-type">' +
       SERVICE_TYPES.map(function (s) {
@@ -6220,7 +6298,7 @@
       '<button type="button" class="btn btn-ghost btn-sm" id="bk-clear-items">Clear list</button></div>' +
       "</section>" +
 
-      '<section class="booking-step"><h3 class="step-title"><span>3</span>When</h3>' +
+      '<section class="booking-step" id="bk-step-schedule"><h3 class="step-title"><span>3</span>Schedule the visit</h3>' +
       '<div class="booking-fields">' +
       '<label class="field"><span>Date</span><input id="bk-date" type="date" value="' + esc(b.date) + '" required /></label>' +
       '<label class="field"><span>Arrival time</span><select id="bk-time">' +
@@ -6239,7 +6317,7 @@
       'placeholder="Gate code, pets, parking, what the customer wants looked at…"></textarea></label>' +
       "</section>" +
 
-      '<section class="booking-step"><h3 class="step-title"><span>4</span>Confirm it with the customer</h3>' +
+      '<section class="booking-step" id="bk-step-confirm"><h3 class="step-title"><span>4</span>Confirm it with the customer</h3>' +
       '<div id="bk-confirm"><p class="hint">Checking what this site can send…</p></div></section>' +
 
       '<div id="bk-conflict"></div>' +
@@ -6248,15 +6326,16 @@
       '<button type="submit" class="btn btn-primary" id="bk-submit">Book appointment</button></div>' +
       "</form></div>" +
 
-      '<div><div class="row-between charge-history-heading"><div><p class="eyebrow">Crew calendar</p>' +
+      '<aside class="booking-sidebar"><div class="booking-recap card"><p class="eyebrow">Order at a glance</p><h2>Your quote</h2><p id="bk-summary-coupon" class="booking-coupon-badge">Regular pricing</p><div id="bk-summary-lines"></div><dl><dt>Services & add-ons</dt><dd id="bk-summary-subtotal">$0.00</dd><dt>Environmental fee</dt><dd id="bk-summary-fee">$25.00</dd><dt class="booking-summary-total">Order total</dt><dd class="booking-summary-total" id="bk-summary-total">$0.00</dd><dt>20% deposit</dt><dd id="bk-summary-deposit">$0.00</dd><dt>Remaining after deposit</dt><dd id="bk-summary-balance">$0.00</dd></dl><p class="hint">Read the selected offer’s scope and total back to the customer before booking.</p></div><div class="row-between charge-history-heading"><div><p class="eyebrow">Crew calendar</p>' +
       '<h2 id="bk-day-title">' + esc(fmtDayLabel(b.date)) + "</h2></div>" +
       '<button type="button" class="btn btn-ghost btn-sm" id="bk-refresh">Refresh</button></div>' +
-      '<div id="bk-schedule"><div class="loading">Loading…</div></div></div>' +
+      '<div id="bk-schedule"><div class="loading">Loading…</div></div></aside>' +
       "</div>";
 
     renderBookingCustomer();
     renderBookingItems();
     wireBooking();
+    renderBookingOffers();
     loadSchedule();
     renderBookingConfirmChoices();
   }
@@ -6281,6 +6360,15 @@
   }
 
   function wireBooking() {
+    document.querySelectorAll("[data-bk-jump]").forEach(function (button) { button.addEventListener("click", function () { document.getElementById(button.dataset.bkJump).scrollIntoView({ behavior: "smooth", block: "start" }); }); });
+    document.getElementById("bk-offer-search").addEventListener("input", renderBookingOffers);
+    document.getElementById("bk-offer-filters").addEventListener("click", function (e) {
+      var button = e.target.closest("[data-offer-kind]"); if (!button) return;
+      document.querySelectorAll("[data-offer-kind]").forEach(function (b) { b.setAttribute("aria-pressed", String(b === button)); });
+      renderBookingOffers();
+    });
+    document.getElementById("bk-offer-grid").addEventListener("click", function (e) { var button = e.target.closest("[data-bk-offer]"); if (button) applyBookingOffer(button.dataset.bkOffer); });
+    document.getElementById("bk-remove-offer").addEventListener("click", clearBookingOffer);
     document.getElementById("booking-form").addEventListener("submit", function (ev) {
       ev.preventDefault();
       submitBooking(false);
@@ -6320,6 +6408,8 @@
     document.getElementById("bk-add-custom").addEventListener("click", promptCustomLine);
     document.getElementById("bk-clear-items").addEventListener("click", function () {
       state.booking.items = [];
+      state.booking.promotionCode = "";
+      renderBookingOffers();
       renderBookingItems();
     });
     document.getElementById("bk-envmt").addEventListener("input", function () {
@@ -6361,7 +6451,11 @@
       var remove = ev.target.closest("[data-item-remove]");
       if (!remove) return;
       state.booking.items.splice(Number(remove.dataset.itemRemove), 1);
+      if (!state.booking.items.some(function (item) { return item.promotionCode === state.booking.promotionCode; })) {
+        state.booking.promotionCode = "";
+      }
       renderBookingItems();
+      renderBookingOffers();
     });
 
     // An address typed into the booking form is where the crew is being sent, so
@@ -6465,8 +6559,15 @@
   }
 
   function addCatalogItem(key) {
+    if (key.indexOf("special:") === 0) { applyBookingOffer(key.slice(8)); return; }
     var entry = findCatalogEntry(key);
     if (!entry) return;
+    if (state.booking.promotionCode === "NEXTDOOR10" && entry.kind === "service") {
+      var piece = ({ "service:armchair": "armchairs", "service:sofa": "sofas", "service:sectional": "sectionals" })[key];
+      if (!piece) { toast("NEXTDOOR10 covers regular-price upholstery. Clear the coupon to switch services."); return; }
+      state.booking.couponQuantities[piece] = Math.min(99, Number(state.booking.couponQuantities[piece] || 0) + 1);
+      updateNextdoorBookingLine(); renderBookingOffers(); renderBookingItems(); return;
+    }
     var items = state.booking.items;
     for (var i = 0; i < items.length; i++) {
       // Same line twice means two rooms, two chairs, two systems.
@@ -6526,10 +6627,10 @@
           '<span class="booking-item-label">' + esc(item.label) +
           (item.kind === "addon" ? ' <small class="muted">add-on</small>' : "") + "</span>" +
           '<label class="booking-item-qty"><small>Qty</small><input type="number" min="1" max="99" step="1" ' +
-          'data-item-qty value="' + item.quantity + '" /></label>' +
+          'data-item-qty value="' + item.quantity + '"' + (item.promotionCode ? ' readonly' : '') + ' /></label>' +
           '<label class="booking-item-price"><small>Each</small><div class="money-input"><span>$</span>' +
           '<input type="number" min="0" max="10000" step="0.01" data-item-price value="' +
-          (item.unitPriceCents / 100).toFixed(2) + '" /></div></label>' +
+          (item.unitPriceCents / 100).toFixed(2) + '"' + (item.promotionCode ? ' readonly' : '') + ' /></div></label>' +
           '<span class="booking-item-amount mono" data-item-amount>' + fmtMoney(item.unitPriceCents * item.quantity) + "</span>" +
           '<button type="button" class="btn btn-ghost btn-sm" data-item-remove="' + index + '" aria-label="Remove">×</button>' +
           "</div>"
@@ -6544,6 +6645,17 @@
     if (total) total.textContent = fmtMoney(bookingTotalCents());
     var deposit = document.getElementById("bk-deposit");
     if (deposit) deposit.textContent = fmtMoney(bookingDepositCents());
+    var summary = document.getElementById("bk-summary-lines");
+    if (summary) {
+      var b = state.booking, subtotal = b.items.reduce(function (sum, item) { return sum + item.unitPriceCents * item.quantity; }, 0);
+      summary.innerHTML = b.items.length ? b.items.map(function (item) { return '<div><span>' + esc(item.quantity + ' × ' + item.label) + '</span><strong>' + fmtMoney(item.unitPriceCents * item.quantity) + '</strong></div>'; }).join("") : '<p class="hint">Choose an offer or add a service to begin.</p>';
+      document.getElementById("bk-summary-coupon").textContent = b.promotionCode || "Regular pricing";
+      document.getElementById("bk-summary-subtotal").textContent = fmtMoney(subtotal);
+      document.getElementById("bk-summary-fee").textContent = fmtMoney(b.envmtCents == null ? 2500 : b.envmtCents);
+      document.getElementById("bk-summary-total").textContent = fmtMoney(bookingTotalCents());
+      document.getElementById("bk-summary-deposit").textContent = fmtMoney(bookingDepositCents());
+      document.getElementById("bk-summary-balance").textContent = fmtMoney(bookingTotalCents() - bookingDepositCents());
+    }
     // Scoped to the booking list: the job drawer's ticket editor uses the same
     // row markup, and its rows keep their own totals.
     document.querySelectorAll("#bk-items [data-item-index]").forEach(function (row) {
@@ -6692,6 +6804,8 @@
       // guessing where it is.
       location: b.location || null,
       notes: val("bk-notes"),
+      promotionCode: b.promotionCode || "",
+      couponQuantities: b.couponQuantities || {},
       items: b.items.map(function (i) {
         return {
           kind: i.kind,

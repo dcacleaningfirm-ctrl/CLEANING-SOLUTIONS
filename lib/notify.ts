@@ -308,6 +308,7 @@ export interface AppointmentSummary {
   address: string | null;
   priceCents: number;
   paidCents?: number;
+  depositPaymentUrl?: string;
   items?: { label: string; quantity: number; amountCents: number }[];
   crewName?: string | null;
 }
@@ -381,6 +382,8 @@ ${table}
 }
 
 export function bookingConfirmation(appointment: AppointmentSummary) {
+  const depositDue = Math.max(0, Math.ceil(appointment.priceCents * .20) - (appointment.paidCents || 0));
+  const depositUrl = depositDue > 0 && /^https:\/\/www\.dcacleaningsolutions\.com\/pay\/deposit\/[a-f0-9]{64}$/.test(appointment.depositPaymentUrl || "") ? appointment.depositPaymentUrl : "";
   const when = spellOutTime(appointment.scheduledFor);
   const balance = Math.max(0, appointment.priceCents - (appointment.paidCents || 0));
   const rows: [string, string][] = [
@@ -394,12 +397,13 @@ export function bookingConfirmation(appointment: AppointmentSummary) {
     rows.push([balance > 0 ? "Deposit paid" : "Paid so far", money(appointment.paidCents)]);
     rows.push(["Balance due", money(balance)]);
   }
+  if (depositUrl) rows.push(["20% deposit due", money(depositDue)], ["Pay deposit securely", depositUrl]);
   rows.push(["Reference", `Job #${appointment.jobId}`]);
 
   const lines = [
     `Hi ${appointment.customerName},`,
     "",
-    `Your ${appointment.serviceType.toLowerCase()} appointment with ${BUSINESS.name} is confirmed for ${when}.`,
+    depositUrl ? `Your ${appointment.serviceType.toLowerCase()} booking with ${BUSINESS.name} is scheduled for ${when}. Pay the deposit below to secure your booking; our office will confirm after payment.` : `Your ${appointment.serviceType.toLowerCase()} appointment with ${BUSINESS.name} is confirmed for ${when}.`,
     ""
   ];
   for (const [label, value] of rows) lines.push(`${label}: ${value}`);
@@ -415,22 +419,22 @@ export function bookingConfirmation(appointment: AppointmentSummary) {
   );
 
   const paragraphs = [
-    `Hi ${appointment.customerName}, your appointment with ${BUSINESS.name} is confirmed.`,
+    depositUrl ? `Hi ${appointment.customerName}, pay your ${money(depositDue)} deposit to secure your booking. Our office will confirm after payment.` : `Hi ${appointment.customerName}, your appointment with ${BUSINESS.name} is confirmed.`,
     window || "Our technician will call ahead before arriving."
   ].filter(Boolean);
 
   const smsWhen = shortTime(appointment.scheduledFor);
-  const sms =
+  const sms = depositUrl ? `${BUSINESS.name}: booking #${appointment.jobId} for ${smsWhen}. Pay your 20% deposit (${money(depositDue)}) securely: ${depositUrl} . Our office will confirm after payment. Call ${BUSINESS.phone}.` :
     `${BUSINESS.name}: your ${appointment.serviceType.toLowerCase()} appointment is confirmed for ${smsWhen}` +
     (appointment.address ? ` at ${appointment.address}` : "") +
     `. Job #${appointment.jobId}. Questions? Call ${BUSINESS.phone}.`;
 
   return {
-    subject: `Your ${appointment.serviceType.toLowerCase()} appointment is confirmed — ${shortTime(
+    subject: `${depositUrl ? "Booking details and deposit" : "Appointment confirmed"} — ${shortTime(
       appointment.scheduledFor
     )}`,
     text: lines.join("\n"),
-    html: wrapHtml("Your appointment is confirmed", paragraphs, rows),
+    html: wrapHtml(depositUrl ? "Your booking and deposit" : "Your appointment is confirmed", paragraphs, rows).replace("</body>", depositUrl ? `<p style="text-align:center"><a href="${escapeHtml(depositUrl)}" style="background:#111;color:#dfbd60;padding:14px 22px;border-radius:6px;display:inline-block">Pay ${money(depositDue)} deposit securely</a></p></body>` : "</body>"),
     sms
   };
 }
