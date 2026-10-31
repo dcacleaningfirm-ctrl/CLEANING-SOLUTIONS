@@ -29,6 +29,7 @@ import { emailKey, phoneKey, displayPhone } from "./customer-import.js";
 import { recordConsentFromForm } from "./marketing-store.js";
 import { splitName } from "./clover-customers.js";
 import { looksLikeEmail, normalizePhone } from "./notify.js";
+import { specificLeadSource } from "./lead-source.js";
 
 // --- Vocabulary -----------------------------------------------------------
 // Kept here rather than in the API or the browser so the server, the console
@@ -40,6 +41,8 @@ export const LEAD_SOURCES = [
   { value: "goodzer", label: "Goodzer" },
   { value: "nextdoor", label: "Nextdoor" },
   { value: "phone", label: "Phone call" },
+  { value: "meta_lead_ads", label: "Facebook / Instagram Lead Ads" },
+  { value: "customer_sms", label: "Customer text reply" },
   { value: "manual", label: "Manual / in-house" },
   { value: "other", label: "Other advertising" }
 ] as const;
@@ -56,7 +59,9 @@ export const LEAD_STATUSES = [
 export const LEAD_SOURCE_VALUES = LEAD_SOURCES.map((s) => s.value) as string[];
 export const LEAD_STATUS_VALUES = LEAD_STATUSES.map((s) => s.value) as string[];
 
-export function leadSourceLabel(value: string): string {
+export function leadSourceLabel(value: string, sourceRef?: string | null): string {
+  const specific = specificLeadSource(value, sourceRef);
+  if (specific) return specific.label;
   return LEAD_SOURCES.find((s) => s.value === value)?.label || value;
 }
 

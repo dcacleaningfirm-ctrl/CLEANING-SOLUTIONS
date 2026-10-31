@@ -31,7 +31,11 @@ export default async (req: Request, _context: Context) => {
   }
 
   const since = new Date(Date.now() - PERIOD_DAYS * 86400000);
-  const sourceKey = sql<string>`coalesce(nullif(${leads.raw}->'attribution'->>'utm_source', ''), nullif(${leads.source}, ''), 'unknown')`;
+  const sourceKey = sql<string>`case
+    when ${leads.sourceRef} like 'meta:%' or ${leads.source} = 'meta_lead_ads' then 'Facebook / Instagram Lead Ads'
+    when ${leads.sourceRef} like 'sms:%' or ${leads.source} = 'customer_sms' then 'Customer text reply'
+    when ${leads.source} = 'phone' then coalesce(nullif(${leads.raw}->'attribution'->>'utm_source', ''), 'Phone call — ad source unconfirmed')
+    else coalesce(nullif(${leads.raw}->'attribution'->>'utm_source', ''), nullif(${leads.source}, ''), 'unknown') end`;
   const campaignKey = sql<string>`coalesce(nullif(${leads.raw}->'attribution'->>'utm_campaign', ''), nullif(${leads.campaign}, ''), nullif(${leads.promotionCode}, ''), 'unattributed')`;
   const revenue = sql<number>`cast(coalesce(sum(case when ${payments.status} = 'paid' then ${payments.amountCents} else 0 end), 0) as int)`;
   const leadCount = sql<number>`cast(count(distinct ${leads.id}) as int)`;

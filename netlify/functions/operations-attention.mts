@@ -1,7 +1,7 @@
 import type { Config } from "@netlify/functions";
 import { desc, eq, lte } from "drizzle-orm";
 import { db } from "../../db/index.js";
-import { customers, employees, jobs, leads, notifications, payments } from "../../db/schema.js";
+import { customers, employees, jobEvents, jobs, leads, notifications, payments } from "../../db/schema.js";
 import { can, readSessionCookie } from "../../lib/manager-session.js";
 
 function json(body: unknown, init: ResponseInit = {}) {
@@ -24,7 +24,7 @@ export default async (req: Request) => {
   }
 
   const now = new Date();
-  const [leadRows, jobRows, paymentRows, failedNotifications] = await Promise.all([
+  const [leadRows, jobRows, paymentRows, failedNotifications, paymentTotals, followUps] = await Promise.all([
     db.select({
       id: leads.id,
       customerName: leads.customerName,
@@ -73,15 +73,17 @@ export default async (req: Request) => {
     }).from(notifications)
       .where(eq(notifications.status, "failed"))
       .orderBy(desc(notifications.createdAt))
-      .limit(30)
+      .limit(30),
+    db.select({ jobId: payments.jobId, paidCents: sql<number>`cast(coalesce(sum(${payments.amountCents}), 0) as int)` })
+      .from(payments).where(eq(payments.status, "paid")).groupBy(payments.jobId),
+    db.select({ jobId: jobEvents.jobId, message: jobEvents.message }).from(jobEvents)
+      .where(eq(jobEvents.kind, "deposit_followup")).orderBy(desc(jobEvents.createdAt)).limit(100)
   ]);
 
-  const paidByJob = new Map<number, number>();
+  // Include all recorded payments, not only the most recent 300 transactions.
+  const paidByJob = new Map<number, number>(paymentTotals.map(row => [row.jobId, Number(row.paidCents)]));
   const refunds: Array<{ paymentId: number; jobId: number; amountCents: number; provider: string; createdAt: Date | null }> = [];
   for (const payment of paymentRows) {
-    if (payment.status === "paid") {
-      paidByJob.set(payment.jobId, (paidByJob.get(payment.jobId) || 0) + Number(payment.amountCents || 0));
-    }
     if (Number(payment.amountCents || 0) < 0) {
       refunds.push({ paymentId: payment.id, jobId: payment.jobId, amountCents: payment.amountCents, provider: payment.provider, createdAt: payment.createdAt });
     }
@@ -93,7 +95,8 @@ export default async (req: Request) => {
     const requiredDeposit = Math.ceil(Math.max(0, job.priceCents) * 0.20);
     const paidCents = paidByJob.get(job.id) || 0;
     if (requiredDeposit > 0 && paidCents < requiredDeposit) {
-      depositPending.push({ ...job, paidCents, requiredDepositCents: requiredDeposit, balanceToDepositCents: requiredDeposit - paidCents });
+      depositPending.push({ ...job, paidCents, requiredDepositCents: requiredDeposit, balanceToDepositCents: requiredDeposit - paidCents,
+        followUpNote: followUps.find(row => row.jobId === job.id)?.message || null });
     } else if (requiredDeposit > 0 && paidCents >= requiredDeposit && !job.scheduledFor) {
       paidConfirm.push({ ...job, paidCents, requiredDepositCents: requiredDeposit });
     }

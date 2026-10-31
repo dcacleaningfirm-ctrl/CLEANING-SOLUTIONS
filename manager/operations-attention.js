@@ -32,7 +32,8 @@
         line = esc(row.customerName) + ' · ' + esc(row.phone) + ' · ' + esc(row.service);
       } else if (key === "depositPending") {
         line = 'Job #' + esc(row.id) + ' · ' + esc(row.customerName) + ' · ' +
-          money(row.balanceToDepositCents) + ' needed · ' + esc(row.customerPhone);
+          money(row.balanceToDepositCents) + ' needed · ' + esc(row.customerPhone) +
+          (row.followUpNote ? '<br><span class="muted">' + esc(row.followUpNote) + '</span>' : '');
       } else if (key === "paidConfirm") {
         line = 'Job #' + esc(row.id) + ' · ' + esc(row.customerName) + ' · ' +
           money(row.paidCents) + ' collected · ' + esc(row.customerPhone);
@@ -61,7 +62,7 @@
       '<button class="btn btn-ghost btn-sm" type="button" data-ops-refresh>Refresh</button></div>' +
       '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">' +
       tile("callNow", "Call now", data.counts.callNow, data.counts.callNow ? "Lead follow-up due" : "No overdue lead calls", "#ef4444") +
-      tile("depositPending", "Deposit pending", data.counts.depositPending, data.counts.depositPending ? "Checkout not completed" : "No pending deposits", "#f59e0b") +
+      tile("depositPending", "Deposit pending", data.counts.depositPending, data.counts.depositPending ? "Recorded deposit still due" : "No pending deposits", "#f59e0b") +
       tile("paidConfirm", "Paid / confirm", data.counts.paidConfirm, data.counts.paidConfirm ? "Deposit paid; appointment time needed" : "No confirmations waiting", "#22c55e") +
       tile("alertFailed", "Alert failed", data.counts.alertFailed, data.counts.alertFailed ? "SMS or office alert failed" : "No failed alerts", "#ef4444") +
       tile("refundException", "Refund / exception", data.counts.refundException, data.counts.refundException ? "Review recent negative transactions" : "No refund exceptions", "#a855f7") +

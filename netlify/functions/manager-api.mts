@@ -3517,7 +3517,7 @@ export default async (req: Request, context: Context) => {
         failures: rows.map((row) => ({
           id: row.id,
           source: row.source,
-          sourceLabel: leadSourceLabel(row.source),
+          sourceLabel: leadSourceLabel(row.source, row.sourceRef),
           sourceRef: row.sourceRef,
           formName: row.formName,
           error: row.error,
@@ -3581,7 +3581,9 @@ export default async (req: Request, context: Context) => {
       // Everything except the status chips, so the count on each chip says how
       // many requests that chip would show under the filters already in force.
       const base: Array<SQL | undefined> = [];
-      if (source && LEAD_SOURCE_VALUES.includes(source)) base.push(eq(leads.source, source));
+      if (source === "meta_lead_ads") base.push(sql`(${leads.sourceRef} like 'meta:%' or ${leads.source} = 'meta_lead_ads')`);
+      else if (source === "customer_sms") base.push(sql`(${leads.sourceRef} like 'sms:%' or ${leads.source} = 'customer_sms')`);
+      else if (source && LEAD_SOURCE_VALUES.includes(source)) base.push(eq(leads.source, source));
       if (service) base.push(ilike(leads.service, `%${service.replace(/[\\%_]/g, "\\$&")}%`));
       if (promotion) {
         base.push(ilike(leads.promotionCode, `%${promotion.replace(/[\\%_]/g, "\\$&")}%`));
@@ -3643,6 +3645,7 @@ export default async (req: Request, context: Context) => {
           customerId: leads.customerId,
           jobId: leads.jobId,
           source: leads.source,
+          sourceRef: leads.sourceRef,
           status: leads.status,
           campaign: leads.campaign,
           customerName: leads.customerName,
@@ -3701,7 +3704,7 @@ export default async (req: Request, context: Context) => {
       return json({
         leads: rows.map((row) => ({
           ...row,
-          sourceLabel: leadSourceLabel(row.source),
+          sourceLabel: leadSourceLabel(row.source, row.sourceRef),
           statusLabel: leadStatusLabel(row.status),
           serviceAreaZone: serviceAreaZone(row),
           attention: leadAttention(row),
@@ -4099,7 +4102,7 @@ async function loadLead(id: number) {
     })
     .from(leadEvents)
     .leftJoin(employees, eq(leadEvents.employeeId, employees.id))
-    .where(eq(leadEvents.leadId, id))
+    .where(and(eq(leadEvents.leadId, id), sql`${leadEvents.kind} not like 'meta_capi_%'`))
     .orderBy(desc(leadEvents.createdAt))
     .limit(50);
 
@@ -4107,7 +4110,7 @@ async function loadLead(id: number) {
     lead: {
       ...lead.lead,
       assignedName: lead.assignedName,
-      sourceLabel: leadSourceLabel(lead.lead.source),
+      sourceLabel: leadSourceLabel(lead.lead.source, lead.lead.sourceRef),
       statusLabel: leadStatusLabel(lead.lead.status),
       serviceAreaZone: serviceAreaZone(lead.lead),
       attention: leadAttention(lead.lead),
@@ -4704,6 +4707,7 @@ async function buildDashboard(view: {
             promotionCode: leads.promotionCode,
             totalCents: leads.totalCents,
             source: leads.source,
+            sourceRef: leads.sourceRef,
             status: leads.status,
             submittedAt: leads.submittedAt
           })
@@ -4727,7 +4731,7 @@ async function buildDashboard(view: {
           },
           newLeads: newLeads.map((row) => ({
             ...row,
-            sourceLabel: leadSourceLabel(row.source),
+            sourceLabel: leadSourceLabel(row.source, row.sourceRef),
             statusLabel: leadStatusLabel(row.status)
           }))
         };
