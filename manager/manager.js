@@ -7341,7 +7341,7 @@
       ? '<p class="muted sent-note">Last sent: ' +
         data.notifications.slice(0, 2).map(function (n) {
           return esc((n.channel === "email" ? "Email" : "Text") + " · " +
-            (n.status === "sent" ? "sent " : "failed ") + fmtDate(n.createdAt));
+            (n.status === "sent" ? "sent " : n.status === "reviewed" ? "reviewed; not resent " : "failed ") + fmtDate(n.createdAt));
         }).join(" · ") +
         "</p>"
       : "";

@@ -2,9 +2,9 @@ import crypto from "node:crypto";
 import type { Config } from "@netlify/functions";
 import { and, desc, eq, ilike, sql } from "drizzle-orm";
 import { db } from "../../db/index.js";
-import { employees, leads, notifications } from "../../db/schema.js";
+import { employees, leadEvents, leads, notifications } from "../../db/schema.js";
 import { isOwner, readSessionCookie } from "../../lib/manager-session.js";
-import { sendCrmEvent } from "../../lib/meta-capi.js";
+import { capiQueueRows, sendCrmEvent } from "../../lib/meta-capi.js";
 
 const esc = (v: unknown) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 const TEST_NAME = "TEST — DO NOT SCHEDULE — DCA Meta verification";
@@ -66,6 +66,27 @@ export default async (req: Request) => {
           const created = await graph(`${formId}/test_leads`, "POST", { field_data: fields });
           result = "Meta test lead created: " + created.id + ". Refresh this page to verify the webhook received it. No real customer was submitted.";
         }
+      } else if (action === "queue_received") {
+        const leadId = Number(body.get("dca_lead_id"));
+        if (!Number.isInteger(leadId) || leadId <= 0) return new Response("Valid DCA lead ID required", { status: 400 });
+        const [lead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
+        const metaId = /^meta:(\d{10,25})$/.exec(lead?.sourceRef || "")?.[1];
+        if (!lead || !metaId || /^TEST\b/i.test(lead.customerName) || !lead.submittedAt || lead.submittedAt.getTime() < Date.now() - 7 * 86400000)
+          throw Error("Only a real Meta lead received in the last seven days can be queued.");
+        const source = await graph(`${metaId}?fields=id,form_id,created_time`);
+        if (source.form_id !== formId) throw Error("Meta's lead does not belong to the selected DCA form.");
+        const eventTime = new Date(source.created_time);
+        if (!Number.isFinite(eventTime.getTime()) || eventTime.getTime() < Date.now() - 7 * 86400000 || eventTime.getTime() > Date.now())
+          throw Error("Original Meta lead time is outside the allowed reporting window.");
+        result = await db.transaction(async tx => {
+          await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"meta-initial:" + metaId}))`);
+          const [existing] = await tx.select({ id: leadEvents.id }).from(leadEvents).where(and(eq(leadEvents.leadId, lead.id), eq(leadEvents.kind, "meta_capi_pending"), sql`${leadEvents.message}::jsonb->>'event_name' = 'Lead'`)).limit(1);
+          if (existing) return "Initial CRM Lead event already queued; the original event is retained for deduplication.";
+          const rows = capiQueueRows(lead, "new", eventTime);
+          if (!rows.length) throw Error("Lead is not eligible for production CRM reporting.");
+          await tx.insert(leadEvents).values(rows);
+          return `Real DCA lead #${lead.id} queued for Meta with its original lead ID and original timestamp. The scheduled sender will record Meta's receipt.`;
+        });
       } else if (action === "capi_test") {
         const leadId = String(body.get("meta_lead_id") || "");
         const code = String(body.get("test_code") || "");
@@ -80,11 +101,30 @@ export default async (req: Request) => {
       } else return new Response("Unknown action", { status: 400 });
     }
   } catch (error) { result = error instanceof Error ? error.message : "Meta verification unavailable"; }
-  const recent = await db.select({ id: leads.id, sourceRef: leads.sourceRef, name: leads.customerName, customerId: leads.customerId, assignee: employees.name, submittedAt: leads.submittedAt })
+  const recent = await db.select({ id: leads.id, sourceRef: leads.sourceRef, name: leads.customerName, customerId: leads.customerId, assignee: employees.name, submittedAt: leads.submittedAt, raw: leads.raw })
     .from(leads).leftJoin(employees, eq(employees.id, leads.assignedTo)).where(sql`${leads.sourceRef} like 'meta:%'`).orderBy(desc(leads.id)).limit(10);
   const alerts = await db.select({ body: notifications.body, channel: notifications.channel, status: notifications.status, provider: notifications.provider, providerRef: notifications.providerRef, error: notifications.error })
     .from(notifications).where(eq(notifications.kind, "lead_alert")).orderBy(desc(notifications.id)).limit(30);
-  const report = recent.map(row => ({ ...row, alerts: alerts.filter(a => a.body.includes(`Lead #${row.id}\n`)).map(({ body, ...a }) => a) }));
-  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DCA Meta lead verification</title><body style="font:16px system-ui;max-width:1050px;margin:30px auto;padding:24px;line-height:1.6"><h1>DCA Meta lead verification</h1><p>Configured Page: ${esc(pageId)}</p><p role="status"><strong>${esc(result)}</strong></p><h2>Page webhook subscriptions</h2><pre style="white-space:pre-wrap">${esc(JSON.stringify(subscriptions,null,2))}</pre><h2>DCA Instant Forms</h2>${forms.map(f => `<p>${esc(f.name)} · ${esc(f.id)} · ${esc(f.status)}<form method="post"><input type="hidden" name="form_id" value="${esc(f.id)}"><input type="hidden" name="action" value="create_test"><button>Create clearly labeled Meta test lead</button></form></p>`).join("")}<h2>Meta leads received in DCA Pro</h2><pre style="white-space:pre-wrap">${esc(JSON.stringify(report,null,2))}</pre><h2>Verify returned CRM event in Meta test mode</h2><form method="post"><input type="hidden" name="action" value="capi_test"><label>Form ID <input name="form_id" required></label><br><label>Meta test lead ID <input name="meta_lead_id" required></label><br><label>Meta test event code <input name="test_code" required></label><br><button>Send test lead outcome to Meta test events</button></form><p><a href="/api/meta-lead-verification">Refresh verification</a> · <a href="/manager/">Return to DCA Pro</a></p></body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'" } });
+  const history = await db.select().from(leadEvents).where(sql`${leadEvents.kind} like 'meta_capi_%'`).orderBy(desc(leadEvents.id)).limit(100);
+  const report = recent.map(({raw, ...row}) => ({ ...row, formId: (raw as any)?.metaFormId || null,
+    alerts: alerts.filter(a => a.body.includes(`Lead #${row.id}\n`)).map(({ body, ...a }) => a),
+    crmEvents: history.filter(e => e.leadId === row.id).map(e => ({ id: e.id, kind: e.kind, message: e.message, createdAt: e.createdAt }))
+  }));
+  // Provider acceptance and handset delivery are different facts. Check only
+  // the most recent office SMS, and never resend it during verification.
+  const latestSms = report[0]?.alerts.find(a => a.provider === "twilio" && /^SM[a-f0-9]{32}$/.test(a.providerRef || ""));
+  if (latestSms && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+    try {
+      const sid = process.env.TWILIO_ACCOUNT_SID;
+      const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages/${latestSms.providerRef}.json`, {
+        headers: { authorization: "Basic " + Buffer.from(sid + ":" + process.env.TWILIO_AUTH_TOKEN).toString("base64") }, signal: AbortSignal.timeout(4000)
+      });
+      if (response.ok) {
+        const delivery = await response.json();
+        Object.assign(latestSms, { deliveryStatus: delivery.status, deliveryErrorCode: delivery.error_code || null });
+      }
+    } catch { /* Keep the stored provider-acceptance fact if lookup is unavailable. */ }
+  }
+  return new Response(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DCA Meta lead verification</title><body style="font:16px system-ui;max-width:1050px;margin:30px auto;padding:24px;line-height:1.6"><h1>DCA Meta lead verification</h1><p>Configured Page: ${esc(pageId)}</p><p role="status"><strong>${esc(result)}</strong></p><h2>Page webhook subscriptions</h2><pre style="white-space:pre-wrap">${esc(JSON.stringify(subscriptions,null,2))}</pre><h2>DCA Instant Forms</h2>${forms.map(f => `<p>${esc(f.name)} · ${esc(f.id)} · ${esc(f.status)}<form method="post"><input type="hidden" name="form_id" value="${esc(f.id)}"><input type="hidden" name="action" value="create_test"><button>Create clearly labeled Meta test lead</button></form></p>`).join("")}<h2>Meta leads received in DCA Pro</h2><pre style="white-space:pre-wrap">${esc(JSON.stringify(report,null,2))}</pre><h2>Report a real lead received before CAPI activation</h2><p>This queues the original lead event, using Meta's original timestamp. It does not change the lead status or claim a sale.</p><form method="post"><input type="hidden" name="action" value="queue_received"><label>DCA lead ID <input name="dca_lead_id" required></label><br><label>Form ID <input name="form_id" required></label><br><button>Queue verified real lead for Meta</button></form><h2>Verify returned CRM event in Meta test mode</h2><form method="post"><input type="hidden" name="action" value="capi_test"><label>Form ID <input name="form_id" required></label><br><label>Meta test lead ID <input name="meta_lead_id" required></label><br><label>Meta test event code <input name="test_code" required></label><br><button>Send test lead outcome to Meta test events</button></form><p><a href="/api/meta-lead-verification">Refresh verification</a> · <a href="/manager/">Return to DCA Pro</a></p></body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'" } });
 };
 export const config: Config = { path: "/api/meta-lead-verification", rateLimit: { action: "rate_limit", aggregateBy: "ip", windowSize: 60, windowLimit: 12 } };
