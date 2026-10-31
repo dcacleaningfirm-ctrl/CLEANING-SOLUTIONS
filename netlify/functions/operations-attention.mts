@@ -24,7 +24,7 @@ export default async (req: Request) => {
   }
 
   const now = new Date();
-  const [leadRows, jobRows, paymentRows, failedNotifications, paymentTotals, followUps] = await Promise.all([
+  const [leadRows, jobRows, paymentRows, failedNotifications, paymentTotals, followUps, pendingPayments] = await Promise.all([
     db.select({
       id: leads.id,
       customerName: leads.customerName,
@@ -77,7 +77,9 @@ export default async (req: Request) => {
     db.select({ jobId: payments.jobId, paidCents: sql<number>`cast(coalesce(sum(${payments.amountCents}), 0) as int)` })
       .from(payments).where(eq(payments.status, "paid")).groupBy(payments.jobId),
     db.select({ jobId: jobEvents.jobId, message: jobEvents.message }).from(jobEvents)
-      .where(eq(jobEvents.kind, "deposit_followup")).orderBy(desc(jobEvents.createdAt)).limit(100)
+      .where(eq(jobEvents.kind, "deposit_followup")).orderBy(desc(jobEvents.createdAt)).limit(100),
+    db.select({ id: payments.id, jobId: payments.jobId, amountCents: payments.amountCents, provider: payments.provider, createdAt: payments.createdAt, status: payments.status }).from(payments)
+      .where(sql`${payments.provider} = 'clover_invoice' and (${payments.status} = 'unknown' or (${payments.status} = 'processing' and ${payments.createdAt} < now() - interval '2 minutes'))`).orderBy(desc(payments.createdAt)).limit(30)
   ]);
 
   // Include all recorded payments, not only the most recent 300 transactions.
@@ -103,7 +105,7 @@ export default async (req: Request) => {
   }
 
   const callNow = leadRows.filter((lead) => Boolean(lead.nextFollowUpAt));
-  const refundExceptions = refunds.slice(0, 20);
+  const refundExceptions = [...pendingPayments.map(row => ({ paymentId: row.id, jobId: row.jobId, amountCents: row.amountCents, provider: row.provider, createdAt: row.createdAt, reason: "Payment needs Clover verification. Do not collect again. Review this payment’s reference in the job." })), ...refunds].slice(0, 30);
 
   return json({
     ok: true,

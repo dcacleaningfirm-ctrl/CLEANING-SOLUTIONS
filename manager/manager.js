@@ -6353,7 +6353,7 @@
         host.innerHTML =
           channelChoices("bk-send", { checked: true, requireRecipient: false }) +
           (ready
-            ? '<p class="hint">Sent as soon as the appointment is booked, to whichever contact details are on file.</p>'
+            ? '<p class="hint">Sent when booked, with a secure link for any unpaid portion of the 20% deposit.</p>'
             : '<p class="hint warn">No email or text provider is set up yet, so nothing can be sent automatically. ' +
               "Open the job afterwards to copy the confirmation wording.</p>");
       });

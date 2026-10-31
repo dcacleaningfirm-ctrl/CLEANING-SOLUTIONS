@@ -2956,6 +2956,7 @@ export default async (req: Request, context: Context) => {
 
       const parsedItems = readBookingItems(body.items);
       if (parsedItems.error) return json({ error: parsedItems.error }, { status: 400 });
+      if (body.promotionCode != null && typeof body.promotionCode !== "string") return json({ error: "Choose a valid coupon code" }, { status: 400 });
       const couponError = validateOfficeCoupon(body.promotionCode, parsedItems.items, body.couponQuantities, when.at);
       if (couponError) return json({ error: couponError }, { status: 400 });
       const fallbackPrice = Math.round(Number(body.priceCents || 0));
@@ -4670,6 +4671,7 @@ async function buildDashboard(view: {
       jobId: jobEvents.jobId
     })
     .from(jobEvents)
+    .where(sql`${jobEvents.kind} <> 'invoice_payment_link'`)
     .orderBy(desc(jobEvents.createdAt))
     .limit(10);
 

@@ -43,7 +43,7 @@
           (row.error ? '<br><span class="muted">' + esc(row.error) + '</span>' : '');
       } else {
         line = 'Job #' + esc(row.jobId) + ' · ' + money(row.amountCents) +
-          ' · ' + esc(row.provider);
+          ' · ' + esc(row.provider) + (row.reason ? '<br><strong>' + esc(row.reason) + '</strong>' : '');
       }
       return '<li style="margin:.6rem 0;overflow-wrap:anywhere">' + line + '</li>';
     }).join('') + '</ol>';
@@ -65,7 +65,7 @@
       tile("depositPending", "Deposit pending", data.counts.depositPending, data.counts.depositPending ? "Recorded deposit still due" : "No pending deposits", "#f59e0b") +
       tile("paidConfirm", "Paid / confirm", data.counts.paidConfirm, data.counts.paidConfirm ? "Deposit paid; appointment time needed" : "No confirmations waiting", "#22c55e") +
       tile("alertFailed", "Alert failed", data.counts.alertFailed, data.counts.alertFailed ? "SMS or office alert failed" : "No failed alerts", "#ef4444") +
-      tile("refundException", "Refund / exception", data.counts.refundException, data.counts.refundException ? "Review recent negative transactions" : "No refund exceptions", "#a855f7") +
+      tile("refundException", "Refund / exception", data.counts.refundException, data.counts.refundException ? "Review payments and refunds" : "No refund exceptions", "#a855f7") +
       '</div><div id="ops-details" hidden style="margin-top:16px;border-top:1px solid #394150;padding-top:12px" aria-live="polite"></div>' +
       ((data.depositPending && data.depositPending.length) ? '<div style="margin-top:14px"><strong>Oldest deposit work</strong><div class="muted" style="margin-top:4px">' + data.depositPending.slice(-3).map(function (row) {
         return 'Job #' + esc(row.id) + ' · ' + esc(row.customerName) + ' · needs ' + money(row.balanceToDepositCents);
