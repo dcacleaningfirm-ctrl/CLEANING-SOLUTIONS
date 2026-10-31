@@ -30,19 +30,20 @@
     card.style.background = ok ? "rgba(52,211,153,.08)" : "rgba(245,158,11,.10)";
 
     if (ok) {
+      var offer = data.offer || {};
       card.innerHTML =
         '<strong>Booking funnel ready</strong>' +
-        '<div class="muted" style="margin-top:4px">CARPET199 = $' +
-        ((Number(data.totalCents || 0)) / 100).toFixed(2) +
-        ' · 20% deposit = $' + ((Number(data.depositCents || 0)) / 100).toFixed(2) +
+        '<div class="muted" style="margin-top:4px">' + esc(offer.code || "CARPET199") + ' = $' +
+        ((Number(offer.totalCents || 0)) / 100).toFixed(2) +
+        ' · ' + esc(offer.depositPercent || 20) + '% deposit = $' + ((Number(offer.depositCents || 0)) / 100).toFixed(2) +
         ' · Database connected · Clover configured.</div>';
     } else {
       var detail = transportError ? transportError : "One or more live funnel checks failed.";
       card.innerHTML =
         '<strong style="color:#fbbf24">Booking funnel needs attention</strong>' +
         '<div style="margin-top:4px">' + esc(detail) + '</div>' +
-        (data ? '<div class="muted" style="margin-top:4px">Promotion: ' + esc(data.promotionAvailable) +
-          ' · Database: ' + esc(data.database) + ' · Clover: ' + esc(data.cloverConfigured) + '</div>' : "");
+        (data ? '<div class="muted" style="margin-top:4px">Promotion: ' + esc((data.checks || {}).offer) +
+          ' · Database: ' + esc((data.checks || {}).database) + ' · Clover: ' + esc((data.checks || {}).clover) + '</div>' : "");
     }
     host.insertBefore(card, host.firstChild);
   }
