@@ -8,6 +8,7 @@ import { db } from "../../db/index.js";
 import { employees, leads, leadEvents, notifications } from "../../db/schema.js";
 import { deliverMetaLeadAlert } from "../../lib/meta-lead-alert.js";
 import { SHACOLE_NUMBER } from "../../lib/voice-agent.js";
+import { capiQueueRows } from "../../lib/meta-capi.js";
 
 const response = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
@@ -65,10 +66,10 @@ async function importLead(leadgenId: string, formId: string | null, adId: string
     // Avoid storing unnecessary field_data/identifiers beyond lead metadata.
     raw: { metaLeadId: leadgenId, metaFormId: data.form_id || formId, metaAdId: data.ad_id || adId }
   }).returning({ id: leads.id });
-  await db.insert(leadEvents).values({
+  await db.insert(leadEvents).values([{
     leadId: created.id, kind: "imported",
     message: "Facebook lead received for Shacole review. Customer not created."
-  });
+  }, ...capiQueueRows({ id: created.id, sourceRef: "meta:" + leadgenId, customerName: name }, "new")]);
   // Only a newly stored lead alerts the office; webhook retries return above.
   // Provider failure must never discard the inquiry or create a customer.
   const alertBody = [

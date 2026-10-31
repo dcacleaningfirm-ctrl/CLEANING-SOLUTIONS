@@ -118,6 +118,7 @@ import {
 import { customerMarketingProfile } from "../../lib/customer-marketing.js";
 import { handleCommercial } from "../../lib/commercial-routes.js";
 import { PROMOTIONS, promotionByCode } from "../../lib/promotions.js";
+import { capiQueueRows } from "../../lib/meta-capi.js";
 
 // Read + write API for the DCA Pro Manager app. Login lives in a separate
 // function (manager-login); everything here requires a valid session cookie.
@@ -3848,12 +3849,13 @@ export default async (req: Request, context: Context) => {
 
       updates.updatedAt = new Date();
       await db.update(leads).set(updates).where(eq(leads.id, id));
-      await db.insert(leadEvents).values({
+      await db.insert(leadEvents).values([{
         leadId: id,
         employeeId: account.id,
         kind: updates.status ? "status" : "note",
         message: `${account.name} changed the ${changed.join(", ")}`
-      });
+      }, ...(updates.status && updates.status !== existing.status
+        ? capiQueueRows(existing, String(updates.status)) : [])]);
       if (existing.customerId) {
         await db
           .update(customers)
@@ -4034,12 +4036,12 @@ export default async (req: Request, context: Context) => {
         .set({ jobId: job.id, status: "scheduled", updatedAt: new Date() })
         .where(eq(leads.id, id));
 
-      await db.insert(leadEvents).values({
+      await db.insert(leadEvents).values([{
         leadId: id,
         employeeId: account.id,
         kind: "converted",
         message: `${account.name} booked this request as job #${job.id} for ${spellOutAppointment(when.at)}`
-      });
+      }, ...capiQueueRows(lead, "scheduled")]);
 
       await db
         .update(customers)
