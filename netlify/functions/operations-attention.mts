@@ -1,5 +1,5 @@
 import type { Config } from "@netlify/functions";
-import { desc, eq, lte } from "drizzle-orm";
+import { desc, eq, lte, sql } from "drizzle-orm";
 import { db } from "../../db/index.js";
 import { customers, employees, jobEvents, jobs, leads, notifications, payments } from "../../db/schema.js";
 import { can, readSessionCookie } from "../../lib/manager-session.js";
