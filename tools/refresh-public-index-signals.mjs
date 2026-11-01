@@ -38,17 +38,8 @@ for (const file of targets) {
       '$1\n  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large">'
     );
   }
-  if (/meta property="og:updated_time"/i.test(source)) {
-    source = source.replace(
-      /<meta property="og:updated_time" content="[^"]*">/i,
-      `<meta property="og:updated_time" content="${revision}">`
-    );
-  } else if (/<meta property="og:url"[^>]*>/i.test(source)) {
-    source = source.replace(
-      /(<meta property="og:url"[^>]*>)/i,
-      `$1\n  <meta property="og:updated_time" content="${revision}">`
-    );
-  }
+  // A deploy does not establish the date of a substantive content update.
+  source = source.replace(/\s*<meta property="og:updated_time" content="[^"]*">/gi, '');
 
   if (source !== before) {
     fs.writeFileSync(file, source);
