@@ -1,7 +1,300 @@
 [
- {"key":"browns-mill","path":"/browns-mill","name":"Browns Mill & Lithonia","city":"Lithonia / Stonecrest","cityPage":"lithonia-ga","eyebrow":"Browns Mill Road · Lithonia · Stonecrest","intro":"A cleaning visit planned around your corner of Lithonia. Choose your Browns Mill community, tell us what needs attention, and ask about coordinating appointments with nearby neighbors.","note":"Start with the Browns Mill Road and Browns Mill Ferry Road communities, or choose one of the nearby Lithonia communities below. Mailing addresses may use Lithonia even where a property is in Stonecrest; we confirm the exact service address before scheduling.","groups":[{"name":"Browns Mill communities","names":["Browns Mill Estates","Browns Mill Station","Browns Mill North","Browns Mill Lake","Chestnut Lake","Chestnut Lake Preserve"]},{"name":"Nearby communities on DCA’s local outreach list","names":["Saddlewood","Carriage Park","Gatewood","Garden City","Cumberland Pines","South Ridge","Stratford","South Mills","Overbrook"]}],"planning":"For homes off Browns Mill Road, include your subdivision entrance and any gate instructions with your booking. If neighbors want the same day, each home should request its own appointment and mention the shared community.","image":"carpet-01.webp"},
- {"key":"decatur","path":"/communities/decatur","name":"Decatur","city":"Decatur","cityPage":"decatur-ga","eyebrow":"Decatur · Neighborhood cleaning","intro":"From Oakhurst and Winnona Park to the neighborhoods north of downtown, bring the DCA touch to the rooms, furniture and floors you use every day.","note":"Choose a City of Decatur neighborhood or the broader Decatur area. A Decatur mailing address does not always mean a property is inside the city limits; our office uses your exact address to plan the route.","groups":[{"name":"City of Decatur communities","names":["Downtown Decatur","Oakhurst","Winnona Park","Decatur Heights","Great Lakes","Glenwood Estates","Clairemont","Sycamore"]},{"name":"Nearby Decatur area","names":["North Decatur","Brook Glen"]}],"planning":"Tell us whether parking is on a driveway, on the street or in a shared building. For apartments and condos, include the floor, elevator access and any building rules so we can plan equipment access before arrival.","image":"carpet-02.webp"},
- {"key":"stone-mountain","path":"/communities/stone-mountain","name":"Stone Mountain","city":"Stone Mountain","cityPage":"stone-mountain-ga","eyebrow":"Stone Mountain · Neighbors helping neighbors","intro":"Plan a neighborhood cleaning day for your Stone Mountain community. Choose carpet, upholstery, ducts, dryer vents or floor care and tell us which spaces need attention.","note":"Our Stone Mountain community list includes established subdivisions and the nearby Mountain Park area. Share your exact address so the office can confirm routing and appointment availability.","groups":[{"name":"Stone Mountain communities","names":["Hidden Hills","Mainstreet","Waters Edge","Circlestone","The Meadows","Mountain Pines","Stone Mountain Village","Shermantown"]},{"name":"Nearby community","names":["Mountain Park"]}],"planning":"For a community with controlled access, arrange visitor entry and provide gate instructions directly to our office. Tell us about stairs, separate HVAC systems and dryer vent access when requesting your estimate.","image":"ducts-04.webp"},
- {"key":"tucker","path":"/communities/tucker","name":"Tucker","city":"Tucker","cityPage":"tucker-ga","eyebrow":"Tucker · Community by community","intro":"A local cleaning plan for Tucker homes, townhomes and neighborhood businesses. Start with your community or road corridor, then choose the service that fits your space.","note":"Some selections are road corridors or local areas rather than formal subdivisions. They help us group nearby requests without assuming a neighborhood boundary.","groups":[{"name":"Communities and local areas","names":["Smoke Rise","Downtown Tucker","Northlake"]},{"name":"Neighborhood road corridors","names":["Midvale Road area","Brockett Road area","Idlewood Road area","Livsey Road area","Montreal Road area"]}],"planning":"Share the best entrance and parking location, especially for properties reached from a busy road or a shared driveway. Let us know if you want residential care or a separate quote for a neighborhood business.","image":"commercial-03.webp"},
- {"key":"dunwoody","path":"/communities/dunwoody","name":"Dunwoody","city":"Dunwoody","cityPage":"dunwoody-ga","eyebrow":"Dunwoody · Care close to home","intro":"Make room for a fresher home in Dunwoody. Coordinate with neighbors or book your own visit for carpet, fabric, duct and floor care.","note":"Choose a named neighborhood or a nearby road corridor. Dunwoody requests are reviewed against the service address and our route from Forest Park; call ahead if your home is outside our 30-mile target radius.","groups":[{"name":"Communities and local areas","names":["Dunwoody Village","Georgetown","Dunwoody North","Kingsley","Village Mill","Perimeter","Winters Chapel"]},{"name":"Neighborhood road corridors","names":["Vermack Road area","Womack Road area","Tilly Mill / Happy Hollow area","Brook Run / North Peachtree area","Jett Ferry / Dunwoody Club area"]}],"planning":"For condos and managed communities, tell us about loading areas, elevator reservations and access windows. For a multi-level home, include the rooms and stairs you want cleaned so the office can confirm the scope.","image":"floors-01.webp"}
+  {
+    "key": "browns-mill",
+    "path": "/browns-mill",
+    "name": "Browns Mill & Lithonia",
+    "city": "Lithonia / Stonecrest",
+    "cityPage": "lithonia-ga",
+    "eyebrow": "Browns Mill Road · Lithonia · Stonecrest",
+    "intro": "A cleaning visit planned around your corner of Lithonia. Choose your Browns Mill community, tell us what needs attention, and ask about coordinating appointments with nearby neighbors.",
+    "note": "Start with the Browns Mill Road and Browns Mill Ferry Road communities, or choose one of the nearby Lithonia communities below. Mailing addresses may use Lithonia even where a property is in Stonecrest; we confirm the exact service address before scheduling.",
+    "groups": [
+      {
+        "name": "Browns Mill communities",
+        "names": [
+          "Browns Mill Estates",
+          "Browns Mill Station",
+          "Browns Mill North",
+          "Browns Mill Lake",
+          "Chestnut Lake",
+          "Chestnut Lake Preserve"
+        ]
+      },
+      {
+        "name": "Nearby communities on DCA’s local outreach list",
+        "names": [
+          "Saddlewood",
+          "Carriage Park",
+          "Gatewood",
+          "Garden City",
+          "Cumberland Pines",
+          "South Ridge",
+          "Stratford",
+          "South Mills",
+          "Overbrook"
+        ]
+      }
+    ],
+    "planning": "For homes off Browns Mill Road, include your subdivision entrance and any gate instructions with your booking. If neighbors want the same day, each home should request its own appointment and mention the shared community.",
+    "image": "carpet-01.webp"
+  },
+  {
+    "key": "decatur",
+    "path": "/communities/decatur",
+    "name": "Decatur",
+    "city": "Decatur",
+    "cityPage": "decatur-ga",
+    "eyebrow": "Decatur · Neighborhood cleaning",
+    "intro": "From Oakhurst and Winnona Park to the neighborhoods north of downtown, bring the DCA touch to the rooms, furniture and floors you use every day.",
+    "note": "Choose a City of Decatur neighborhood or the broader Decatur area. A Decatur mailing address does not always mean a property is inside the city limits; our office uses your exact address to plan the route.",
+    "groups": [
+      {
+        "name": "City of Decatur communities",
+        "names": [
+          "Downtown Decatur",
+          "Oakhurst",
+          "Winnona Park",
+          "Decatur Heights",
+          "Great Lakes",
+          "Glenwood Estates",
+          "Clairemont",
+          "Sycamore"
+        ]
+      },
+      {
+        "name": "Nearby Decatur area",
+        "names": [
+          "North Decatur",
+          "Brook Glen"
+        ]
+      }
+    ],
+    "planning": "Tell us whether parking is on a driveway, on the street or in a shared building. For apartments and condos, include the floor, elevator access and any building rules so we can plan equipment access before arrival.",
+    "image": "carpet-02.webp"
+  },
+  {
+    "key": "stone-mountain",
+    "path": "/communities/stone-mountain",
+    "name": "Stone Mountain",
+    "city": "Stone Mountain",
+    "cityPage": "stone-mountain-ga",
+    "eyebrow": "Stone Mountain · Neighbors helping neighbors",
+    "intro": "Plan a neighborhood cleaning day for your Stone Mountain community. Choose carpet, upholstery, ducts, dryer vents or floor care and tell us which spaces need attention.",
+    "note": "Our Stone Mountain community list includes established subdivisions and the nearby Mountain Park area. Share your exact address so the office can confirm routing and appointment availability.",
+    "groups": [
+      {
+        "name": "Stone Mountain communities",
+        "names": [
+          "Hidden Hills",
+          "Mainstreet",
+          "Waters Edge",
+          "Circlestone",
+          "The Meadows",
+          "Mountain Pines",
+          "Stone Mountain Village",
+          "Shermantown"
+        ]
+      },
+      {
+        "name": "Nearby community",
+        "names": [
+          "Mountain Park"
+        ]
+      }
+    ],
+    "planning": "For a community with controlled access, arrange visitor entry and provide gate instructions directly to our office. Tell us about stairs, separate HVAC systems and dryer vent access when requesting your estimate.",
+    "image": "ducts-04.webp"
+  },
+  {
+    "key": "tucker",
+    "path": "/communities/tucker",
+    "name": "Tucker",
+    "city": "Tucker",
+    "cityPage": "tucker-ga",
+    "eyebrow": "Tucker · Community by community",
+    "intro": "A local cleaning plan for Tucker homes, townhomes and neighborhood businesses. Start with your community or road corridor, then choose the service that fits your space.",
+    "note": "Some selections are road corridors or local areas rather than formal subdivisions. They help us group nearby requests without assuming a neighborhood boundary.",
+    "groups": [
+      {
+        "name": "Communities and local areas",
+        "names": [
+          "Smoke Rise",
+          "Downtown Tucker",
+          "Northlake"
+        ]
+      },
+      {
+        "name": "Neighborhood road corridors",
+        "names": [
+          "Midvale Road area",
+          "Brockett Road area",
+          "Idlewood Road area",
+          "Livsey Road area",
+          "Montreal Road area"
+        ]
+      }
+    ],
+    "planning": "Share the best entrance and parking location, especially for properties reached from a busy road or a shared driveway. Let us know if you want residential care or a separate quote for a neighborhood business.",
+    "image": "commercial-03.webp"
+  },
+  {
+    "key": "dunwoody",
+    "path": "/communities/dunwoody",
+    "name": "Dunwoody",
+    "city": "Dunwoody",
+    "cityPage": "dunwoody-ga",
+    "eyebrow": "Dunwoody · Care close to home",
+    "intro": "Make room for a fresher home in Dunwoody. Coordinate with neighbors or book your own visit for carpet, fabric, duct and floor care.",
+    "note": "Choose a named neighborhood or a nearby road corridor. Dunwoody requests are reviewed against the service address and our route from Forest Park; call ahead if your home is outside our 30-mile target radius.",
+    "groups": [
+      {
+        "name": "Communities and local areas",
+        "names": [
+          "Dunwoody Village",
+          "Georgetown",
+          "Dunwoody North",
+          "Kingsley",
+          "Village Mill",
+          "Perimeter",
+          "Winters Chapel"
+        ]
+      },
+      {
+        "name": "Neighborhood road corridors",
+        "names": [
+          "Vermack Road area",
+          "Womack Road area",
+          "Tilly Mill / Happy Hollow area",
+          "Brook Run / North Peachtree area",
+          "Jett Ferry / Dunwoody Club area"
+        ]
+      }
+    ],
+    "planning": "For condos and managed communities, tell us about loading areas, elevator reservations and access windows. For a multi-level home, include the rooms and stairs you want cleaned so the office can confirm the scope.",
+    "image": "floors-01.webp"
+  },
+  {
+    "key": "riverdale",
+    "path": "/communities/riverdale",
+    "name": "Riverdale",
+    "city": "Riverdale",
+    "cityPage": "riverdale-ga",
+    "eyebrow": "Riverdale · Community cleaning days",
+    "intro": "Bring neighbors together for cleaner carpets, upholstery and indoor spaces in Riverdale. Choose your local area and request a day that works for your household.",
+    "note": "Choose your neighborhood or local road area below. Road-area selections help group nearby requests and do not define subdivision boundaries. If your community is not listed, enter its name; we confirm your exact service address before scheduling.",
+    "groups": [
+      {
+        "name": "Local areas and road corridors",
+        "names": [
+          "Church Street area",
+          "Upper Riverdale Road area",
+          "West Fayetteville Road area",
+          "Lamar Hutcheson Parkway area",
+          "King Road area"
+        ]
+      }
+    ],
+    "planning": "For homes and apartments around Riverdale, include your building number, parking instructions and the rooms or vents you want serviced. Each neighbor should submit a separate request so we can confirm the right scope.",
+    "image": "carpet-02.webp"
+  },
+  {
+    "key": "forest-park",
+    "path": "/communities/forest-park",
+    "name": "Forest Park",
+    "city": "Forest Park",
+    "cityPage": "forest-park-ga",
+    "eyebrow": "Forest Park · Community cleaning days",
+    "intro": "Get the DCA touch close to our Forest Park operations base. Arrange your own cleaning visit or invite nearby neighbors to request appointments on the same day.",
+    "note": "Choose your neighborhood or local road area below. Road-area selections help group nearby requests and do not define subdivision boundaries. If your community is not listed, enter its name; we confirm your exact service address before scheduling.",
+    "groups": [
+      {
+        "name": "Local areas and road corridors",
+        "names": [
+          "Main Street area",
+          "Forest Parkway area",
+          "Jonesboro Road area",
+          "Starr Park / Park Avenue area",
+          "Scott Boulevard area"
+        ]
+      }
+    ],
+    "planning": "Tell us the best place to park our service van and how to reach your entrance. For nearby household or business requests, mention your community and preferred date so our office can plan the route.",
+    "image": "carpet-01.webp"
+  },
+  {
+    "key": "morrow",
+    "path": "/communities/morrow",
+    "name": "Morrow",
+    "city": "Morrow",
+    "cityPage": "morrow-ga",
+    "eyebrow": "Morrow · Community cleaning days",
+    "intro": "Plan a fresh start for your Morrow home with carpet, upholstery, air duct and floor care. Share your community page with neighbors and ask about nearby appointments.",
+    "note": "Choose your neighborhood or local road area below. Road-area selections help group nearby requests and do not define subdivision boundaries. If your community is not listed, enter its name; we confirm your exact service address before scheduling.",
+    "groups": [
+      {
+        "name": "Local areas and road corridors",
+        "names": [
+          "Lake Harbin Road area",
+          "Reynolds Road area",
+          "Morrow Road area",
+          "North Lee Street area",
+          "South Lee Street area",
+          "Old Rex Morrow Road area",
+          "Harbin Woods Drive area"
+        ]
+      }
+    ],
+    "planning": "For townhomes and apartments, include unit numbers, stairs and any shared-access rules. Tell us which carpets, furniture or HVAC systems need attention so we can prepare an estimate for your home.",
+    "image": "floors-01.webp"
+  },
+  {
+    "key": "stockbridge",
+    "path": "/communities/stockbridge",
+    "name": "Stockbridge",
+    "city": "Stockbridge",
+    "cityPage": "stockbridge-ga",
+    "eyebrow": "Stockbridge · Community cleaning days",
+    "intro": "Bring community cleaning days to Stockbridge. From downtown to nearby residential streets, choose the services your home needs and invite neighbors to plan their own visits.",
+    "note": "Choose your neighborhood or local road area below. Road-area selections help group nearby requests and do not define subdivision boundaries. If your community is not listed, enter its name; we confirm your exact service address before scheduling.",
+    "groups": [
+      {
+        "name": "Local areas and road corridors",
+        "names": [
+          "Downtown Stockbridge",
+          "North Henry Boulevard area",
+          "East Atlanta Road area"
+        ]
+      }
+    ],
+    "planning": "Stockbridge mailing addresses can cover a wider area than the city itself. Provide your exact service address and driveway or gate instructions; our office will confirm routing, scope and availability.",
+    "image": "ducts-04.webp"
+  },
+  {
+    "key": "east-point",
+    "path": "/communities/east-point",
+    "name": "East Point",
+    "city": "East Point",
+    "cityPage": "east-point-ga",
+    "eyebrow": "East Point · Community cleaning days",
+    "intro": "Connect with your East Point neighbors for carpet, upholstery, air duct and floor cleaning. Choose your neighborhood, share the page and request your own DCA appointment.",
+    "note": "Choose your neighborhood or local road area below. Road-area selections help group nearby requests and do not define subdivision boundaries. If your community is not listed, enter its name; we confirm your exact service address before scheduling.",
+    "groups": [
+      {
+        "name": "Neighborhoods",
+        "names": [
+          "Jefferson Park",
+          "Historic Conley Hills",
+          "Colonial Hills",
+          "Semmes Park",
+          "Frog Hollow",
+          "Eagan Park",
+          "River Park",
+          "Idlewood",
+          "East Washington"
+        ]
+      }
+    ],
+    "planning": "For historic homes, tell us about delicate fabrics, older floors and any access constraints. For condos or rentals, include parking and building requirements so equipment access can be planned before arrival.",
+    "image": "commercial-03.webp"
+  }
 ]
