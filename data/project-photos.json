@@ -1,0 +1,514 @@
+[
+  {
+    "category": "carpet",
+    "src": "/assets/projects/carpet-01.webp",
+    "alt": "Residential carpet \u2014 DCA project photograph 1",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0399.jpeg"
+  },
+  {
+    "category": "carpet",
+    "src": "/assets/projects/carpet-02.webp",
+    "alt": "Residential carpet \u2014 DCA project photograph 2",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0398(1).jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-01.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 1",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0368.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-02.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 2",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0365.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-03.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 3",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_4537.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-04.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 4",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_4559.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-05.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 5",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_4555.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-06.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 6",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_4535.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-07.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 7",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_4533.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-08.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 8",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_4482.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-09.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 9",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_4546.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-10.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 10",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_4545.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-11.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 11",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_4548.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-12.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 12",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_4549.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-13.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 13",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0370.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-14.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 14",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0369.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-15.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 15",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0366.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-16.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 16",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0367.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-17.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 17",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0362.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-18.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 18",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0364.jpeg"
+  },
+  {
+    "category": "commercial",
+    "src": "/assets/projects/commercial-19.webp",
+    "alt": "Commercial cleaning \u2014 DCA project photograph 19",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0360.jpeg"
+  },
+  {
+    "category": "ducts",
+    "src": "/assets/projects/ducts-01.webp",
+    "alt": "Air duct cleaning \u2014 DCA project photograph 1",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0425.jpeg"
+  },
+  {
+    "category": "ducts",
+    "src": "/assets/projects/ducts-02.webp",
+    "alt": "Air duct cleaning \u2014 DCA project photograph 2",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0416.jpeg"
+  },
+  {
+    "category": "ducts",
+    "src": "/assets/projects/ducts-03.webp",
+    "alt": "Air duct cleaning \u2014 DCA project photograph 3",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0417.jpeg"
+  },
+  {
+    "category": "ducts",
+    "src": "/assets/projects/ducts-04.webp",
+    "alt": "Air duct cleaning \u2014 DCA project photograph 4",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0428.jpeg"
+  },
+  {
+    "category": "ducts",
+    "src": "/assets/projects/ducts-05.webp",
+    "alt": "Air duct cleaning \u2014 DCA project photograph 5",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0427.jpeg"
+  },
+  {
+    "category": "ducts",
+    "src": "/assets/projects/ducts-06.webp",
+    "alt": "Air duct cleaning \u2014 DCA project photograph 6",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0415.jpeg"
+  },
+  {
+    "category": "ducts",
+    "src": "/assets/projects/ducts-07.webp",
+    "alt": "Air duct cleaning \u2014 DCA project photograph 7",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_1240.jpeg"
+  },
+  {
+    "category": "ducts",
+    "src": "/assets/projects/ducts-08.webp",
+    "alt": "Air duct cleaning \u2014 DCA project photograph 8",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_3282.jpeg"
+  },
+  {
+    "category": "ducts",
+    "src": "/assets/projects/ducts-09.webp",
+    "alt": "Air duct cleaning \u2014 DCA project photograph 9",
+    "width": 1050,
+    "height": 1400,
+    "source": "57789331679__AF535434-1E97-426D-BCE7-AD3F84FB056A.jpeg"
+  },
+  {
+    "category": "dryer",
+    "src": "/assets/projects/dryer-01.webp",
+    "alt": "Dryer vent cleaning \u2014 DCA project photograph 1",
+    "width": 1050,
+    "height": 1400,
+    "source": "176.jpeg"
+  },
+  {
+    "category": "dryer",
+    "src": "/assets/projects/dryer-02.webp",
+    "alt": "Dryer vent cleaning \u2014 DCA project photograph 2",
+    "width": 1050,
+    "height": 1400,
+    "source": "170.jpeg"
+  },
+  {
+    "category": "dryer",
+    "src": "/assets/projects/dryer-03.webp",
+    "alt": "Dryer vent cleaning \u2014 DCA project photograph 3",
+    "width": 1050,
+    "height": 1400,
+    "source": "172.jpeg"
+  },
+  {
+    "category": "dryer",
+    "src": "/assets/projects/dryer-04.webp",
+    "alt": "Dryer vent cleaning \u2014 DCA project photograph 4",
+    "width": 1050,
+    "height": 1400,
+    "source": "173.jpeg"
+  },
+  {
+    "category": "dryer",
+    "src": "/assets/projects/dryer-05.webp",
+    "alt": "Dryer vent cleaning \u2014 DCA project photograph 5",
+    "width": 1400,
+    "height": 1050,
+    "source": "174.jpeg"
+  },
+  {
+    "category": "dryer",
+    "src": "/assets/projects/dryer-06.webp",
+    "alt": "Dryer vent cleaning \u2014 DCA project photograph 6",
+    "width": 1050,
+    "height": 1400,
+    "source": "175.jpeg"
+  },
+  {
+    "category": "dryer",
+    "src": "/assets/projects/dryer-07.webp",
+    "alt": "Dryer vent cleaning \u2014 DCA project photograph 7",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0586.jpeg"
+  },
+  {
+    "category": "dryer",
+    "src": "/assets/projects/dryer-08.webp",
+    "alt": "Dryer vent cleaning \u2014 DCA project photograph 8",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0587.jpeg"
+  },
+  {
+    "category": "dryer",
+    "src": "/assets/projects/dryer-09.webp",
+    "alt": "Dryer vent cleaning \u2014 DCA project photograph 9",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0588.jpeg"
+  },
+  {
+    "category": "dryer",
+    "src": "/assets/projects/dryer-10.webp",
+    "alt": "Dryer vent cleaning \u2014 DCA project photograph 10",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0581.jpeg"
+  },
+  {
+    "category": "rugs",
+    "src": "/assets/projects/rugs-01.webp",
+    "alt": "Area rug cleaning \u2014 DCA project photograph 1",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_1011.jpeg"
+  },
+  {
+    "category": "mattress",
+    "src": "/assets/projects/mattress-01.webp",
+    "alt": "Mattress cleaning \u2014 DCA project photograph 1",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_1009.jpeg"
+  },
+  {
+    "category": "mattress",
+    "src": "/assets/projects/mattress-02.webp",
+    "alt": "Mattress cleaning \u2014 DCA project photograph 2",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_1007.jpeg"
+  },
+  {
+    "category": "tile",
+    "src": "/assets/projects/tile-01.webp",
+    "alt": "Tile & grout cleaning \u2014 DCA project photograph 1",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_3785.jpeg"
+  },
+  {
+    "category": "tile",
+    "src": "/assets/projects/tile-02.webp",
+    "alt": "Tile & grout cleaning \u2014 DCA project photograph 2",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0451.jpeg"
+  },
+  {
+    "category": "tile",
+    "src": "/assets/projects/tile-03.webp",
+    "alt": "Tile & grout cleaning \u2014 DCA project photograph 3",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0453.jpeg"
+  },
+  {
+    "category": "tile",
+    "src": "/assets/projects/tile-04.webp",
+    "alt": "Tile & grout cleaning \u2014 DCA project photograph 4",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0452.jpeg"
+  },
+  {
+    "category": "tile",
+    "src": "/assets/projects/tile-05.webp",
+    "alt": "Tile & grout cleaning \u2014 DCA project photograph 5",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0445.jpeg"
+  },
+  {
+    "category": "tile",
+    "src": "/assets/projects/tile-06.webp",
+    "alt": "Tile & grout cleaning \u2014 DCA project photograph 6",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0439.jpeg"
+  },
+  {
+    "category": "tile",
+    "src": "/assets/projects/tile-07.webp",
+    "alt": "Tile & grout cleaning \u2014 DCA project photograph 7",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_3783.jpeg"
+  },
+  {
+    "category": "tile",
+    "src": "/assets/projects/tile-08.webp",
+    "alt": "Tile & grout cleaning \u2014 DCA project photograph 8",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_3786.jpeg"
+  },
+  {
+    "category": "tile",
+    "src": "/assets/projects/tile-09.webp",
+    "alt": "Tile & grout cleaning \u2014 DCA project photograph 9",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_3788.jpeg"
+  },
+  {
+    "category": "tile",
+    "src": "/assets/projects/tile-10.webp",
+    "alt": "Tile & grout cleaning \u2014 DCA project photograph 10",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_3787.jpeg"
+  },
+  {
+    "category": "tile",
+    "src": "/assets/projects/tile-11.webp",
+    "alt": "Tile & grout cleaning \u2014 DCA project photograph 11",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_3781.jpeg"
+  },
+  {
+    "category": "tile",
+    "src": "/assets/projects/tile-12.webp",
+    "alt": "Tile & grout cleaning \u2014 DCA project photograph 12",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_3782.jpeg"
+  },
+  {
+    "category": "floors",
+    "src": "/assets/projects/floors-01.webp",
+    "alt": "Hard floor cleaning \u2014 DCA project photograph 1",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0450.jpeg"
+  },
+  {
+    "category": "floors",
+    "src": "/assets/projects/floors-02.webp",
+    "alt": "Hard floor cleaning \u2014 DCA project photograph 2",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0440.jpeg"
+  },
+  {
+    "category": "floors",
+    "src": "/assets/projects/floors-03.webp",
+    "alt": "Hard floor cleaning \u2014 DCA project photograph 3",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0448.jpeg"
+  },
+  {
+    "category": "floors",
+    "src": "/assets/projects/floors-04.webp",
+    "alt": "Hard floor cleaning \u2014 DCA project photograph 4",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0449.jpeg"
+  },
+  {
+    "category": "floors",
+    "src": "/assets/projects/floors-05.webp",
+    "alt": "Hard floor cleaning \u2014 DCA project photograph 5",
+    "width": 1050,
+    "height": 1400,
+    "source": "IMG_0438.jpeg"
+  },
+  {
+    "category": "floors",
+    "src": "/assets/projects/floors-06.webp",
+    "alt": "Hard floor cleaning \u2014 DCA project photograph 6",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0437.jpeg"
+  },
+  {
+    "category": "floors",
+    "src": "/assets/projects/floors-07.webp",
+    "alt": "Hard floor cleaning \u2014 DCA project photograph 7",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0436.jpeg"
+  },
+  {
+    "category": "floors",
+    "src": "/assets/projects/floors-08.webp",
+    "alt": "Hard floor cleaning \u2014 DCA project photograph 8",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0434.jpeg"
+  },
+  {
+    "category": "floors",
+    "src": "/assets/projects/floors-09.webp",
+    "alt": "Hard floor cleaning \u2014 DCA project photograph 9",
+    "width": 1400,
+    "height": 1050,
+    "source": "IMG_0433.jpeg"
+  }
+]
