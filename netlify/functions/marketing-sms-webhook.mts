@@ -78,7 +78,7 @@ export default async (req: Request, context: Context) => {
         error: params.ErrorCode ? `Carrier error ${params.ErrorCode}` : null
       });
     }
-    return new Response("", { status: 204 });
+    return new Response(null, { status: 204 });
   }
 
   // --- Replies --------------------------------------------------------------
