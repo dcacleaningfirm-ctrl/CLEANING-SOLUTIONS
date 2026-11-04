@@ -29,7 +29,8 @@ test("abandoned deposits escalate quickly and alert the office", () => {
 test("paid booking confirmation is explicit for customer and office", () => {
   const source = read("netlify/functions/voice-payment.mts");
   assert.match(source, /PAYMENT CONFIRMED/);
-  assert.match(source, /PAID BOOKING — CONFIRM NOW/);
+  assert.match(source, /alertOfficePayment/);
+  assert.doesNotMatch(source, /office has been alerted/i);
   assert.match(source, /customerReceiptSent/);
   assert.match(source, /officeAlertSent/);
   assert.match(source, /office appointment confirmation required/);
