@@ -1,10 +1,10 @@
 import { and, eq, sql } from "drizzle-orm";
 import type { Config, Context } from "@netlify/functions";
 import { db } from "../../db/index.js";
-import { customers, jobEvents, jobs, notifications, payments } from "../../db/schema.js";
-import { money, SHACOLE_NUMBER } from "../../lib/voice-agent.js";
+import { customers, jobEvents, jobs, payments } from "../../db/schema.js";
+import { money } from "../../lib/voice-agent.js";
 import { getVoicePaymentLink, markVoicePaymentUsed } from "../../lib/voice-payment.js";
-import { normalizePhone, sendSms } from "../../lib/notify.js";
+import { alertOfficePayment } from "../../lib/office-payment-alert.js";
 
 function htmlEscape(value: unknown): string {
   return String(value ?? "").replace(/[&<>"']/g, (char) =>
@@ -81,7 +81,7 @@ function page(input: {
     const cfg=${config}; const button=document.getElementById('submit'); const error=document.getElementById('error');
     function fail(message){error.textContent=message||'Check the card details and try again.';error.hidden=false;button.disabled=false;button.textContent='Pay ${money(input.amountCents)} deposit';}
     try { const clover=new Clover(cfg.publicKey,{merchantId:cfg.merchantId}); const elements=clover.elements(); const styles={body:{fontFamily:'Arial,sans-serif',fontSize:'16px'},input:{color:'#111827'}}; elements.create('CARD_NUMBER',styles).mount('#card-number'); elements.create('CARD_DATE',styles).mount('#card-date'); elements.create('CARD_CVV',styles).mount('#card-cvv'); elements.create('CARD_POSTAL_CODE',styles).mount('#card-postal'); button.disabled=false;button.textContent='Pay ${money(input.amountCents)} deposit';
-      document.getElementById('pay-form').addEventListener('submit',async function(event){event.preventDefault();error.hidden=true;button.disabled=true;button.textContent='Processing…';try{const result=await clover.createToken();if(!result||!result.token)throw new Error('Check the card details and try again.');const key=(crypto.randomUUID?crypto.randomUUID():Date.now()+'_'+Math.random().toString(36).slice(2)).replace(/-/g,'_');const response=await fetch(location.pathname,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({cardToken:result.token,idempotencyKey:key})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Payment could not be completed.');try{if(typeof gtag==='function')gtag('event','purchase',{transaction_id:data.chargeId,value:data.amountCents/100,currency:'USD',items:[{item_name:data.serviceType||cfg.serviceType,item_category:'deposit'}]});}catch(e){}try{if(typeof fbq==='function')fbq('track','Purchase',{value:data.amountCents/100,currency:'USD',content_name:data.serviceType||cfg.serviceType,content_category:'deposit'},{eventID:data.chargeId});}catch(e){}document.body.innerHTML='<main><div class="success">✓</div><p class="eyebrow">PAYMENT CONFIRMED</p><h1>Deposit received</h1><div class="summary"><span>'+String(data.serviceType||cfg.serviceType)+'</span><strong>'+new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(data.amountCents/100)+'</strong><small>Job #'+data.jobId+' is now in DCA Pro. The office has been alerted to confirm your appointment time.</small></div><a class="call" href="tel:4704853123">Questions? Call (470) 485-3123</a></main>';}catch(err){fail(err.message);}});
+      document.getElementById('pay-form').addEventListener('submit',async function(event){event.preventDefault();error.hidden=true;button.disabled=true;button.textContent='Processing…';try{const result=await clover.createToken();if(!result||!result.token)throw new Error('Check the card details and try again.');const key=(crypto.randomUUID?crypto.randomUUID():Date.now()+'_'+Math.random().toString(36).slice(2)).replace(/-/g,'_');const response=await fetch(location.pathname,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({cardToken:result.token,idempotencyKey:key})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Payment could not be completed.');try{if(typeof gtag==='function')gtag('event','purchase',{transaction_id:data.chargeId,value:data.amountCents/100,currency:'USD',items:[{item_name:data.serviceType||cfg.serviceType,item_category:'deposit'}]});}catch(e){}try{if(typeof fbq==='function')fbq('track','Purchase',{value:data.amountCents/100,currency:'USD',content_name:data.serviceType||cfg.serviceType,content_category:'deposit'},{eventID:data.chargeId});}catch(e){}document.body.innerHTML='<main><div class="success">✓</div><p class="eyebrow">PAYMENT CONFIRMED</p><h1>Deposit received</h1><div class="summary"><span>'+String(data.serviceType||cfg.serviceType)+'</span><strong>'+new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(data.amountCents/100)+'</strong><small>Job #'+data.jobId+' is now in DCA Pro. Please contact the office to confirm your appointment time.</small></div><a class="call" href="tel:4704853123">Questions? Call (470) 485-3123</a></main>';}catch(err){fail(err.message);}});
     } catch(err){fail('The secure card form could not load. Please refresh this page.');}
   </script>`;
   return new Response(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DCA Secure Deposit</title><style>body{margin:0;background:#101010;color:#171717;font-family:Arial,sans-serif}main{max-width:520px;margin:32px auto;background:#fff;padding:28px;border-top:8px solid #d4af37;border-radius:12px;box-sizing:border-box}h1{margin:8px 0 20px}.eyebrow{color:#8a6b00;font-weight:800;letter-spacing:.12em}.summary{display:grid;gap:7px;background:#f7f3e8;padding:18px;border-radius:8px;margin-bottom:22px}.summary strong{font-size:28px}.summary small{line-height:1.4}label{display:block;font-weight:700;margin:14px 0}.field{height:46px;border:1px solid #b8b8b8;border-radius:7px;margin-top:7px;padding:2px 8px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}button,.call{display:block;width:100%;box-sizing:border-box;border:0;border-radius:7px;background:#111;color:#f1cc4f;padding:15px;font-size:17px;font-weight:800;margin-top:12px;text-align:center;text-decoration:none}button:disabled{opacity:.6}.error{color:#a11212;background:#fff0f0;padding:10px}.fine{font-size:13px;color:#555;line-height:1.5}.success{display:grid;place-items:center;width:58px;height:58px;border-radius:50%;background:#276749;color:#fff;font-size:34px}a{color:#6d5200}@media(max-width:560px){main{margin:0;min-height:100vh;border-radius:0}.grid{grid-template-columns:1fr}}</style></head><body><main>${content}</main>${script}</body></html>`, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
@@ -148,9 +148,9 @@ export default async (req: Request, context: Context) => {
 
   // Show payment success on screen; avoid an extra customer notification.
   // The office sends the booking confirmation after confirming the time.
-  const officeBody = `PAID BOOKING — CONFIRM NOW: ${payment.row.customerName}, ${money(remaining)}, ${payment.row.serviceType}, job #${payment.row.jobId}, source ${payment.row.source || "website"}. Deposit is paid. Contact the customer to confirm the appointment time.`;
-  const officeResult = await sendSms({ to: SHACOLE_NUMBER, body: officeBody });
-  await db.insert(notifications).values({ jobId: payment.row.jobId, customerId: payment.row.customerId, kind: "office_deposit_alert", channel: "sms", recipient: normalizePhone(SHACOLE_NUMBER) || SHACOLE_NUMBER, body: officeBody, status: officeResult.ok ? "sent" : "failed", provider: officeResult.provider, providerRef: officeResult.providerRef, error: officeResult.error });
+  const officeAlertSent = !duplicate && await alertOfficePayment({
+    jobId: payment.row.jobId, customerId: payment.row.customerId, amountCents: remaining, chargeId: charge.id
+  }).catch(() => false);
   return Response.json({
     success: true,
     jobId: payment.row.jobId,
@@ -158,8 +158,8 @@ export default async (req: Request, context: Context) => {
     amountCents: remaining,
     serviceType: payment.row.serviceType,
     customerReceiptSent: false,
-    officeAlertSent: officeResult.ok,
-    message: "Payment confirmed. Your deposit was received and the DCA office has been alerted to confirm your appointment time."
+    officeAlertSent,
+    message: "Payment confirmed. Your deposit was received. Please contact the DCA office to confirm your appointment time."
   });
 };
 

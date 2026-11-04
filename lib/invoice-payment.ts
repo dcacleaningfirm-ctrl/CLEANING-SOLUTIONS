@@ -1,3 +1,4 @@
+import { alertOfficePayment } from "./office-payment-alert.js";
 import crypto from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../db/index.js";
@@ -67,7 +68,7 @@ export async function prepareInvoiceAttempt(input: { jobId: number; customerId: 
 }
 
 export async function recordInvoicePayment(attempt: InvoiceAttempt, chargeId: string) {
-  await db.transaction(async tx => {
+  const recorded = await db.transaction(async tx => {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${"invoice-payment:" + attempt.jobId}))`);
     const [existing] = await tx.select().from(payments).where(eq(payments.id, attempt.id)).limit(1);
     if (existing?.status === "paid") return;
@@ -80,6 +81,10 @@ export async function recordInvoicePayment(attempt: InvoiceAttempt, chargeId: st
     await tx.update(payments).set({ status: "paid", provider: "clover", providerRef: chargeId,
       note: "Customer paid invoice balance through the secure Clover payment link. Reference " + attempt.externalReference }).where(eq(payments.id, attempt.id));
     await tx.insert(jobEvents).values({ jobId: attempt.jobId, kind: "payment", message: `Invoice payment of $${(attempt.amountCents/100).toFixed(2)} received through Clover. Charge ${chargeId}.` });
+    return true;
+  });
+  if (recorded) await alertOfficePayment({ ...attempt, chargeId }).catch(() => {
+    console.error("Office payment alert failed", { jobId: attempt.jobId });
   });
 }
 export async function recordInvoicePaymentFailure(attempt: InvoiceAttempt, uncertain: boolean) {
