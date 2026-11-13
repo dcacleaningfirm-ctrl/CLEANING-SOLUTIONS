@@ -583,7 +583,7 @@
     if (name === "maps") renderMaps();
     if (name === "customers") renderCustomers();
     if (name === "invoices" && window.DCAInvoices) window.DCAInvoices.render();
-    if (name === "commercial" && window.DCACommercial) window.DCACommercial.render(state.isOwner);
+    if (name === "commercial" && window.DCACommercial) window.DCACommercial.render(state.isOwner, hasPerm("customers"), state.me.vendorOnboarding);
     if (name === "grow") renderGrow();
     if (name === "charges") renderCharges();
     if (name === "crew") renderCrew();

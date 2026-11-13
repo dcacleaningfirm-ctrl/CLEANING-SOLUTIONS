@@ -117,6 +117,7 @@ import {
   updateServiceNote
 } from "../../lib/service-notes.js";
 import { customerMarketingProfile } from "../../lib/customer-marketing.js";
+import { canOnboard, vendorOnboarding } from "../../lib/vendor-onboarding.js";
 import { handleCommercial } from "../../lib/commercial-routes.js";
 import { PROMOTIONS, promotionByCode } from "../../lib/promotions.js";
 import { capiQueueRows } from "../../lib/meta-capi.js";
@@ -1024,7 +1025,8 @@ export default async (req: Request, context: Context) => {
           role: account.role,
           roleLabel: roleLabel(account.role),
           permissions: permissionsFor(account.role),
-          navigation: navigationFor(account.role),
+          vendorOnboarding: canOnboard(account),
+          navigation: [...new Set([...navigationFor(account.role), ...(canOnboard(account) ? ["commercial"] : [])])],
           defaultView: defaultViewFor(account.role),
           canManageCrew: canManageCrew(account.role),
           isOwner: isOwner(account.role),
@@ -1048,6 +1050,11 @@ export default async (req: Request, context: Context) => {
         },
         { status: 403 }
       );
+    }
+
+    if (path === "commercial/onboarding") {
+      if (!canOnboard(account)) return denied("vendor onboarding");
+      return vendorOnboarding(req, account);
     }
 
     // Company records and their invoice documents contain the customer base.
