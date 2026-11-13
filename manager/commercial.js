@@ -21,7 +21,17 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
   }
   function handleError(error) { notify(error.message || "Something went wrong"); }
-  async function load(showTest) {
+  function render(showTest, canSeeAccounts, canOnboard) {
+    if (!canOnboard) return load(showTest);
+    function pipeline() {
+      root.innerHTML = '<h1>Commercial</h1><div class="card"><strong>Vendor onboarding</strong> ' +
+        (canSeeAccounts ? '<button class="btn btn-ghost" id="co-show-orders">Accounts &amp; work orders</button>' : '') +
+        '</div><iframe title="Commercial vendor onboarding" src="/manager/vendor-onboarding.html" style="width:100%;height:80vh;border:0"></iframe>';
+      if (canSeeAccounts) get("co-show-orders").onclick = function () { load(showTest, pipeline); };
+    }
+    pipeline();
+  }
+  async function load(showTest, pipeline) {
     try {
       root.innerHTML = '<h1>Commercial accounts & vendor orders</h1><p id="commercial-notice" role="status"></p>' +
         (showTest ? '<div class="card"><h2>Send a test invoice to my phone</h2><p>This sends a $0.00 sample PDF link. It does not book a job or change vendor totals.</p><form id="co-test-form" class="commercial-form"><label>My mobile phone<input id="co-test-phone" type="tel" required maxlength="40" autocomplete="tel"></label><button class="btn btn-primary">Text test invoice</button></form></div>' : '') +
@@ -37,6 +47,11 @@
         '<div class="card"><h2>Vendor order history</h2><div class="commercial-form"><label>Company<select id="co-filter"></select></label>' +
         '<label>Search PO / work order<input id="co-search" type="search"></label></div><div id="commercial-orders"></div></div>' +
         '<div id="commercial-detail"></div>';
+      if (pipeline) {
+        var back = document.createElement("button");
+        back.className = "btn btn-ghost"; back.textContent = "Vendor onboarding";
+        back.onclick = pipeline; root.prepend(back);
+      }
       get("commercial-account-form").addEventListener("submit", addAccount);
       if (showTest) get("co-test-form").addEventListener("submit", async function (event) {
         event.preventDefault();
@@ -166,5 +181,5 @@
     try { await request("orders/" + id + "/invoice", "POST", { channel: channel, recipient: recipient }); await refresh(); await openOrder(id); notify(channel === "sms" ? "Invoice text sent." : "Invoice email sent."); }
     catch (e) { handleError(e); button.disabled = false; }
   }
-  window.DCACommercial = { render: load };
+  window.DCACommercial = { render: render };
 })();

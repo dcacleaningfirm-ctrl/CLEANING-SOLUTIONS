@@ -869,3 +869,10 @@ export const marketingContacts = pgTable(
     )
   ]
 );
+
+export const commercialOnboardingWorkspace = pgTable("commercial_onboarding_workspace", {
+  id: integer().primaryKey(),
+  revision: integer().notNull().default(0),
+  vendors: jsonb().notNull(),
+  drafts: jsonb().notNull().default([])
+});
