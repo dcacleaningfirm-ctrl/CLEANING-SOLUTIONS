@@ -34,6 +34,8 @@ export default async (req: Request, _context: Context) => {
   const sourceKey = sql<string>`case
     when ${leads.sourceRef} like 'meta:%' or ${leads.source} = 'meta_lead_ads' then 'Facebook / Instagram Lead Ads'
     when ${leads.sourceRef} like 'sms:%' or ${leads.source} = 'customer_sms' then 'Customer text reply'
+    when ${leads.source} = 'chatgpt'
+      or lower(${leads.raw}->'attribution'->>'utm_source') in ('chatgpt', 'chatgpt.com') then 'ChatGPT'
     when ${leads.source} = 'phone' then coalesce(nullif(${leads.raw}->'attribution'->>'utm_source', ''), 'Phone call — ad source unconfirmed')
     else coalesce(nullif(${leads.raw}->'attribution'->>'utm_source', ''), nullif(${leads.source}, ''), 'unknown') end`;
   const campaignKey = sql<string>`coalesce(nullif(${leads.raw}->'attribution'->>'utm_campaign', ''), nullif(${leads.campaign}, ''), nullif(${leads.promotionCode}, ''), 'unattributed')`;

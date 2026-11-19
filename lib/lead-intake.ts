@@ -41,6 +41,7 @@ export const LEAD_SOURCES = [
   { value: "goodzer", label: "Goodzer" },
   { value: "nextdoor", label: "Nextdoor" },
   { value: "phone", label: "Phone call" },
+  { value: "chatgpt", label: "ChatGPT" },
   { value: "meta_lead_ads", label: "Facebook / Instagram Lead Ads" },
   { value: "customer_sms", label: "Customer text reply" },
   { value: "manual", label: "Manual / in-house" },
