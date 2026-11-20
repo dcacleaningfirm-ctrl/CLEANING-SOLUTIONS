@@ -283,7 +283,7 @@ export function contactPage() {
             )} Service area</dt><dd>Metro ${business.city} and surrounding communities<span class="rate-note">We are a service-area business — we come to you, and we hold no walk-in storefront.</span></dd></div>
             <div class="rate-row"><dt>${icon(
               "calendar",
-            )} Hours</dt><dd>Monday to Saturday, 8:00am – 6:00pm<span class="rate-note">Appointments are subject to route availability that day.</span></dd></div>
+            )} Hours</dt><dd>Monday to Saturday, 8:00am – 6:00pm<span class="rate-note">Closed for Thanksgiving on Thursday, November 26, 2026. Appointments are subject to route availability that day.</span></dd></div>
           </dl>
           <div class="form-card stack-top">
             <p class="eyebrow">Reaching us</p>
