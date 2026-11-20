@@ -53,6 +53,9 @@ export const PROMOTIONS: readonly Promotion[] = Object.freeze([
     path: "/combo498",
     summary: "Up to 5 carpeted areas plus one HVAC system in one appointment."
   },
+  {"code": "FIVESTEAM", "kind": "carpet", "name": "5-room steam cleaning", "price": 159, "summary": "Regularly $199. Includes fiber rinse and deodorizer.", "path": "/quote?code=FIVESTEAM"},
+  {"code": "FIVEDEEP", "kind": "carpet", "name": "5-room deep cleaning (+$75)", "price": 234, "summary": "Shampoo, fiber rinse and deodorizer at 600 PSI and 180°F.", "path": "/quote?code=FIVEDEEP"},
+  {"code": "FIVEPET", "kind": "carpet", "name": "5-room deep cleaning with pet treatment (+$135)", "price": 294, "summary": "Shampoo, fiber rinse, deodorizer and enzyme treatment for pet urine and odor control at 600 PSI and 210°F.", "path": "/quote?code=FIVEPET"},
   {
     code: "CARPET199",
     kind: "carpet",

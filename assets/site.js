@@ -114,6 +114,7 @@
 
     if (offer.kind === "carpet") {
       add(title, "Up to " + offer.includedAreas + " areas", offer.price);
+      if (["FIVESTEAM", "FIVEDEEP", "FIVEPET"].includes(offer.code)) add("Environmental fee", "Per order", 25);
       var extraAreas = Math.max(0, quantity - offer.includedAreas);
       if (extraAreas > 0) {
         add(
@@ -1031,6 +1032,8 @@
         });
       });
 
+      var depositNote = form.querySelector("[data-five-deposit]");
+      if (depositNote) depositNote.textContent = offer.code.startsWith("FIVE") ? offer.summary + " Your 20% deposit is " + formatPrice(result.total * 0.2) + "." : "";
       setHidden("planning_estimate", formatPrice(result.total));
       setHidden("estimate_breakdown", result.lines.map(function (line) {
         return line.label + ": " + formatPrice(line.total);

@@ -177,6 +177,9 @@ window.DCA_PRICING = Object.freeze({
         "Final scope, availability and price are confirmed before work begins."
       ])
     }),
+    Object.freeze({"code": "FIVESTEAM", "kind": "carpet", "name": "5-room steam cleaning", "price": 159, "summary": "Regularly $199. Includes fiber rinse and deodorizer.", "includedAreas": 5, "includes": ["Regularly $199. Includes fiber rinse and deodorizer."], "terms": ["A $25 environmental fee applies per order."]}),
+    Object.freeze({"code": "FIVEDEEP", "kind": "carpet", "name": "5-room deep cleaning (+$75)", "price": 234, "summary": "Shampoo, fiber rinse and deodorizer at 600 PSI and 180°F.", "includedAreas": 5, "includes": ["Shampoo, fiber rinse and deodorizer at 600 PSI and 180°F."], "terms": ["A $25 environmental fee applies per order."]}),
+    Object.freeze({"code": "FIVEPET", "kind": "carpet", "name": "5-room deep cleaning with pet treatment (+$135)", "price": 294, "summary": "Shampoo, fiber rinse, deodorizer and enzyme treatment for pet urine and odor control at 600 PSI and 210°F.", "includedAreas": 5, "includes": ["Shampoo, fiber rinse, deodorizer and enzyme treatment for pet urine and odor control at 600 PSI and 210°F."], "terms": ["A $25 environmental fee applies per order."]}),
     Object.freeze({
       code: "CARPET199",
       kind: "carpet",

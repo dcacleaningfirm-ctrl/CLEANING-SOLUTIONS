@@ -38,6 +38,9 @@ const SPECIAL_RULES: Record<string, {
 }> = Object.freeze({
   CARPET119: { kind: "carpet", includedAreas: 3 },
   CARPET159: { kind: "carpet", includedAreas: 4 },
+  FIVESTEAM: { kind: "carpet", includedAreas: 5 },
+  FIVEDEEP: { kind: "carpet", includedAreas: 5 },
+  FIVEPET: { kind: "carpet", includedAreas: 5 },
   CARPET199: { kind: "carpet", includedAreas: 5 },
   CARPET350: { kind: "carpet", includedAreas: 10 },
   CARPET431: { kind: "carpet", includedAreas: 12 },
@@ -127,6 +130,10 @@ function priceSpecial(code: string, q: Record<string, unknown>): CheckoutPricing
     detail.push("Flat published promotional rate");
   }
 
+  if (["FIVESTEAM", "FIVEDEEP", "FIVEPET"].includes(code)) {
+    total += 25;
+    detail.push("$25 environmental fee");
+  }
   const totalCents = cents(total);
   return {
     totalCents,
