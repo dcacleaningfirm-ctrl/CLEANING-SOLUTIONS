@@ -43,6 +43,7 @@ export const LEAD_SOURCES = [
   { value: "phone", label: "Phone call" },
   { value: "chatgpt", label: "ChatGPT" },
   { value: "meta_lead_ads", label: "Facebook / Instagram Lead Ads" },
+  { value: "explee", label: "Explee" },
   { value: "customer_sms", label: "Customer text reply" },
   { value: "manual", label: "Manual / in-house" },
   { value: "other", label: "Other advertising" }
