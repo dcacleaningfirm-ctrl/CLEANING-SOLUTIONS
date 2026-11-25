@@ -1,3 +1,4 @@
+import { OFFICE_CLIENT, TEST_PHONE, phoneConfiguration } from "../../lib/manager-phone.js";
 import { getStore } from "@netlify/blobs";
 import type { Config, Context } from "@netlify/functions";
 import { newVoiceCall, nextVoiceQuestion, SHACOLE_NUMBER } from "../../lib/voice-agent.js";
@@ -34,6 +35,18 @@ export default async (req: Request, _context: Context) => {
   const callSid = String(params.get("CallSid") || "").trim();
   const caller = String(params.get("From") || "").trim();
   if (!callSid || !caller) return twiml("<Hangup/>", 400);
+
+  const isOfficeFallback = new URL(req.url).searchParams.get("officeFallback") === "1";
+  if (isOfficeFallback && !["busy", "no-answer", "failed", "canceled"].includes(
+    params.get("DialCallStatus") || ""
+  )) return twiml("<Hangup/>");
+
+  if (!isOfficeFallback && params.get("To") === TEST_PHONE && phoneConfiguration()) {
+    return twiml(
+      '<Dial timeout="18" answerOnBridge="true" action="/api/voice/incoming?officeFallback=1" method="POST">' +
+        `<Client>${OFFICE_CLIENT}</Client></Dial>`
+    );
+  }
 
   try {
     const state = newVoiceCall(callSid, caller);

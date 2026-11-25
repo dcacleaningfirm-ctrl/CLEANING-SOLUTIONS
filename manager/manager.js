@@ -483,6 +483,7 @@
 
   // ---------- login ----------
   function showLogin() {
+    window.dispatchEvent(new Event("dca-manager-session-ended"));
     document.getElementById("app").hidden = true;
     document.getElementById("login").hidden = false;
     // Nothing from the last session stays on screen behind the login card: the
@@ -7853,6 +7854,7 @@
   function showApp() {
     document.getElementById("login").hidden = true;
     document.getElementById("app").hidden = false;
+    window.dispatchEvent(new Event("dca-manager-session-ready"));
   }
 
   // Home-screen shortcuts in the manifest open the app straight on a tab. A

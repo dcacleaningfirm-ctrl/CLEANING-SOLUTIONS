@@ -6,7 +6,7 @@
   <meta name="robots" content="noindex, nofollow" />
   <title>DCA Pro Manager</title>
   <link rel="icon" href="/logo.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="/manager/manager.css?v=18" />
+  <link rel="stylesheet" href="/manager/manager.css?v=19" />
   <link rel="manifest" href="/manager/manifest.webmanifest" />
   <meta name="theme-color" content="#0e1116" />
   <meta name="mobile-web-app-capable" content="yes" />
@@ -67,6 +67,13 @@
     </header>
 
     <main class="content">
+      <aside id="office-phone" hidden aria-label="Office phone">
+        <span id="office-phone-status" role="status">Office phone off</span>
+        <button class="btn btn-ghost" id="office-phone-start" type="button">Enable phone</button>
+        <button class="btn" id="office-phone-answer" type="button" hidden>Answer</button>
+        <button class="btn btn-ghost" id="office-phone-mute" type="button" hidden>Mute</button>
+        <button class="btn btn-ghost" id="office-phone-end" type="button" hidden>Decline</button>
+      </aside>
       <section id="view-dashboard" class="view active"></section>
       <section id="view-book" class="view"></section>
       <section id="view-leads" class="view"></section>
@@ -109,7 +116,7 @@
   <script src="/manager/maps.js?v=1" defer></script>
   <script src="/manager/commercial.js?v=3" defer></script>
   <script src="/manager/invoices.js?v=1" defer></script>
-  <script src="/manager/manager.js?v=25" defer></script>
+  <script src="/manager/manager.js?v=26" defer></script>
   <script src="/manager/source-performance.js?v=1" defer></script>
   <script src="/manager/customer-delete.js?v=1" defer></script>
   <script src="/manager/owner-cleanup.js?v=2" defer></script>
@@ -118,5 +125,6 @@
   <script src="/manager/verification-health.js?v=1" defer></script>
   <script src="/manager/operations-attention.js?v=1" defer></script>
   <script src="/manager/pwa-register.js?v=1" defer></script>
+  <script src="/manager/office-phone.js?v=1" defer></script>
 </body>
 </html>

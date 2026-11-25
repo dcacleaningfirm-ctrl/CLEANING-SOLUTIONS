@@ -1358,3 +1358,18 @@ tbody tr.clickable:hover { background: var(--surface-2); }
 @media(max-width:1120px){.booking-layout{grid-template-columns:minmax(0,1fr) 290px}.booking-jumps{max-width:290px}.booking-workspace-header{align-items:flex-start}.booking-panel{padding:20px}}
 @media(max-width:850px){.booking-layout{grid-template-columns:1fr}.booking-sidebar{position:static}.booking-workspace-header{display:block}.booking-jumps{max-width:none;margin-top:20px}.booking-offer-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.booking-workspace-header h1{font-size:26px}}
 @media(max-width:420px){.booking-offers{padding:13px}.booking-offer-card{padding:13px}.booking-offer-card>strong{font-size:22px}.booking-workspace-header{padding:20px}.booking-upholstery-counts{grid-template-columns:1fr}.booking-recap{padding:20px}}
+
+#office-phone:not([hidden]) {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  margin-bottom: 0.75rem;
+  background: #151d29;
+  border: 1px solid #424a57;
+  border-radius: 0.5rem;
+}

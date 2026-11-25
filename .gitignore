@@ -3,3 +3,4 @@
 
 # Installed JavaScript dependencies
 node_modules/
+/manager/twilio-voice-sdk.js

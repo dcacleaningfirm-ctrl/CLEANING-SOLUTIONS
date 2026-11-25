@@ -1,3 +1,4 @@
+import { officePhoneToken, phoneConfiguration } from "../../lib/manager-phone.js";
 import { createInvoicePaymentLink } from "../../lib/invoice-payment.js";
 import { allowsCustomerJobNotification } from "../../lib/customer-notification-policy.js";
 import { checkServiceAddressText } from "../../lib/service-area-check.js";
@@ -1032,6 +1033,14 @@ export default async (req: Request, context: Context) => {
           isOwner: isOwner(account.role),
           mustChangePin: Boolean(account.mustChangePin)
         }
+      });
+    }
+
+    if (path === "phone" && method === "GET") {
+      if (account.mustChangePin || !allows("dashboard")) return denied("the office phone");
+      const config = phoneConfiguration();
+      return json(config ? { token: officePhoneToken(config) } : { enabled: false }, {
+        headers: { "cache-control": "no-store" }
       });
     }
 
