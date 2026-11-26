@@ -13,13 +13,14 @@ const input={jobId:45,customerId:1,amountCents:9560,chargeId:'verified-charge'};
 test('email still succeeds when SMS throws, with failed SMS recorded',async()=>{
  notify.reset(true);database.reset(false);
  assert.equal(await alertOfficePayment(input),true);
- assert.equal(notify.calls.length,2);
+ assert.equal(notify.calls.length,3);
  assert.equal(notify.calls[0][1].to,'dcacleaningfirm@gmail.com');
+ assert.deepEqual(notify.calls.slice(1).map(([, message]: any) => message.to), ['+14047033704', '+14047162720']);
  assert.match(notify.calls[0][1].html,/&lt;test&gt;/);
- assert.deepEqual(database.writes.map((v:any)=>v.status),['sent','failed']);
+ assert.deepEqual(database.writes.map((v:any)=>v.status),['sent','failed','failed']);
 });
 test('notification log failure cannot turn a recorded payment into a failure',async()=>{
  notify.reset(false);database.reset(true);
  assert.equal(await alertOfficePayment(input),true);
- assert.equal(notify.calls.length,2);
+ assert.equal(notify.calls.length,3);
 });
