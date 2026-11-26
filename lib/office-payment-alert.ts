@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../db/index.js";
 import { customers, notifications } from "../db/schema.js";
 import { money, sendEmail, sendSms, type SendResult } from "./notify.js";
-import { SHACOLE_NUMBER } from "./voice-agent.js";
+import { JAMES_COMMERCIAL_NUMBER, SHACOLE_NUMBER } from "./voice-agent.js";
 
 // Notification failures must never change an already-recorded payment outcome.
 export async function alertOfficePayment(input: { jobId: number; customerId: number; amountCents: number; chargeId: string }): Promise<boolean> {
@@ -16,7 +16,9 @@ export async function alertOfficePayment(input: { jobId: number; customerId: num
   const html = `<p>${body.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]!))}</p>`;
   const targets = [
     { channel: "email", recipient: "dcacleaningfirm@gmail.com", send: () => sendEmail({ to: "dcacleaningfirm@gmail.com", subject, text: body, html }) },
-    { channel: "sms", recipient: SHACOLE_NUMBER, send: () => sendSms({ to: SHACOLE_NUMBER, body }) }
+    ...[SHACOLE_NUMBER, JAMES_COMMERCIAL_NUMBER].map(recipient => ({
+      channel: "sms", recipient, send: () => sendSms({ to: recipient, body })
+    }))
   ];
   const results = await Promise.all(targets.map(async target => {
     let result: SendResult;
