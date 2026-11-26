@@ -57,9 +57,9 @@ describe("server-authoritative checkout pricing", () => {
       quantities: { carpet_rooms: 3, air_vents: 10, sofas: 1 },
       treatments: ["petTreatment", "dryerVent"]
     });
-    // 3*46.58 + 155.25 + 10*15.53 + 165.60 + 65 + 70 (duct add-on rate)
-    expect(result.totalCents).toBe(75089);
-    expect(result.depositCents).toBe(15018);
+    // 3*46.58 + 155.25 + 10*15.53 + 149.00 + 65 + 70 (duct add-on rate)
+    expect(result.totalCents).toBe(73429);
+    expect(result.depositCents).toBe(14686);
   });
 
   it("applies NEXTDOOR10 only to regular-price upholstery", () => {
@@ -69,11 +69,11 @@ describe("server-authoritative checkout pricing", () => {
       quantities: { armchairs: 1, sofas: 1, sectionals: 1 },
       treatments: ["petTreatment"]
     });
-    // Upholstery: $507.15 - $50.72 (10%, rounded to cents) + $65 pet treatment.
-    expect(result.totalCents).toBe(52143);
-    expect(result.depositCents).toBe(10429);
+    // Upholstery:  $477.00 - $47.70 (10%, rounded to cents) + $65 pet treatment.
+    expect(result.totalCents).toBe(49430);
+    expect(result.depositCents).toBe(9886);
     expect(result.promotionCode).toBe("NEXTDOOR10");
-    expect(result.serviceDetail).toMatch(/10% off upholstery \(-\$50\.72\)/);
+    expect(result.serviceDetail).toMatch(/10% off upholstery \(-\$47\.70\)/);
   });
 
   it("does not allow NEXTDOOR10 without a regular-price upholstery item", () => {

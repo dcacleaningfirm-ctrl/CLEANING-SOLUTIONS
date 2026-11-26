@@ -160,6 +160,7 @@
     "carpet_rooms",
     "air_vents",
     "armchairs",
+    "loveseats",
     "sofas",
     "sectionals",
     "move_packages"
@@ -533,12 +534,15 @@
 
     var upholsterySubtotal = 0;
     var armchairs = toCount(draft.armchairs);
+    var loveseats = toCount(draft.loveseats);
     var sofas = toCount(draft.sofas);
     var sectionals = toCount(draft.sectionals);
     addUnits(services.armchair, armchairs);
+    addUnits(services.loveseat, loveseats);
     addUnits(services.sofa, sofas);
     addUnits(services.sectional, sectionals);
     upholsterySubtotal += armchairs * services.armchair.price;
+    upholsterySubtotal += loveseats * services.loveseat.price;
     upholsterySubtotal += sofas * services.sofa.price;
     upholsterySubtotal += sectionals * services.sectional.price;
 
@@ -756,7 +760,7 @@
       var activeName = result.couponApplied
         ? nextdoorCoupon.name
         : (draft.promo_applied ? bannerPromotion.name : "Not applied");
-      var upholsteryPieces = toCount(draft.armchairs) + toCount(draft.sofas) + toCount(draft.sectionals);
+      var upholsteryPieces = toCount(draft.armchairs) + toCount(draft.loveseats) + toCount(draft.sofas) + toCount(draft.sectionals);
       setHidden("promotion_code", activeCode);
       setHidden("promotion_name", activeName);
       setHidden("promotion_quantity", result.couponApplied ? String(upholsteryPieces) : "0");

@@ -73,6 +73,7 @@
       air_vents: numberValue(form, "air_vents"),
       hvac_units: numberValue(form, "hvac_units"),
       armchairs: numberValue(form, "armchairs"),
+      loveseats: numberValue(form, "loveseats"),
       sofas: numberValue(form, "sofas"),
       sectionals: numberValue(form, "sectionals"),
       move_packages: numberValue(form, "move_packages")
