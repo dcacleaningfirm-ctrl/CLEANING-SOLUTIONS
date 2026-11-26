@@ -264,6 +264,7 @@ const WEBSITE_QUANTITIES: Array<[string, string]> = [
   ["air_returns", "Returns"],
   ["hvac_units", "HVAC units"],
   ["armchairs", "Armchairs"],
+  ["loveseats", "Loveseats"],
   ["sofas", "Sofas"],
   ["sectionals", "Sectionals"],
   ["move_packages", "Move packages"],
@@ -286,7 +287,7 @@ function describeWebsiteService(
   if (count(data.air_vents) || count(data.hvac_units) || count(data.air_returns)) {
     wanted.push("Air duct cleaning");
   }
-  if (count(data.armchairs) || count(data.sofas) || count(data.sectionals)) {
+  if (count(data.armchairs) || count(data.loveseats) || count(data.sofas) || count(data.sectionals)) {
     wanted.push("Upholstery cleaning");
   }
   if (count(data.move_packages)) wanted.push("Move-in / move-out cleaning");

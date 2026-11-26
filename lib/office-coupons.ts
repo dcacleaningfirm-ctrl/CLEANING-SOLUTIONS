@@ -14,8 +14,8 @@ export function validateOfficeCoupon(code: unknown, items: Line[], quantities: R
   if (key === "VENTS199" && !["Mon", "Tue", "Wed"].includes(new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "America/New_York" }).format(appointment)))
     return "VENTS199 is available Monday through Wednesday only. Select another date or offer.";
   if (key === "NEXTDOOR10") {
-    if (Object.keys(quantities || {}).some(name => !["armchairs", "sofas", "sectionals"].includes(name) && Number(quantities![name] || 0) !== 0)) return "NEXTDOOR10 applies only to regular-price upholstery pieces";
-    for (const name of ["armchairs", "sofas", "sectionals"]) {
+    if (Object.keys(quantities || {}).some(name => !["armchairs", "loveseats", "sofas", "sectionals"].includes(name) && Number(quantities![name] || 0) !== 0)) return "NEXTDOOR10 applies only to regular-price upholstery pieces";
+    for (const name of ["armchairs", "loveseats", "sofas", "sectionals"]) {
       const n = Number(quantities?.[name] || 0);
       if (!Number.isInteger(n) || n < 0 || n > 99) return "Check the upholstery piece counts";
     }

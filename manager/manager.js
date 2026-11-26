@@ -6104,7 +6104,7 @@
     var offer = offers.find(function (o) { return o.code === selected; });
     if (detail) {
       detail.innerHTML = offer ? '<div class="booking-offer-selected"><strong>Applied: ' + esc(offer.code) + '</strong><p>' + esc(offer.summary) + '</p>' +
-        (selected === "NEXTDOOR10" ? '<div class="booking-upholstery-counts">' + [["armchairs", "Chairs / recliners"], ["sofas", "Sofas"], ["sectionals", "Sectionals"]].map(function (entry) { return '<label>' + esc(entry[1]) + '<input type="number" min="0" max="99" step="1" data-bk-upholstery="' + entry[0] + '" value="' + Number(state.booking.couponQuantities[entry[0]] || 0) + '"></label>'; }).join("") + '</div><p class="hint">Set the piece counts. Optional treatments stay at their regular price.</p>' : "") +
+        (selected === "NEXTDOOR10" ? '<div class="booking-upholstery-counts">' + [["armchairs", "Chairs / recliners"], ["loveseats", "Loveseats"], ["sofas", "Sofas"], ["sectionals", "Sectionals"]].map(function (entry) { return '<label>' + esc(entry[1]) + '<input type="number" min="0" max="99" step="1" data-bk-upholstery="' + entry[0] + '" value="' + Number(state.booking.couponQuantities[entry[0]] || 0) + '"></label>'; }).join("") + '</div><p class="hint">Set the piece counts. Optional treatments stay at their regular price.</p>' : "") +
         '<details><summary>Scope & coupon terms</summary><ul>' + (offer.terms || []).map(function (term) { return '<li>' + esc(term) + '</li>'; }).join("") + '</ul></details></div>' : "";
       detail.querySelectorAll("[data-bk-upholstery]").forEach(function (input) { input.addEventListener("input", function () {
         state.booking.couponQuantities[input.dataset.bkUpholstery] = Math.max(0, Math.min(99, Math.floor(Number(input.value) || 0)));
@@ -6116,7 +6116,7 @@
   function updateNextdoorBookingLine() {
     var b = state.booking, p = window.DCA_PRICING, q = b.couponQuantities;
     var subtotal = 0, descriptions = [];
-    [["armchairs", "armchair", "chair(s)"], ["sofas", "sofa", "sofa(s)"], ["sectionals", "sectional", "sectional(s)"]].forEach(function (entry) {
+    [["armchairs", "armchair", "chair(s)"], ["loveseats", "loveseat", "loveseat(s)"], ["sofas", "sofa", "sofa(s)"], ["sectionals", "sectional", "sectional(s)"]].forEach(function (entry) {
       var qty = Number(q[entry[0]] || 0); subtotal += Math.round(p.services[entry[1]].price * 100) * qty;
       if (qty) descriptions.push(qty + " " + entry[2]);
     });
@@ -6129,8 +6129,8 @@
     if (!offer) return;
     var b = state.booking;
     if (code === "NEXTDOOR10" && b.promotionCode !== "NEXTDOOR10") {
-      b.couponQuantities = { armchairs: 0, sofas: 0, sectionals: 0 };
-      b.items.forEach(function (item) { var map = { "service:armchair": "armchairs", "service:sofa": "sofas", "service:sectional": "sectionals" }; if (map[item.key]) b.couponQuantities[map[item.key]] += item.quantity; });
+      b.couponQuantities = { armchairs: 0, loveseats: 0, sofas: 0, sectionals: 0 };
+      b.items.forEach(function (item) { var map = { "service:armchair": "armchairs", "service:loveseat": "loveseats", "service:sofa": "sofas", "service:sectional": "sectionals" }; if (map[item.key]) b.couponQuantities[map[item.key]] += item.quantity; });
     }
     b.items = b.items.filter(function (i) { return i.kind === "addon" || i.kind === "custom"; });
     b.promotionCode = code;
@@ -6192,7 +6192,7 @@
       customer: null,
       items: [],
       promotionCode: "",
-      couponQuantities: { armchairs: 0, sofas: 0, sectionals: 0 },
+      couponQuantities: { armchairs: 0, loveseats: 0, sofas: 0, sectionals: 0 },
       envmtCents: 2500,
       date: dateValue(new Date()),
       searchTimer: null,
@@ -6563,7 +6563,7 @@
     var entry = findCatalogEntry(key);
     if (!entry) return;
     if (state.booking.promotionCode === "NEXTDOOR10" && entry.kind === "service") {
-      var piece = ({ "service:armchair": "armchairs", "service:sofa": "sofas", "service:sectional": "sectionals" })[key];
+      var piece = ({ "service:armchair": "armchairs", "service:loveseat": "loveseats", "service:sofa": "sofas", "service:sectional": "sectionals" })[key];
       if (!piece) { toast("NEXTDOOR10 covers regular-price upholstery. Clear the coupon to switch services."); return; }
       state.booking.couponQuantities[piece] = Math.min(99, Number(state.booking.couponQuantities[piece] || 0) + 1);
       updateNextdoorBookingLine(); renderBookingOffers(); renderBookingItems(); return;

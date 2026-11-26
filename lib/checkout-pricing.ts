@@ -7,9 +7,10 @@ const SERVICES = Object.freeze({
   carpetRoom: 46.58,
   airDuctBase: 155.25,
   airVent: 15.53,
-  armchair: 93.15,
-  sofa: 165.60,
-  sectional: 248.40,
+  armchair: 79.00,
+  loveseat: 119.00,
+  sofa: 149.00,
+  sectional: 249.00,
   movePackage: 199.99
 });
 
@@ -157,6 +158,7 @@ function priceGeneral(input: CheckoutPricingInput): CheckoutPricingResult {
     carpet_rooms: count(q.carpet_rooms, 40),
     air_vents: count(q.air_vents, 60),
     armchairs: count(q.armchairs, 30),
+    loveseats: count(q.loveseats, 30),
     sofas: count(q.sofas, 30),
     sectionals: count(q.sectionals, 20),
     move_packages: count(q.move_packages, 10)
@@ -182,6 +184,7 @@ function priceGeneral(input: CheckoutPricingInput): CheckoutPricingResult {
   }
   let upholsterySubtotal = 0;
   if (quantities.armchairs) { const amount = quantities.armchairs * SERVICES.armchair; total += amount; upholsterySubtotal += amount; detail.push(`${quantities.armchairs} armchair(s)`); }
+  if (quantities.loveseats) { const amount = quantities.loveseats * SERVICES.loveseat; total += amount; upholsterySubtotal += amount; detail.push(`${quantities.loveseats} loveseat(s)`); }
   if (quantities.sofas) { const amount = quantities.sofas * SERVICES.sofa; total += amount; upholsterySubtotal += amount; detail.push(`${quantities.sofas} sofa(s)`); }
   if (quantities.sectionals) { const amount = quantities.sectionals * SERVICES.sectional; total += amount; upholsterySubtotal += amount; detail.push(`${quantities.sectionals} sectional(s)`); }
   if (quantities.move_packages) { total += quantities.move_packages * SERVICES.movePackage; detail.push(`${quantities.move_packages} move package(s)`); }

@@ -11,9 +11,10 @@ window.DCA_PRICING = Object.freeze({
     carpetRoom: Object.freeze({ label: "Carpet cleaning — per room", price: 46.58 }),
     airDuctBase: Object.freeze({ label: "Air duct cleaning — system base", price: 155.25 }),
     airVent: Object.freeze({ label: "Air duct cleaning — per vent/register", price: 15.53 }),
-    armchair: Object.freeze({ label: "Armchair or recliner", price: 93.15 }),
-    sofa: Object.freeze({ label: "Three-seat sofa", price: 165.60 }),
-    sectional: Object.freeze({ label: "Large sectional", price: 248.40 }),
+    armchair: Object.freeze({ label: "Armchair or recliner", price: 79.00 }),
+    loveseat: Object.freeze({ label: "Standard loveseat", price: 119.00 }),
+    sofa: Object.freeze({ label: "Three-seat sofa", price: 149.00 }),
+    sectional: Object.freeze({ label: "Standard sectional", price: 249.00 }),
     movePackage: Object.freeze({ label: "Move-in or move-out cleaning package", price: 199.99 })
   }),
   treatments: Object.freeze({

@@ -9,6 +9,14 @@ const { PROMOTIONS } = await import("../lib/promotions.ts");
 const { calculateCheckout } = await import("../lib/checkout-pricing.ts");
 const context={window:{} as any};vm.runInNewContext(fs.readFileSync(new URL('../data/pricing.js',import.meta.url),'utf8'),context);
 const monday=new Date('2026-11-02T15:00:00Z');
+test("website checkout and office catalog agree on standard upholstery prices",()=>{
+ for(const [key,quantity,expected] of [["armchair","armchairs",7900],["loveseat","loveseats",11900],["sofa","sofas",14900],["sectional","sectionals",24900]] as const){
+  const quote=calculateCheckout({orderMode:"general",quantities:{[quantity]:1}});
+  assert.equal(quote.totalCents,expected);
+  assert.equal(context.window.DCA_PRICING.services[key].price*100,expected);
+ }
+ assert.equal(calculateCheckout({orderMode:"special",promotionCode:"UPHOLSTERY199"}).totalCents,19900);
+});
 test("every published fixed coupon has the matching office code and price",()=>{
  for(const offer of context.window.DCA_PRICING.specials){const server=PROMOTIONS.find(p=>p.code===offer.code);assert.ok(server,offer.code);assert.equal(server.price,offer.price);assert.equal(validateOfficeCoupon(offer.code,[{label:offer.code+' · '+offer.name,kind:'service',quantity:1,unitPriceCents:offer.price*100}],{},monday),null);}
 });
