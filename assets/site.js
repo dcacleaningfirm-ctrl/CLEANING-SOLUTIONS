@@ -1009,6 +1009,10 @@
         ? toCount(form.elements[quantities[1].field].value)
         : 0;
       var result = specialEstimate(offer, count, secondary);
+      if (result.lines.length && ["CARPET199", "DUCT299"].includes(offer.code)) {
+        result.lines.push({ label: "Environmental fee", detail: "Per order", total: 25 });
+        result.total = toCents(result.total + 25);
+      }
 
       document.querySelectorAll("[data-quote-total]").forEach(function (element) {
         element.textContent = formatPrice(result.total);
@@ -1037,7 +1041,7 @@
       });
 
       var depositNote = form.querySelector("[data-five-deposit]");
-      if (depositNote) depositNote.textContent = offer.code.startsWith("FIVE") ? offer.summary + " Your 20% deposit is " + formatPrice(result.total * 0.2) + "." : "";
+      if (depositNote) depositNote.textContent = (offer.code.startsWith("FIVE") || ["CARPET199", "DUCT299"].includes(offer.code)) ? offer.summary + " Your 20% deposit is " + formatPrice(result.total * 0.2) + "." : "";
       setHidden("planning_estimate", formatPrice(result.total));
       setHidden("estimate_breakdown", result.lines.map(function (line) {
         return line.label + ": " + formatPrice(line.total);

@@ -2,19 +2,20 @@ import { eq } from "drizzle-orm";
 import type { Config, Context } from "@netlify/functions";
 import { db } from "../../db/index.js";
 import { jobs } from "../../db/schema.js";
-import { promotionByCode } from "../../lib/promotions.js";
+import { calculateCheckout, CHECKOUT_DEPOSIT_PERCENT } from "../../lib/checkout-pricing.js";
 
 const OFFER_CODE = "CARPET199";
-const DEPOSIT_PERCENT = 20;
 
 export default async (req: Request, _context: Context) => {
   if (req.method !== "GET") {
     return Response.json({ error: "Method not allowed" }, { status: 405 });
   }
 
-  const promotion = promotionByCode(OFFER_CODE);
-  const totalCents = promotion ? Math.round(promotion.price * 100) : 0;
-  const depositCents = Math.ceil(totalCents * DEPOSIT_PERCENT / 100);
+  const { totalCents, depositCents, promotionCode } = calculateCheckout({
+    orderMode: "special",
+    promotionCode: OFFER_CODE,
+    quantities: {}
+  });
 
   let database = "ok";
   try {
@@ -33,7 +34,7 @@ export default async (req: Request, _context: Context) => {
       : "sandbox"
   };
 
-  const offerOk = Boolean(promotion && promotion.code === OFFER_CODE && totalCents === 19900 && depositCents === 3980);
+  const offerOk = promotionCode === OFFER_CODE && totalCents === 22400 && depositCents === 4480;
   const cloverConfigured = clover.apiKey && clover.publicKey && clover.merchantId;
   const ok = offerOk && database === "ok" && cloverConfigured;
 
@@ -47,7 +48,7 @@ export default async (req: Request, _context: Context) => {
     offer: {
       code: OFFER_CODE,
       totalCents,
-      depositPercent: DEPOSIT_PERCENT,
+      depositPercent: CHECKOUT_DEPOSIT_PERCENT,
       depositCents
     },
     clover: {

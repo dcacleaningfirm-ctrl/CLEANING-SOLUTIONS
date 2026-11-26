@@ -131,7 +131,7 @@ function priceSpecial(code: string, q: Record<string, unknown>): CheckoutPricing
     detail.push("Flat published promotional rate");
   }
 
-  if (["FIVESTEAM", "FIVEDEEP", "FIVEPET"].includes(code)) {
+  if (["FIVESTEAM", "FIVEDEEP", "FIVEPET", "CARPET199", "DUCT299"].includes(code)) {
     total += 25;
     detail.push("$25 environmental fee");
   }
