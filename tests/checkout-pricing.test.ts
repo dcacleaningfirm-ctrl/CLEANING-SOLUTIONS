@@ -4,10 +4,10 @@ import { calculateCheckout } from "../lib/checkout-pricing.js";
 const expected: Record<string, number> = {
   CARPET119: 11900,
   CARPET159: 15900,
-  CARPET199: 19900,
+  CARPET199: 22400,
   CARPET350: 35000,
   CARPET431: 43100,
-  DUCT299: 29900,
+  DUCT299: 32400,
   VENTS199: 19900,
   COMBO498: 49800,
   UPHOLSTERY199: 19900,
@@ -30,14 +30,14 @@ describe("server-authoritative checkout pricing", () => {
     });
   }
 
-  it("prices DUCT299 3 systems as 299 + 299 + 199", () => {
+  it("prices DUCT299 3 systems with one environmental fee", () => {
     const result = calculateCheckout({
       orderMode: "special",
       promotionCode: "DUCT299",
       quantities: { hvac_units: 3 }
     });
-    expect(result.totalCents).toBe(79700);
-    expect(result.depositCents).toBe(15940);
+    expect(result.totalCents).toBe(82200);
+    expect(result.depositCents).toBe(16440);
   });
 
   it("prices combo extras on the server", () => {
